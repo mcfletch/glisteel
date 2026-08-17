@@ -64,26 +64,25 @@ quarter of a second and puts the car on its roof.
 ## How fast it runs
 
 Measured in this container on an RTX-class GPU, driving the autopilot, at
-1000×560:
+1000×560, twenty seconds each:
 
 | World | Instances per tile | Average |
 |---|---|---|
-| 2048 m, depth 3, no trees | 0 | 148 fps |
-| 2048 m, depth 3 | 40 | 33 fps |
-| 2048 m, depth 4 | 24 | 16 fps |
-| 2048 m, depth 4 | 200 | 5 fps |
+| 2048 m, depth 3, no trees | 0 | 133 fps |
+| 2048 m, depth 3 | 40 | 77 fps |
+| 2048 m, depth 4 | 24 | 43 fps |
+| 2048 m, depth 4 | 240 | 39 fps |
 
-**The frame rate is set by how many baked tree instances are on screen**, at
-roughly 0.06–0.2 ms of CPU each. The engine expands a glTF
-`EXT_mesh_gpu_instancing` node into one scenegraph transform per instance, and
-the render pass pays a per-object cost for each of them before its instancing
-batcher collapses them into a single draw: the GPU work is batched and the CPU
-work is not. Bake with `--max-instances 24` for a world that moves; the fix
-belongs in the engine and is tracked as §I of
-[GLISTEEL-WORLD-AUTHORING.md](https://github.com/mcfletch/openglcontext/blob/main/plans/GLISTEEL-WORLD-AUTHORING.md).
-
-`--sse` trades sharpness for speed (higher is coarser), and a shallower world
+The frame rate is set by how much of the world is on screen and how finely it is
+drawn. `--sse` trades sharpness for speed (higher is coarser); a shallower world
 (`oglc-bake --depth 3`) draws fewer tiles.
+
+Baked tree instances used to set it instead, at 0.06–0.2 ms of CPU each — the
+240-instance world above ran at 5 fps. The engine now reads a glTF
+`EXT_mesh_gpu_instancing` node as a single scenegraph node holding every
+placement, so the render pass does its per-object work once for the set rather
+than once per tree. The rest of the road to 60 fps at 1080p is §I of
+[GLISTEEL-WORLD-AUTHORING.md](https://github.com/mcfletch/openglcontext/blob/main/plans/GLISTEEL-WORLD-AUTHORING.md).
 
 ## Developing
 
