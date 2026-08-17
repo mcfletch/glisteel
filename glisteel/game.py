@@ -70,6 +70,11 @@ STUCK_SPEED = 1.0
 #: of the *scene the player is in* rather than of the whole map.
 WORLD_LIGHT_SCALE = 120.0
 
+#: How far a driver can see before the air takes the view, in metres. Far
+#: enough to place the car for the corner after next; close enough that the far
+#: side of a baked world is haze rather than a line where the ground stops.
+VISIBILITY = 1800.0
+
 #: Which keys do what. Each is a set of names, so the arrows and WASD are the
 #: same control rather than two.
 CONTROLS = {
@@ -107,8 +112,11 @@ class GlisteelContext(OverlayMixin, BaseContext):
         # The engine's own sky and light rig, rather than one written here: a
         # world baked for the viewer is lit the way the viewer lights it, and a
         # game that invents its own rig renders the same tiles differently.
+        # What a race adds to it is its own air, because a baked world is a few
+        # kilometres across and then it stops.
         self.sg = SceneGraph(children=[
-            environment.sky_background(),
+            environment.horizon_background(),
+            race_fog(),
             *ViewerContext.defaultLights(WORLD_LIGHT_SCALE),
             self.world.terrain,
         ])
@@ -317,6 +325,20 @@ class GlisteelContext(OverlayMixin, BaseContext):
         if self.world is not None:
             self.world.shutdown()
         super().OnQuit(*args)
+
+
+def race_fog() -> Any:
+    """The air the world is seen through.
+
+    A baked world runs out, and past the last of it a camera at ground level
+    sees the background. The fog is the colour the background's horizon is, so
+    the ground fades into the same air rather than ending at a line, and it
+    closes in over a distance rather than at one -- an exponential fall-off has
+    no visible edge, which is the whole point of it here.
+    """
+    from OpenGLContext.scenegraph.fog import Fog
+    return Fog(color=environment.HORIZON_HAZE, fogType='EXPONENTIAL',
+               visibilityRange=VISIBILITY)
 
 
 def build_parser() -> argparse.ArgumentParser:

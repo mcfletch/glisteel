@@ -260,3 +260,33 @@ def _shapes(node, out=None):
     for child in getattr(node, 'children', None) or []:
         _shapes(child, out)
     return out
+
+
+class TestTheAirTheWorldIsSeenThrough:
+    """A baked world is a few kilometres across and then it stops. What a
+    camera at ground level sees past the last of it is the background, and a
+    hard line between the two says where the world ends.
+    """
+
+    def test_the_haze_and_the_fog_are_the_same_colour(self) -> None:
+        """Terrain fades into the air the background is already made of."""
+        from OpenGLContext.viewer import environment
+
+        from glisteel.game import race_fog
+        assert (tuple(race_fog().color)
+                == pytest.approx(tuple(environment.HORIZON_HAZE)))
+
+    def test_it_thickens_over_a_distance_not_at_a_line(self) -> None:
+        from glisteel.game import race_fog
+        assert race_fog().fogType == 'EXPONENTIAL'
+
+    def test_the_far_side_of_the_world_is_in_it(self) -> None:
+        """Whatever the far plane still draws must be hazed, or the edge shows."""
+        from glisteel.game import race_fog
+        from glisteel.world import VIEW_DISTANCE
+        assert race_fog().visibilityRange < VIEW_DISTANCE
+
+    def test_the_road_ahead_is_not(self) -> None:
+        """A driver has to see far enough to place the car for a corner."""
+        from glisteel.game import race_fog
+        assert race_fog().visibilityRange > 600.0
