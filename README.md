@@ -63,25 +63,28 @@ quarter of a second and puts the car on its roof.
 
 ## How fast it runs
 
-Measured in this container on an RTX-class GPU, driving the autopilot, at
-1000×560, twenty seconds each:
+Measured in this container on an RTX-class GPU, driving the autopilot, twenty
+seconds each:
 
-| World | Instances per tile | Average |
-|---|---|---|
-| 2048 m, depth 3, no trees | 0 | 133 fps |
-| 2048 m, depth 3 | 40 | 77 fps |
-| 2048 m, depth 4 | 24 | 43 fps |
-| 2048 m, depth 4 | 240 | 39 fps |
+| World | Instances per tile | 1000×560 | 1920×1080 |
+|---|---|---|---|
+| 2048 m, depth 3, no trees | 0 | 147 fps | |
+| 2048 m, depth 3 | 40 | 111 fps | |
+| 2048 m, depth 4 | 24 | 74 fps | 57 fps |
+| 2048 m, depth 4 | 240 | 61 fps | |
 
 The frame rate is set by how much of the world is on screen and how finely it is
 drawn. `--sse` trades sharpness for speed (higher is coarser); a shallower world
 (`oglc-bake --depth 3`) draws fewer tiles.
 
-Baked tree instances used to set it instead, at 0.06–0.2 ms of CPU each — the
-240-instance world above ran at 5 fps. The engine now reads a glTF
-`EXT_mesh_gpu_instancing` node as a single scenegraph node holding every
-placement, so the render pass does its per-object work once for the set rather
-than once per tree. The rest of the road to 60 fps at 1080p is §I of
+At 1080p a frame is about 10 ms of drawing, 5 ms of physics and 3 ms of
+everything else. Getting there took four things, each in the engine underneath
+rather than here: a glTF instancing node became *one* scenegraph node holding
+every placement instead of one per tree; the same image loaded by a hundred
+tiles became one texture, so the hundred draws it forced became one; a car's
+four wheels are cast into the world together rather than one at a time; and a
+landscape's bodies are no longer asked every step whether they have moved. The
+rest of the way to 60 fps at 1080p is §I of
 [GLISTEEL-WORLD-AUTHORING.md](https://github.com/mcfletch/openglcontext/blob/main/plans/GLISTEEL-WORLD-AUTHORING.md).
 
 ## Developing
