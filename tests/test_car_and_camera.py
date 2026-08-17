@@ -152,7 +152,7 @@ class TestHowItIsDrawn:
 
     def test_the_car_has_a_body_a_cabin_and_four_wheels(self, floor) -> None:
         car = Car(floor, position=(0, 1.0, 0))
-        assert len(car.node.children) == 6
+        assert len(car.node.children[0].choice[0].children) == 6
 
 
 class TestTheCamera:
@@ -169,50 +169,74 @@ class TestTheCamera:
             return self._speed
 
     def test_it_sits_behind_and_above_the_car(self) -> None:
-        pose = ChaseCamera().update(self._Car(), 1.0)
+        pose = ChaseCamera(mode='chase').update(self._Car(), 1.0)
         assert pose.position[2] > 0.0                 # behind a car facing -Z
         assert pose.position[1] > 1.0                 # and above it
 
     def test_it_looks_where_the_car_is_going(self) -> None:
-        pose = ChaseCamera().update(self._Car(), 1.0)
+        pose = ChaseCamera(mode='chase').update(self._Car(), 1.0)
         assert pose.target[2] < pose.position[2]
         assert abs(pose.heading()) < 1e-6             # straight down -Z
 
     def test_it_lags_the_car_rather_than_snapping_to_it(self) -> None:
-        camera = ChaseCamera()
+        camera = ChaseCamera(mode='chase')
         camera.update(self._Car(), 1.0)
         moved = camera.update(self._Car(position=(0, 0, -50.0)), 1.0 / 60.0)
         assert moved.position[2] > -40.0, "the camera teleported after the car"
 
     def test_a_faster_car_is_watched_from_further_back(self) -> None:
-        slow = ChaseCamera().update(self._Car(speed=0.0), 1.0)
-        fast = ChaseCamera().update(self._Car(speed=60.0), 1.0)
+        slow = ChaseCamera(mode='chase').update(self._Car(speed=0.0), 1.0)
+        fast = ChaseCamera(mode='chase').update(self._Car(speed=60.0), 1.0)
         assert fast.position[2] > slow.position[2]
 
     def test_the_pull_back_is_capped(self) -> None:
-        fast = ChaseCamera().update(self._Car(speed=1000.0), 1.0)
+        fast = ChaseCamera(mode='chase').update(self._Car(speed=1000.0), 1.0)
         assert fast.position[2] < 20.0
 
-    def test_the_bonnet_view_is_on_the_car(self) -> None:
-        camera = ChaseCamera(mode='bonnet')
+    def test_the_cockpit_view_is_where_a_driver_sits(self) -> None:
+        camera = ChaseCamera(mode='cockpit')
         pose = camera.update(self._Car(), 1.0)
-        assert pose.position[2] < 0.0                 # ahead of the origin
-        assert pose.position[1] < 1.0                 # and low
+        assert abs(float(pose.position[2])) < 1.0     # about the car's middle
+        assert 0.3 < float(pose.position[1]) < 1.0    # at a driver's eye
+
+    def test_the_cockpit_looks_down_the_road(self) -> None:
+        camera = ChaseCamera(mode='cockpit')
+        pose = camera.update(self._Car(), 1.0)
+        assert pose.target[2] < -10.0
+        assert abs(pose.pitch()) < 0.05, "a driver looks at the road, not the sky"
+
+    def test_it_starts_in_the_cockpit(self) -> None:
+        """A game about driving a route is seen from the car."""
+        assert ChaseCamera().mode == 'cockpit'
 
     def test_the_view_can_be_cycled(self) -> None:
         camera = ChaseCamera()
-        assert camera.cycle() == 'bonnet'
         assert camera.cycle() == 'chase'
+        assert camera.cycle() == 'bonnet'
+        assert camera.cycle() == 'cockpit'
+
+    def test_the_bonnet_view_is_ahead_of_the_driver(self) -> None:
+        cockpit = ChaseCamera(mode='cockpit').update(self._Car(), 1.0)
+        bonnet = ChaseCamera(mode='bonnet').update(self._Car(), 1.0)
+        assert float(bonnet.position[2]) < float(cockpit.position[2])
+
+    def test_a_view_from_the_car_does_not_lag(self) -> None:
+        """It is bolted on: lag would be the car sliding around the frame."""
+        for mode in ('cockpit', 'bonnet'):
+            camera = ChaseCamera(mode=mode)
+            camera.update(self._Car(), 1.0)
+            moved = camera.update(self._Car(position=(0, 0, -50.0)), 1.0 / 60.0)
+            assert float(moved.position[2]) < -45.0
 
     def test_a_reset_snaps_it_back_into_place(self) -> None:
-        camera = ChaseCamera()
+        camera = ChaseCamera(mode='chase')
         camera.update(self._Car(), 1.0)
         camera.reset()
         pose = camera.update(self._Car(position=(0, 0, -500.0)), 1.0 / 60.0)
         assert pose.position[2] < -480.0
 
     def test_it_reports_its_pitch(self) -> None:
-        pose = ChaseCamera().update(self._Car(), 1.0)
+        pose = ChaseCamera(mode='chase').update(self._Car(), 1.0)
         assert pose.pitch() < 0.0, "a chase camera looks slightly down"
 
     def test_a_car_facing_east_is_watched_from_the_west(self) -> None:
@@ -257,7 +281,8 @@ def _shapes(node, out=None):
     out = [] if out is None else out
     if isinstance(node, Shape):
         out.append(node)
-    for child in getattr(node, 'children', None) or []:
+    for child in ((getattr(node, 'children', None) or [])
+                  + (getattr(node, 'choice', None) or [])):
         _shapes(child, out)
     return out
 
@@ -290,3 +315,52 @@ class TestTheAirTheWorldIsSeenThrough:
         """A driver has to see far enough to place the car for a corner."""
         from glisteel.game import race_fog
         assert race_fog().visibilityRange > 600.0
+
+
+class TestTheDriverIsInsideTheCar:
+    """A cockpit view is taken from a point inside the bodywork.
+
+    Drawn from there, the only thing in frame is the inside of the car's own
+    shell -- so the shell comes off. It is the player's own car and they are
+    sitting in it; the views that look *at* it are the other two.
+    """
+
+    def test_the_cockpit_is_inside_it(self) -> None:
+        assert ChaseCamera('cockpit').inside
+
+    def test_the_bonnet_is_not(self) -> None:
+        assert not ChaseCamera('bonnet').inside
+
+    def test_the_chase_view_is_not(self) -> None:
+        assert not ChaseCamera('chase').inside
+
+    def test_a_car_is_drawn_by_default(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        assert not car.hidden
+        assert _drawn(car.node)
+
+    def test_a_hidden_car_is_not(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        car.hidden = True
+        assert not _drawn(car.node)
+
+    def test_it_comes_back(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        car.hidden = True
+        car.hidden = False
+        assert _drawn(car.node)
+
+    def test_hiding_it_does_not_stop_it_moving(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        car.hidden = True
+        car.follow(STEP)
+        assert car.node.translation is not None
+
+
+def _drawn(node) -> bool:
+    """Whether anything under a car's node would be rendered."""
+    from OpenGLContext.scenegraph.switch import Switch
+    for child in node.children:
+        if isinstance(child, Switch):
+            return bool(child.renderedChildren())
+    return bool(node.children)          # pragma: no cover - the shell is a Switch

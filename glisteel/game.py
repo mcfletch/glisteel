@@ -9,7 +9,7 @@ Keys::
     down / s            brake, and reverse once stopped
     left / right, a / d steer
     space               handbrake
-    c                   chase camera / bonnet camera
+    c                   cockpit / chase / bonnet camera
     r                   put the car back on the track
     F2                  save a screenshot
 
@@ -258,6 +258,7 @@ class GlisteelContext(OverlayMixin, BaseContext):
         self.car.follow(elapsed)
         self._recover_if_stuck(elapsed)
         pose = self.camera.update(self.car, elapsed)
+        self.car.hidden = self.camera.inside
         self._aim(pose)
         if self.timing is not None and not self._over():
             self.timing.update(self.car.position, elapsed)

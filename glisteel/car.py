@@ -23,6 +23,7 @@ from OpenGLContext.scenegraph.appearance import Appearance
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.shape import Shape
+from OpenGLContext.scenegraph.switch import Switch
 from OpenGLContext.scenegraph.transform import Transform
 
 __all__ = ['Car', 'CarSpec', 'car_body_mesh', 'wheel_mesh']
@@ -87,7 +88,7 @@ class Car:
         self.vehicle = RaycastVehicle(world, self.body, self.spec.wheels(),
                                       self.spec.tuning)
         self.vehicle.place(position, heading)
-        self.node, self._wheel_nodes = self._build_nodes()
+        self.node, self._shell, self._wheel_nodes = self._build_nodes()
         self._wheel_spin = [0.0] * len(self.vehicle.wheels)
 
     # -- driving ---------------------------------------------------------------
@@ -139,7 +140,22 @@ class Car:
             node.rotation = (0.0, 1.0, 0.0, wheel.steer_angle)
             node.children[0].rotation = (1.0, 0.0, 0.0, self._wheel_spin[index])
 
-    def _build_nodes(self) -> tuple[Transform, list[Transform]]:
+    @property
+    def hidden(self) -> bool:
+        """Whether the car's own bodywork is left out of the frame.
+
+        For the view from the driver's seat, which is a point inside it: what
+        that view would otherwise show is the inside of this car's shell. The
+        node stays in the scene and keeps following the physics, so nothing has
+        to be added or removed as the player changes view.
+        """
+        return self._shell.whichChoice < 0
+
+    @hidden.setter
+    def hidden(self, value: bool) -> None:
+        self._shell.whichChoice = -1 if value else 0
+
+    def _build_nodes(self) -> tuple[Transform, Switch, list[Transform]]:
         paint = PBRMaterial(baseColor=self.spec.paint, metallic=0.55,
                             roughness=0.32)
         glass = PBRMaterial(baseColor=(0.10, 0.13, 0.16), metallic=0.1,
@@ -153,7 +169,9 @@ class Car:
             wheels.append(Transform(children=[spin]))
         body = _painted(car_body_mesh(paint), paint)
         cabin = _painted(cabin_mesh(glass), glass)
-        return Transform(children=[body, cabin, *wheels]), wheels
+        shell = Switch(choice=[Transform(children=[body, cabin, *wheels])],
+                       whichChoice=0)
+        return Transform(children=[shell]), shell, wheels
 
 
 def _painted(mesh: PBRMesh, material: PBRMaterial) -> Shape:

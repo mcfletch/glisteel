@@ -7,9 +7,17 @@ wants to be a set distance behind and above the car, and it gets there over
 time rather than at once, which turns a flick of oversteer into a slide the
 player can read and catch.
 
-Two views, because they answer different questions. The chase view shows where
-the car is going and what it is doing; the bonnet view shows exactly where the
-front wheels are. :class:`ChaseCamera` is both, with :attr:`mode`.
+Three views, because they answer different questions. The **cockpit** view is
+where the driver is, and is what the game is for: a route is a thing you drive
+*through*, and a forest read from seven metres up and behind reads as scenery
+rather than as trees you are passing between. The **chase** view shows what the
+car is doing, which is what a player catching a slide needs. The **bonnet** view
+shows exactly where the front wheels are. :class:`ChaseCamera` is all three,
+with :attr:`mode`.
+
+The cockpit's eye is a point inside the bodywork, so :attr:`ChaseCamera.inside`
+says so and the game hides the player's own car for that view -- see
+:attr:`glisteel.car.Car.hidden`.
 """
 from __future__ import annotations
 
@@ -28,6 +36,24 @@ UP = np.array([0.0, 1.0, 0.0])
 CHASE_BACK = 7.5
 CHASE_UP = 2.6
 CHASE_AHEAD = 9.0
+
+#: Where a driver's eyes are, relative to the car body's own centre: a little
+#: back of it and above it. The body sits about two thirds of a metre off the
+#: road, so this puts the eye at about the height of a real one.
+COCKPIT_BACK = 0.25
+COCKPIT_UP = 0.52
+
+#: Where the bonnet camera sits, ahead of the centre and lower.
+BONNET_AHEAD = 1.1
+BONNET_UP = 0.55
+
+#: How far down the road a view from inside the car looks. Far enough that the
+#: aim point does not swing with every bump, near enough that it is on the road
+#: rather than on the horizon.
+AHEAD_VIEW = 60.0
+
+#: The views, in the order the key cycles them.
+VIEWS = ('cockpit', 'chase', 'bonnet')
 
 #: How quickly the camera closes on where it wants to be, as a fraction of the
 #: remaining gap per second. High enough to keep up with a fast car, low enough
@@ -71,16 +97,31 @@ class ChaseCamera:
     swinging the whole frame.
     """
 
-    #: ``'chase'`` or ``'bonnet'``.
+    #: One of :data:`VIEWS`.
     mode: str
 
-    def __init__(self, mode: str = 'chase') -> None:
+    def __init__(self, mode: str = VIEWS[0]) -> None:
         self.mode = mode
         self._position: np.ndarray | None = None
 
+    @property
+    def inside(self) -> bool:
+        """Whether the eye is within the car's own shell.
+
+        A view from in there draws the inside of the bodywork and nothing else,
+        so the car it belongs to is not drawn for it.
+        """
+        return self.mode == 'cockpit'
+
+    @property
+    def onboard(self) -> bool:
+        """Whether the camera is bolted to the car rather than chasing it."""
+        return self.mode != 'chase'
+
     def cycle(self) -> str:
-        """Switch to the other view, and say which it now is."""
-        self.mode = 'bonnet' if self.mode == 'chase' else 'chase'
+        """Move to the next view, and say which it now is."""
+        found = VIEWS.index(self.mode) if self.mode in VIEWS else -1
+        self.mode = VIEWS[(found + 1) % len(VIEWS)]
         self._position = None
         return self.mode
 
@@ -94,7 +135,7 @@ class ChaseCamera:
 
     def update(self, car: Any, dt: float) -> CameraPose:
         wanted, target = self._wanted(car)
-        if self.mode == 'bonnet' or self._position is None or dt <= 0:
+        if self.onboard or self._position is None or dt <= 0:
             self._position = wanted
         else:
             # Exponential approach, framed so the rate is per second and the
@@ -109,9 +150,12 @@ class ChaseCamera:
         flat = forward - UP * float(np.dot(forward, UP))
         length = float(np.linalg.norm(flat))
         flat = flat / length if length > 1e-6 else np.array([0.0, 0.0, -1.0])
+        if self.mode == 'cockpit':
+            eye = position - flat * COCKPIT_BACK + UP * COCKPIT_UP
+            return eye, eye + flat * AHEAD_VIEW
         if self.mode == 'bonnet':
-            eye = position + flat * 1.1 + UP * 0.55
-            return eye, eye + flat * 40.0
+            eye = position + flat * BONNET_AHEAD + UP * BONNET_UP
+            return eye, eye + flat * AHEAD_VIEW
         back = min(CHASE_BACK + car.speed() * SPEED_PULL_BACK,
                    CHASE_BACK + MAXIMUM_PULL_BACK)
         eye = position - flat * back + UP * CHASE_UP

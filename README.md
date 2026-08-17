@@ -10,10 +10,10 @@ oglc-bake --output /tmp/world
 glisteel /tmp/world/tileset.json
 ```
 
-The first command bakes a world: hill country under a third of a million trees,
-and an eight-kilometre circuit routed through it — on the ground where the
-ground allows, on a viaduct over the valleys and through a bore where it does
-not. The second drives it.
+The first command bakes a world: hill country under half a million trees, and an
+eight-kilometre circuit routed through it — on the ground where the ground
+allows, on a walled causeway over the low ground, on a viaduct over the valleys
+and through a bore where it does not. The second drives it.
 
 ## Driving
 
@@ -23,12 +23,18 @@ not. The second drives it.
 | `down` / `s` | brake, and reverse once stopped |
 | `left` `right` / `a` `d` | steer |
 | `space` | handbrake |
-| `c` | chase camera / bonnet camera |
+| `c` | cockpit / chase / bonnet camera |
 | `r` | put the car back on the track |
 | `F2` | screenshot |
 
 `glisteel --autopilot` drives itself, which is the quickest way to see a lap and
 the same code an opponent car would use.
+
+**The default view is the driver's seat.** A route is a thing you drive
+*through*, and a forest read from seven metres up and behind reads as scenery
+rather than as trees you are passing between. `c` cycles cockpit, chase and
+bonnet; the chase view is what a player catching a slide wants. The player's own
+car is not drawn for the cockpit view, because the eye is inside its shell.
 
 ## What is where
 
@@ -87,6 +93,10 @@ seconds each:
 | 2048 m, depth 3 | 40 | 111 fps | |
 | 2048 m, depth 4 | 24 | 74 fps | 57 fps |
 | 2048 m, depth 4 | 240 | 61 fps | |
+
+The shipped 4096 m world — 575k trees, ground cover, and a shaded canopy —
+drives at 62–80 fps at 1080p on the same machine, an autopilot lap of 3:32 over
+8.3 km.
 
 The frame rate is set by how much of the world is on screen and how finely it is
 drawn. `--sse` trades sharpness for speed (higher is coarser); a shallower world
