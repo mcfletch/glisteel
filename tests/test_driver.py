@@ -181,3 +181,86 @@ class TestItActuallyGetsRound:
             worst = max(worst, course.nearest(car.position)[1])
         assert worst < course.total_width, (
             "wandered %.1f m from the centreline" % worst)
+
+
+class TestItGetsOverTheHills:
+    """A circuit is not flat, and the interesting question a hilly one asks is
+    not about steering: it is whether the car stays on the road over a crest.
+
+    A car that leaves the ground has no grip and no drive, so it goes where it
+    was pointed when it left rather than where the road goes. What keeps its
+    wheels down is the road being built with vertical curves long enough for the
+    speed it is driven at (``OpenGLContext_editor``'s ``design_speed``), so the
+    course here is built to exactly that limit and driven at exactly that speed.
+    """
+
+    #: How much of the car's weight a crest may take off the wheels, and the
+    #: speed the course is built for -- the shipped circuit's figures.
+    WEIGHT_LOSS = 0.25
+    DESIGN_SPEED = 47.0
+    GRAVITY = 9.81
+
+    def _relief(self, x, z):
+        """Rolling ground whose crests are at the design limit and no sharper."""
+        radius = self.DESIGN_SPEED ** 2 / (self.GRAVITY * self.WEIGHT_LOSS)
+        wavelength = 260.0
+        k = 2 * math.pi / wavelength
+        # A sine of curvature k^2 * a has its sharpest crest at the peak.
+        amplitude = 1.0 / (k * k * radius)
+        return amplitude * np.sin(k * np.asarray(x, 'd'))
+
+    def _course(self, points=240, radius_x=300.0, radius_z=200.0):
+        angle = np.linspace(0.0, 2 * math.pi, points, endpoint=False)
+        x = radius_x * np.cos(angle)
+        z = radius_z * np.sin(angle)
+        line = np.stack([x, self._relief(x, z), z], axis=-1)
+        length = float(np.linalg.norm(np.diff(np.vstack([line, line[:1]]),
+                                              axis=0), axis=1).sum())
+        return Course(name='hills', centreline=line, carriageway_width=9.0,
+                      total_width=18.0, closed=True, length=length)
+
+    def _ground(self, world, extent=420.0, resolution=121):
+        """The same relief as a triangle mesh, which is what the car drives on."""
+        from omi_physics import model
+        axis = np.linspace(-extent, extent, resolution)
+        gx, gz = np.meshgrid(axis, axis, indexing='ij')
+        points = np.stack([gx.ravel(), self._relief(gx, gz).ravel(),
+                           gz.ravel()], axis=-1)
+        faces = []
+        for i in range(resolution - 1):
+            for j in range(resolution - 1):
+                a = i * resolution + j
+                faces += [(a, a + 1, a + resolution),
+                          (a + 1, a + resolution + 1, a + resolution)]
+        shape = world.add_shape(
+            model.Shape.trimesh(points, np.asarray(faces, dtype='i')))
+        world.add_body(model.Motion(type=model.STATIC),
+                       collider=model.Collider(shape=shape))
+
+    def _drive(self, seconds=150.0):
+        from glisteel.race import RaceTiming
+        world = PhysicsWorld()
+        self._ground(world)
+        course = self._course()
+        start, heading = course.grid_position(height=1.0)
+        car = Car(world, position=start, heading=heading)
+        pilot = Autopilot(course, DriverStyle(maximum_speed=self.DESIGN_SPEED))
+        timing = RaceTiming(course)
+        worst = 0.0
+        for _ in range(int(seconds / STEP)):
+            car.control(*pilot.update(car))
+            car.update(STEP)
+            world.step(STEP)
+            timing.update(car.position, STEP)
+            worst = max(worst, float(course.nearest(car.position)[1]))
+            if timing.laps:
+                break
+        return timing, worst
+
+    def test_it_completes_a_lap_over_the_crests(self) -> None:
+        timing, _worst = self._drive()
+        assert timing.laps, "the autopilot did not get round the hilly circuit"
+
+    def test_it_stays_on_the_road_over_them(self) -> None:
+        _timing, worst = self._drive()
+        assert worst < 18.0, "wandered %.1f m from the centreline" % worst
