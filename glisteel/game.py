@@ -42,7 +42,7 @@ from glisteel.camera import ChaseCamera  # noqa: E402
 from glisteel.car import Car, CarSpec  # noqa: E402
 from glisteel.driver import Autopilot  # noqa: E402
 from glisteel.hud import RaceHUD  # noqa: E402
-from glisteel.race import RaceTiming, off_course  # noqa: E402
+from glisteel.race import OffRoad, RaceTiming, off_course  # noqa: E402
 from glisteel.world import RaceWorld  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -95,6 +95,7 @@ class GlisteelContext(OverlayMixin, BaseContext):
     car: Car | None = None
     autopilot: Autopilot | None = None
     timing: RaceTiming | None = None
+    watch: OffRoad | None = None
     hud: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
@@ -145,6 +146,7 @@ class GlisteelContext(OverlayMixin, BaseContext):
                        heading=heading)
         self.sg.children.append(self.car.node)
         self.timing = RaceTiming(course)
+        self.watch = OffRoad(course)
         self.autopilot = Autopilot(course) if self.config.autopilot else None
         self._settle_onto_the_road()
 
@@ -226,6 +228,8 @@ class GlisteelContext(OverlayMixin, BaseContext):
         self.camera.reset()
         if self.timing is not None:
             self.timing.restart()
+        if self.watch is not None:
+            self.watch.restart()
 
     # -- the frame -------------------------------------------------------------
 
@@ -246,6 +250,7 @@ class GlisteelContext(OverlayMixin, BaseContext):
         # of a second and puts the car on its roof.
         self._accumulated += elapsed
         while self._accumulated >= PHYSICS_STEP:
+            self._read_the_ground(PHYSICS_STEP)
             self.car.control(*self.controls())
             self.car.update(PHYSICS_STEP)
             self.world.physics.step(PHYSICS_STEP)
@@ -254,7 +259,7 @@ class GlisteelContext(OverlayMixin, BaseContext):
         self._recover_if_stuck(elapsed)
         pose = self.camera.update(self.car, elapsed)
         self._aim(pose)
-        if self.timing is not None:
+        if self.timing is not None and not self._over():
             self.timing.update(self.car.position, elapsed)
         self._update_hud()
         width, height = self.getViewPort()
@@ -267,6 +272,24 @@ class GlisteelContext(OverlayMixin, BaseContext):
             # Through the floor of the world: put it back rather than let the
             # player watch it fall for ever.
             self.return_to_track()
+
+    def _read_the_ground(self, dt: float) -> None:
+        """What the wheels are on, and whether the run is over.
+
+        Inside the fixed step rather than once a frame: the surface decides the
+        forces, and a surface sampled at the frame rate would change under the
+        car in jumps on a slow frame.
+        """
+        assert self.car is not None
+        if self.watch is None:
+            return
+        reason = self.watch.update(self.car.position, dt)
+        self.car.vehicle.surface = self.watch.surface()
+        if reason is not None:
+            log.info("run over: %s", reason)
+
+    def _over(self) -> bool:                     # pragma: no cover - needs a window
+        return bool(self.watch is not None and self.watch.ended)
 
     def _recover_if_stuck(self, elapsed: float) -> None:
         """Put the car back on the road if it has got itself stuck.
@@ -295,7 +318,8 @@ class GlisteelContext(OverlayMixin, BaseContext):
         if self.hud is None or self.car is None:
             return
         self.hud.show(speed_kph=self.car.speed_kph(), timing=self.timing,
-                      off=self._off_course())
+                      off=self.watch.off if self.watch else False,
+                      ended=self.watch.ended if self.watch else None)
 
     def _off_course(self) -> bool:               # pragma: no cover - needs a window
         assert self.world is not None and self.car is not None

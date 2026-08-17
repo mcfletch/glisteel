@@ -1,18 +1,19 @@
 # GLinting Steel
 
 A racing game on [OpenGLContext](https://github.com/mcfletch/openglcontext): a
-car, a circuit, and a world too big to load. The track streams in around the
-player as they drive it, and every tile that pages in becomes collision the car
-drives on — the same triangles you can see.
+car, a forest road, and a world too big to load. The world streams in around the
+player as they drive it.
 
 ```bash
 pip install glisteel OpenGLContext-editor
-oglc-bake --output /tmp/world --extent 2048 --depth 3 --max-instances 24
+oglc-bake --output /tmp/world
 glisteel /tmp/world/tileset.json
 ```
 
-The first command bakes a world: hills, a lake, a conifer forest and a 4.6 km
-circuit through it. The second drives it.
+The first command bakes a world: hill country under a third of a million trees,
+and an eight-kilometre circuit routed through it — on the ground where the
+ground allows, on a viaduct over the valleys and through a bore where it does
+not. The second drives it.
 
 ## Driving
 
@@ -41,14 +42,28 @@ what makes it a *game*.
 | `car.py` | the car — its body, its wheels, and how it is drawn |
 | `camera.py` | where the player watches from |
 | `driver.py` | the autopilot: pure pursuit, and a speed the corner allows |
-| `race.py` | lap timing that a shortcut does not fool |
+| `race.py` | lap timing that a shortcut does not fool, and leaving the road |
 | `hud.py` | the four numbers a driver acts on |
 | `game.py` | the window, the loop, and the keys |
 
 **The road comes with the world.** A pile of triangles does not say where a
-track goes, so the baker writes the centreline into the tileset's `extras` and
-the game reads it back. That is what puts the car on the grid, points it the
-right way, times the lap, and steers the autopilot.
+track goes, so the baker writes the centreline, the cross-section and the
+structures into the tileset's `extras` and the game reads them back. That is what
+puts the car on the grid, points it the right way, times the lap, steers the
+autopilot, and — because it is a road and not a pile of triangles — decides what
+is under the wheels.
+
+**What the car drives on is built here, not read off the tiles.** Tile geometry
+is level-of-detail geometry: two resolutions of one curve are the better part of
+a metre apart, and a surface that steps under the wheels at a hundred and thirty
+is a wall in the middle of an open road. So the carriageway is swept from the
+centreline and the ground is cut from the landscape's own height field, each in
+chunks held near the car. Nothing streams underneath it.
+
+**Leaving the road ends the run.** A forest road is as wide as it is and the
+forest starts at the verge. A wheel on the grass loses most of its grip and picks
+up drag; a car that stays off for a couple of seconds is mired, and one that goes
+a long way off is gone. `r` puts it back on the grid.
 
 **The car is a rigid body on four spring-loaded rays** — `omi_physics`'
 `RaycastVehicle`. There are no wheels in the simulation: each is a ray cast

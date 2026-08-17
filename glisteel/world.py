@@ -13,6 +13,7 @@ which way it faces, and tells the timing where the lap begins.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import os
@@ -43,6 +44,29 @@ FOV = math.radians(55.0)
 VIEW_DISTANCE = 4000.0
 
 
+@dataclass(frozen=True)
+class Structure:
+    """A stretch of a road that is built rather than laid.
+
+    ``kind`` is what it is -- a bridge, a tunnel, a causeway -- and ``start``
+    and ``end`` are distances along the centreline, in metres.
+    """
+
+    kind: str
+    start: float
+    end: float
+
+    def holds(self, station: Any, along: float = 0.0) -> Any:
+        """Whether each of these distances along the road falls inside it.
+
+        ``along`` extends it that far up each approach, for a caller that needs
+        the stretch leading to a structure as well as the structure itself.
+        """
+        distance = np.asarray(station, dtype='d')
+        return ((distance >= self.start - along)
+                & (distance <= self.end + along))
+
+
 @dataclass
 class Course:
     """A road out of a baked world: where it goes and how wide it is."""
@@ -53,6 +77,73 @@ class Course:
     total_width: float
     closed: bool
     length: float
+    structures: tuple[Structure, ...] = ()
+    #: The road's cross-section as the world wrote it, or empty for a world
+    #: that only said how wide the road is.
+    profile: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+    def road_profile(self) -> Any:
+        """The cut across the road, as the engine's own profile.
+
+        What a collider for the carriageway is swept from. A world that did not
+        write its section gets one built from the two widths it did write, which
+        is the shape of the road even if not every drop of it.
+        """
+        from OpenGLContext.scenegraph.road import RoadProfile
+        found = self.profile
+        if found:
+            return RoadProfile(
+                lane_width=float(found['laneWidth']),
+                lanes=int(found['lanes']),
+                shoulder_width=float(found['shoulderWidth']),
+                shoulder_drop=float(found['shoulderDrop']),
+                verge_width=float(found['vergeWidth']),
+                verge_drop=float(found['vergeDrop']),
+                crossfall=float(found['crossfall']),
+                texture_length=float(found['textureLength']))
+        beside = max(self.total_width - self.carriageway_width, 0.0) / 2.0
+        return RoadProfile(lane_width=self.carriageway_width / 2.0, lanes=2,
+                           shoulder_width=beside * 0.4,
+                           verge_width=beside * 0.6)
+
+    @property
+    def stations(self) -> np.ndarray:
+        """Distance along the road to each centreline point."""
+        steps = np.linalg.norm(np.diff(self.centreline, axis=0), axis=1)
+        return np.concatenate([[0.0], np.cumsum(steps)])
+
+    def inside(self, kind: str, x: Any, z: Any, margin: float = 0.0,
+               along: float = 0.0) -> Any:
+        """Which of these ground positions lie over a structure of ``kind``.
+
+        What a bore needs from the ground it runs through: the surface is still
+        drawn over a tunnel, and a collider left there is a wall across the
+        road. ``margin`` widens the answer beyond the road's own width, so the
+        opening clears the bore rather than grazing it, and ``along`` extends it
+        up the approaches: the ground beside a portal is a cutting sampled on a
+        grid metres wide, and where that meets the untouched hillside it rides
+        over the carriageway by the better part of a step.
+        """
+        wanted = [one for one in self.structures if one.kind == kind]
+        found = np.zeros(np.shape(np.asarray(x, dtype='d')), dtype=bool)
+        if not wanted:
+            return found
+        reach = self.total_width / 2.0 + margin
+        stations = self.stations
+        line = self.centreline
+        points = np.stack([np.asarray(x, 'd').ravel(),
+                           np.asarray(z, 'd').ravel()], axis=-1)
+        for one in wanted:
+            run = one.holds(stations, along=along)
+            if not run.any():
+                continue
+            near = line[run][:, [0, 2]]
+            # Distance to the run's own points rather than to its segments: the
+            # centreline is written densely enough that the difference is under
+            # a metre, and the margin is metres.
+            gaps = np.linalg.norm(points[:, None, :] - near[None, :, :], axis=-1)
+            found |= (gaps.min(axis=1) <= reach).reshape(found.shape)
+        return found
 
     def point(self, index: int) -> np.ndarray:
         """One point of the centreline, wrapping round a closed circuit."""
@@ -69,15 +160,29 @@ class Course:
         return math.atan2(float(ahead[0]), -float(ahead[2]))
 
     def nearest(self, position: Any) -> tuple[int, float]:
-        """The index of the nearest centreline point, and how far off it is.
+        """The nearest centreline point's index, and how far off the *road* it is.
 
-        Distance is measured across the ground, so a car in the air over the
-        track is still on it.
+        Distance is to the line, not to the points written down for it: a course
+        is a shape sampled every few metres, and a car exactly on the line half
+        way between two samples is on the line, not four metres off it. The
+        index is still a point -- what a caller wants it for is to look up the
+        road ahead -- and it is the nearer of the two the car lies between.
+
+        Measured across the ground, so a car in the air over the track is still
+        on it.
         """
-        point = np.asarray(position, dtype='d')
-        gaps = np.linalg.norm(self.centreline[:, [0, 2]] - point[[0, 2]], axis=1)
+        point = np.asarray(position, dtype='d')[[0, 2]]
+        line = self.centreline[:, [0, 2]]
+        gaps = np.linalg.norm(line - point, axis=1)
         index = int(gaps.argmin())
-        return index, float(gaps[index])
+        start = line if self.closed else line[:-1]
+        delta = np.roll(line, -1, axis=0) - line if self.closed \
+            else line[1:] - line[:-1]
+        length2 = np.einsum('ij,ij->i', delta, delta)
+        along = np.clip(np.einsum('ij,ij->i', point - start, delta)
+                        / np.where(length2 > 0, length2, 1.0), 0.0, 1.0)
+        off = np.linalg.norm(start + along[:, None] * delta - point, axis=1)
+        return index, float(off.min())
 
     def on_road(self, position: Any) -> bool:
         """Whether a point is on the carriageway rather than beside it."""
@@ -110,8 +215,32 @@ def load_courses(tileset_path: str) -> list[Course]:
             carriageway_width=float(road.get('carriagewayWidth', 7.0)),
             total_width=float(road.get('totalWidth', 12.0)),
             closed=bool(road.get('closed', False)),
-            length=float(road.get('length', 0.0))))
+            length=float(road.get('length', 0.0)),
+            profile=dict(road.get('profile') or {}),
+            structures=tuple(
+                Structure(kind=str(one.get('kind', 'dirt')),
+                          start=float(one.get('from', 0.0)),
+                          end=float(one.get('to', 0.0)))
+                for one in road.get('structures') or ())))
     return out
+
+
+#: How far under a starting position its ground may be, in metres, before the
+#: world counts as settled. A grid slot sits about a metre over the surface it
+#: is on; anything much further down is a different surface.
+SETTLE_DROP = 4.0
+
+#: How far past a road's own width a bore's opening in the ground reaches, in
+#: metres. Wide enough to clear the lining, and no wider: the opening is a hole
+#: in the ground with the bore's own tube inside it, and one wider than the tube
+#: is a trench beside the carriageway.
+BORE_MARGIN = 2.0
+
+#: How far up each approach the opening reaches, in metres. The ground beside a
+#: portal is a cutting sampled on a grid metres wide, and where that meets the
+#: untouched hillside it rides over the carriageway; the road's own surface
+#: carries the car through, so opening the ground early costs nothing.
+BORE_APPROACH = 24.0
 
 
 class RaceWorld:
@@ -122,6 +251,11 @@ class RaceWorld:
     physics only ever knows about ground that is actually loaded -- which is why
     :meth:`settled` exists: a car dropped before its tile arrives falls through
     the world.
+
+    A world whose ground is a *field* rather than a tree of tiles brings its own
+    colliders instead: the landscape is one height field, cut into chunks and
+    held near the car. It settles the moment it is built, because there is
+    nothing to wait for.
     """
 
     def __init__(self, tileset_path: str, memory: int = DEFAULT_MEMORY,
@@ -132,9 +266,49 @@ class RaceWorld:
                 % (tileset_path, os.path.dirname(tileset_path) or 'world'))
         self.path = tileset_path
         self.physics = PhysicsWorld(gravity=model.Gravity(gravity=abs(gravity)))
-        self.terrain = TilesTerrain(tileset_path, physics_world=self.physics,
-                                    memory_budget=memory, max_sse=max_sse)
+        # No colliders from the tiles: tile geometry is level-of-detail
+        # geometry, and a surface that changes resolution under the wheels is a
+        # step to hit at speed. The two surfaces a car meets are built here
+        # instead, each from the thing itself rather than from a drawing of it.
+        self.terrain = TilesTerrain(tileset_path, memory_budget=memory,
+                                    max_sse=max_sse)
         self.courses = load_courses(tileset_path)
+        #: The ground, when the world carries its landscape as a field. The
+        #: chunks near the car are in the physics world; the rest are not.
+        self.ground: Any = None
+        if self.terrain.field is not None:
+            from OpenGLContext.physics.heightfield import HeightFieldColliders
+            self.ground = HeightFieldColliders(self.physics,
+                                               self.terrain.field,
+                                               holes=self._bores())
+        #: The carriageway, built from the course rather than from the tiles.
+        self.roads: list[Any] = []
+        for road in self.courses:
+            from OpenGLContext.physics.road import RoadColliders
+            self.roads.append(RoadColliders(
+                self.physics, road.centreline, road.road_profile(),
+                closed=road.closed))
+
+    def _bores(self) -> Any:
+        """Where the ground is not there, because a road runs inside it.
+
+        A field terrain is a surface and keeps the hill a tunnel passes through,
+        which is right to look at and a wall to drive into. The bores are cut
+        out of the collider; the bore's own lining, which streams with the tile
+        it is in, is what the car actually drives through.
+        """
+        tunnelled = [road for road in self.courses
+                     if any(one.kind == 'tunnel' for one in road.structures)]
+        if not tunnelled:
+            return None
+
+        def opened(x: Any, z: Any) -> Any:
+            found = np.zeros(np.shape(np.asarray(x, dtype='d')), dtype=bool)
+            for road in tunnelled:
+                found |= road.inside('tunnel', x, z, margin=BORE_MARGIN,
+                                     along=BORE_APPROACH)
+            return found
+        return opened
 
     @property
     def course(self) -> Course | None:
@@ -151,6 +325,10 @@ class RaceWorld:
         tile in the world is a candidate to refine and to draw, including the
         half of it behind the car.
         """
+        if self.ground is not None:
+            self.ground.update(camera)
+        for road in self.roads:
+            road.update(camera)
         return self.terrain.update_for_camera(
             camera, viewport_height, view_projection=view_projection)
 
@@ -170,19 +348,33 @@ class RaceWorld:
                                far if far is not None else VIEW_DISTANCE)
 
     def settled(self, camera: Any, viewport_height: float = 720.0,
-                rounds: int = 24, timeout: float = 20.0) -> bool:
-        """Stream until the ground under ``camera`` is loaded, or give up.
+                rounds: int = 24, timeout: float = 20.0,
+                drop: float = SETTLE_DROP) -> bool:
+        """Stream until there is ground within ``drop`` under ``camera``.
 
         A car placed on a road whose tile has not arrived falls through the
         world and keeps falling, so the grid waits for its ground.
+
+        Within ``drop`` rather than anywhere below: a car on a viaduct has the
+        valley floor ninety metres under it from the first frame, and a start
+        that took that for its ground would drop the car off the deck.
         """
         for _ in range(rounds):
             self.stream(camera, viewport_height)
+            if self._standing_on(camera, drop):
+                return True
             self.terrain.runtime.wait_for_loads(timeout=timeout / rounds)
             self.stream(camera, viewport_height)
-            if self.ground_under(camera) is not None:
+            if self._standing_on(camera, drop):
                 return True
         return False
+
+    def _standing_on(self, camera: Any, drop: float) -> bool:
+        """Whether there is a surface close enough under a point to stand on."""
+        found = self.ground_under(camera)
+        if found is None:
+            return False
+        return bool(float(np.asarray(camera, dtype='d')[1]) - found <= drop)
 
     def ground_under(self, position: Any, reach: float = 200.0) -> float | None:
         """The height of the ground below a point, or None if nothing is there.

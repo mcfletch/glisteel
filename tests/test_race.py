@@ -157,3 +157,101 @@ class TestBeingOffCourse:
     def test_the_infield_is_off_course(self) -> None:
         course = _oval()
         assert off_course(course, (0.0, 0.0, 0.0))
+
+
+class TestLeavingTheRoad:
+    """A car that puts two wheels on the grass loses grip and drags; one that
+    stays off it long enough is mired, and the run is over. What ends a lap on
+    a forest road is the forest."""
+
+    def _course(self, width=7.2, total=10.6):
+        from glisteel.world import Course
+        line = np.stack([np.arange(60) * 8.0, np.zeros(60), np.zeros(60)],
+                        axis=-1)
+        return Course(name='r', centreline=line, carriageway_width=width,
+                      total_width=total, closed=False, length=472.0)
+
+    def _watch(self, **named):
+        from glisteel.race import OffRoad
+        return OffRoad(self._course(), **named)
+
+    def test_a_car_on_the_carriageway_is_on_the_road(self) -> None:
+        watch = self._watch()
+        assert watch.update((100.0, 0.0, 0.0), 0.1) is None
+        assert not watch.off
+
+    def test_a_wheel_on_the_verge_is_off_it(self) -> None:
+        watch = self._watch()
+        watch.update((100.0, 0.0, 4.6), 0.1)
+        assert watch.off
+
+    def test_being_off_it_is_not_the_end_of_the_run(self) -> None:
+        """A car that has slid a wheel wide is still racing."""
+        watch = self._watch()
+        assert watch.update((100.0, 0.0, 4.6), 0.5) is None
+
+    def test_staying_off_it_is(self) -> None:
+        watch = self._watch(patience=2.0)
+        ended = None
+        for _ in range(30):
+            ended = ended or watch.update((100.0, 0.0, 6.0), 0.1)
+        assert ended is not None
+
+    def test_coming_back_forgives_it(self) -> None:
+        watch = self._watch(patience=2.0)
+        for _ in range(15):
+            watch.update((100.0, 0.0, 6.0), 0.1)
+        watch.update((100.0, 0.0, 0.0), 0.1)
+        assert watch.time_off == 0.0
+        assert not watch.off
+
+    def test_going_a_long_way_off_ends_it_at_once(self) -> None:
+        """Down a bank and into the trees: there is no coming back from that."""
+        watch = self._watch()
+        assert watch.update((100.0, 0.0, 60.0), 0.02) is not None
+
+    def test_it_says_why(self) -> None:
+        watch = self._watch(patience=1.0)
+        reasons = [watch.update((100.0, 0.0, 6.0), 0.1) for _ in range(20)]
+        said = [one for one in reasons if one]
+        assert len(said) == 1, "the reason is given once, not every frame"
+        assert 'off' in said[0].lower()
+
+    def test_once_it_is_over_it_stays_over(self) -> None:
+        watch = self._watch(patience=1.0)
+        for _ in range(20):
+            watch.update((100.0, 0.0, 6.0), 0.1)
+        assert watch.ended
+        assert watch.update((100.0, 0.0, 0.0), 0.1) is None
+        assert watch.ended
+
+    def test_restarting_puts_it_back(self) -> None:
+        watch = self._watch(patience=1.0)
+        for _ in range(20):
+            watch.update((100.0, 0.0, 6.0), 0.1)
+        watch.restart()
+        assert not watch.ended and watch.time_off == 0.0
+
+
+class TestWhatTheGroundIsUnderTheWheels:
+    def test_on_the_carriageway_it_is_tarmac(self) -> None:
+        from glisteel.race import OffRoad
+        watch = OffRoad(TestLeavingTheRoad()._course())
+        watch.update((100.0, 0.0, 0.0), 0.1)
+        assert watch.surface().grip == 1.0
+        assert watch.surface().rolling == 0.0
+
+    def test_off_it_the_going_is_soft(self) -> None:
+        from glisteel.race import OffRoad
+        watch = OffRoad(TestLeavingTheRoad()._course())
+        watch.update((100.0, 0.0, 6.0), 0.1)
+        assert watch.surface().grip < 0.6
+        assert watch.surface().rolling > 0.1
+
+    def test_the_further_off_the_softer_it_gets(self) -> None:
+        from glisteel.race import OffRoad
+        course = TestLeavingTheRoad()._course()
+        near, far = OffRoad(course), OffRoad(course)
+        near.update((100.0, 0.0, 4.6), 0.1)
+        far.update((100.0, 0.0, 12.0), 0.1)
+        assert far.surface().rolling > near.surface().rolling

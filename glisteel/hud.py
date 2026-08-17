@@ -36,8 +36,12 @@ class RaceHUD(HUDLayer):
         self.children = [self.times, self.speed, self.warning]
 
     def show(self, speed_kph: float, timing: Any = None,
-             off: bool = False) -> None:
-        """Put this frame's numbers on the readouts."""
+             off: bool = False, ended: str | None = None) -> None:
+        """Put this frame's numbers on the readouts.
+
+        ``ended`` is the reason the run is over, and displaces the off-track
+        warning: once a car is mired there is nothing left to warn about.
+        """
         self.speed.value = '%3.0f' % max(0.0, speed_kph)
         self.speed.critical = bool(speed_kph >= FAST_KPH)
         if timing is not None:
@@ -45,8 +49,11 @@ class RaceHUD(HUDLayer):
                                           _clock(timing.current))
             self.last.value = timing.last.clock() if timing.last else '--:--.---'
             self.best.value = timing.best.clock() if timing.best else '--:--.---'
-        self.warning.value = 'OFF TRACK' if off else ''
-        self.warning.critical = bool(off)
+        if ended:
+            self.warning.value = ended.upper()
+        else:
+            self.warning.value = 'OFF TRACK' if off else ''
+        self.warning.critical = bool(ended or off)
 
 
 def _clock(seconds: float) -> str:

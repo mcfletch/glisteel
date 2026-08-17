@@ -9,6 +9,13 @@ steer toward it, and let the distance grow with speed so the car looks further
 ahead the faster it goes. It is the oldest path-following rule there is and it
 holds a racing line better than anything of its size.
 
+On its own it *cuts* a corner: aiming ``L`` up the road on a bend of radius
+``R`` settles the car about ``L**2 / 2R`` inside the line, which on a narrow
+road is the width of the carriageway. So the driver also corrects the error it
+can see under itself, as an angle that softens with speed -- the same metres off
+the line is a smaller correction the faster you are going, or what settles at
+20 m/s saws the wheel at 50.
+
 **Corner-limited speed** for the pedals: how fast a car may go through a bend of
 radius *r* is `sqrt(grip * g * r)`, so the target speed comes from the curvature
 of the road ahead rather than from a number written down per corner. Below the
@@ -29,7 +36,7 @@ __all__ = ['Autopilot', 'DriverStyle']
 #: many seconds ahead. Too short and it saws at the wheel; too long and it cuts
 #: every corner.
 LOOK_AHEAD_METRES = 12.0
-LOOK_AHEAD_SECONDS = 0.9
+LOOK_AHEAD_SECONDS = 0.6
 
 #: How far ahead it reads the curvature to set its speed. A car doing 40 m/s
 #: needs about 80 m to lose 20 of them, so it has to be looking that far.
@@ -54,6 +61,10 @@ class DriverStyle:
     maximum_speed: float = 46.0
     #: How hard it steers per radian of error, and the most it will ask for.
     steering_gain: float = 1.8
+    #: How hard it pulls back to the centreline, in metres per second of
+    #: sideways speed per metre off it. Zero is pure pursuit, corner-cutting
+    #: and all.
+    tracking: float = 4.0
     #: Speed error, in m/s, at which it goes to full throttle or full brake.
     pedal_span: float = 6.0
 
@@ -76,7 +87,9 @@ class Autopilot:
         speed = float(car.speed())
         index, _ = self.course.nearest(position)
         aim = self._aim_point(index, speed)
-        steer = self._steer_towards(car, position, aim)
+        steer = self._steer_towards(car, position, aim) \
+            + self._back_to_the_line(car, position, index, speed)
+        steer = float(np.clip(steer, -1.0, 1.0))
         target = self.target_speed(index, speed)
         throttle, brake = self._pedals(speed, target)
         return throttle, brake, steer
@@ -108,6 +121,30 @@ class Autopilot:
         angle = math.atan2(float(np.cross(forward, to_aim)[1]),
                            float(np.dot(forward, to_aim)))
         return float(np.clip(angle * self.style.steering_gain, -1.0, 1.0))
+
+    def _back_to_the_line(self, car: Any, position: np.ndarray, index: int,
+                          speed: float) -> float:
+        """The correction for being off the centreline where the car is now.
+
+        ``atan2(k * error, speed)``: a heading that closes the error at
+        ``k`` metres per second sideways, which is a smaller angle the faster
+        the car is going. The classic cross-track term, and what stops pure
+        pursuit settling inside every bend.
+        """
+        if not self.style.tracking:
+            return 0.0
+        forward = np.asarray(car.forward(), dtype='d')
+        forward[1] = 0.0
+        if not np.any(forward):                          # pragma: no cover
+            return 0.0
+        forward /= np.linalg.norm(forward)
+        offset = position - self.course.point(index)
+        offset[1] = 0.0
+        # Positive to the car's left, which is the direction a positive steer
+        # turns towards -- so the correction is its negative.
+        sideways = float(np.cross(forward, offset)[1])
+        angle = math.atan2(-self.style.tracking * sideways, max(speed, 1.0))
+        return float(np.clip(angle, -1.0, 1.0))
 
     # -- pedals ----------------------------------------------------------------
 

@@ -1,4 +1,4 @@
-"""Timing a lap, and knowing when one has been cut.
+"""Timing a lap, knowing when one has been cut, and knowing when it is over.
 
 A lap is not "crossed the line": a car that reverses over the start line has
 not done a lap, and one that drives across the infield has not either. So the
@@ -15,8 +15,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from omi_physics.vehicle import Surface
 
-__all__ = ['Lap', 'RaceTiming']
+__all__ = ['Lap', 'RaceTiming', 'OffRoad', 'TARMAC', 'VERGE', 'ROUGH']
 
 #: How many sectors a circuit is divided into for the purpose of saying a lap
 #: was completed rather than cut. Enough that a shortcut across the middle
@@ -123,3 +124,91 @@ def off_course(course: Any, position: Any, tolerance: float = 12.0) -> bool:
     """
     _, distance = course.nearest(np.asarray(position, dtype='d'))
     return bool(distance > course.total_width / 2.0 + tolerance)
+
+
+#: What a car is on, on the road and off it. The verge is the strip either side
+#: of the carriageway -- gravel, then grass -- where a wheel loses most of its
+#: grip and picks up a great deal of drag. Past that is rough ground, and a car
+#: in it is not coming back out at speed.
+TARMAC = Surface()
+VERGE = Surface(grip=0.45, rolling=0.25)
+ROUGH = Surface(grip=0.30, rolling=0.55)
+
+#: How long a car may be off the carriageway before the run is over, in
+#: seconds. Long enough to slide a wheel wide and gather it up; short enough
+#: that driving across the infield is not a strategy.
+PATIENCE = 2.5
+
+#: How far off the carriageway is far enough that the run is over the moment it
+#: happens, as a multiple of the road's total width from the centreline. Down a
+#: bank and into the trees: there is no gathering that up.
+LOST = 2.0
+
+
+@dataclass
+class OffRoad:
+    """Whether the car is on the road, what it is driving on, and when to stop.
+
+    A forest road is as wide as it is and the forest starts at the verge, so
+    leaving it matters: a wheel on the grass loses most of its grip and picks up
+    drag, and a car that stays there is mired and the run is over. Feed it
+    :meth:`update` once a frame with where the car is; it answers the surface to
+    put under the wheels and, once, the reason the run ended.
+
+    It is deliberately about *where the car is* rather than about what it hit:
+    what stops a car leaving a forest road is the trees, and modelling every
+    trunk as a collider costs more than the answer is worth.
+    """
+
+    course: Any
+    patience: float = PATIENCE
+    lost: float = LOST
+    #: Whether the car is off the carriageway right now.
+    off: bool = False
+    #: How far off the centreline it is, in metres.
+    distance: float = 0.0
+    #: How long it has been off, in seconds; zero the moment it is back on.
+    time_off: float = 0.0
+    #: Set once the run is over, and the reason why.
+    ended: str | None = None
+
+    def update(self, position: Any, dt: float) -> str | None:
+        """Read where the car is; return the reason the run ended, once.
+
+        Returns the reason on the frame it ends and None on every other frame,
+        so a caller can act on it without keeping a flag of its own.
+        """
+        if self.ended is not None:
+            return None
+        _index, self.distance = self.course.nearest(
+            np.asarray(position, dtype='d'))
+        self.off = self.distance > self.course.carriageway_width / 2.0
+        if not self.off:
+            self.time_off = 0.0
+            return None
+        if self.distance > self.course.total_width * self.lost:
+            return self._over("off the road")
+        self.time_off += float(dt)
+        if self.time_off >= self.patience:
+            return self._over("mired off the road")
+        return None
+
+    def surface(self) -> Surface:
+        """What the wheels are on, from how far off the road the car is."""
+        if not self.off:
+            return TARMAC
+        beside = max(self.course.total_width - self.course.carriageway_width,
+                     1e-6) / 2.0
+        edge = self.course.carriageway_width / 2.0
+        return VERGE if self.distance <= edge + beside else ROUGH
+
+    def restart(self) -> None:
+        """The car has been put back on the grid: the run is on again."""
+        self.off = False
+        self.time_off = 0.0
+        self.distance = 0.0
+        self.ended = None
+
+    def _over(self, why: str) -> str:
+        self.ended = why
+        return why

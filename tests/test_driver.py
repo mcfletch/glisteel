@@ -264,3 +264,89 @@ class TestItGetsOverTheHills:
     def test_it_stays_on_the_road_over_them(self) -> None:
         _timing, worst = self._drive()
         assert worst < 18.0, "wandered %.1f m from the centreline" % worst
+
+
+class TestHoldingTheLine:
+    """Pure pursuit alone *cuts* a corner: aiming at a point L up the road on a
+    bend of radius R leaves the car about L squared over 2R inside the line, and
+    on a narrow road that is the width of the carriageway. So the driver also
+    corrects the error it can see under itself."""
+
+    def _lap(self, course, style=None, seconds=45.0):
+        world = PhysicsWorld()
+        static_ground(world, size=3000.0)
+        start, heading = course.grid_position(height=1.0)
+        car = Car(world, position=start, heading=heading)
+        pilot = Autopilot(course, style)
+        worst = 0.0
+        for step in range(int(seconds / STEP)):
+            car.control(*pilot.update(car))
+            car.update(STEP)
+            world.step(STEP)
+            if step * STEP > 3.0:                # once it is up to speed
+                worst = max(worst, course.nearest(car.position)[1])
+        return worst
+
+    def test_it_holds_a_narrow_lane_round_a_bend(self) -> None:
+        course = _oval(radius_x=200.0, radius_z=150.0)
+        assert self._lap(course) < 3.0
+
+    def test_correcting_the_error_is_what_does_it(self) -> None:
+        course = _oval(radius_x=200.0, radius_z=150.0)
+        loose = DriverStyle(tracking=0.0)
+        assert self._lap(course, loose) > self._lap(course)
+
+    def test_it_is_steady_on_a_straight(self) -> None:
+        """A correction hard enough to hold a bend must not saw at the wheel."""
+        course = _straight(points=400, spacing=5.0)
+        assert self._lap(course, seconds=25.0) < 1.0
+
+    def test_a_car_put_off_the_line_comes_back_to_it(self) -> None:
+        world = PhysicsWorld()
+        static_ground(world, size=3000.0)
+        course = _straight(points=400, spacing=5.0)
+        start, heading = course.grid_position(height=1.0)
+        car = Car(world, position=start + np.array([6.0, 0.0, 0.0]),
+                  heading=heading)
+        pilot = Autopilot(course)
+        for _ in range(int(12.0 / STEP)):
+            car.control(*pilot.update(car))
+            car.update(STEP)
+            world.step(STEP)
+        assert course.nearest(car.position)[1] < 2.0
+
+
+class TestTheCrossTrackTerm:
+    def test_a_car_to_the_left_of_the_line_steers_right(self) -> None:
+        course = _straight()
+        pilot = Autopilot(course)
+        left = _Car(position=(-4.0, 0.0, -50.0), forward=(0, 0, -1), speed=20.0)
+        assert pilot.update(left)[2] < 0.0
+
+    def test_a_car_to_the_right_of_the_line_steers_left(self) -> None:
+        course = _straight()
+        pilot = Autopilot(course)
+        right = _Car(position=(4.0, 0.0, -50.0), forward=(0, 0, -1), speed=20.0)
+        assert pilot.update(right)[2] > 0.0
+
+    def test_a_car_on_the_line_is_unmoved_by_it(self) -> None:
+        course = _straight()
+        pilot = Autopilot(course)
+        on = _Car(position=(0.0, 0.0, -50.0), forward=(0, 0, -1), speed=20.0)
+        assert pilot.update(on)[2] == pytest.approx(0.0, abs=1e-6)
+
+    def test_the_correction_softens_with_speed(self) -> None:
+        """The same metres off the line is a smaller angle the faster you are
+        going, or a correction that settles at 20 m/s oscillates at 50."""
+        course = _straight()
+        pilot = Autopilot(course, DriverStyle(steering_gain=0.0))
+        slow = _Car(position=(3.0, 0, -50.0), forward=(0, 0, -1), speed=10.0)
+        fast = _Car(position=(3.0, 0, -50.0), forward=(0, 0, -1), speed=45.0)
+        assert abs(pilot.update(slow)[2]) > abs(pilot.update(fast)[2])
+
+    def test_turning_it_off_leaves_pure_pursuit(self) -> None:
+        course = _straight()
+        off = Autopilot(course, DriverStyle(tracking=0.0))
+        beside = _Car(position=(4.0, 0.0, -50.0), forward=(0, 0, -1), speed=20.0)
+        assert off.update(beside)[2] == pytest.approx(
+            Autopilot(course, DriverStyle(tracking=0.0)).update(beside)[2])
