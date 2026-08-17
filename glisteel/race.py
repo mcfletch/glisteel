@@ -1,0 +1,125 @@
+"""Timing a lap, and knowing when one has been cut.
+
+A lap is not "crossed the line": a car that reverses over the start line has
+not done a lap, and one that drives across the infield has not either. So the
+circuit is divided into *sectors* and a lap counts only when the car has passed
+through all of them in order and come back to the first. That is the same rule
+a real timing loop uses, and it costs one integer of state.
+
+The circuit comes from the world (:class:`~glisteel.world.Course`), so nothing
+here knows or cares how the track was made.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+
+__all__ = ['Lap', 'RaceTiming']
+
+#: How many sectors a circuit is divided into for the purpose of saying a lap
+#: was completed rather than cut. Enough that a shortcut across the middle
+#: misses one; few enough that a car briefly off the road does not.
+SECTORS = 8
+
+
+@dataclass
+class Lap:
+    """One completed lap: how long it took, and when."""
+
+    number: int
+    seconds: float
+
+    def clock(self) -> str:
+        """The time as a driver reads it: ``m:ss.mmm``."""
+        minutes, seconds = divmod(self.seconds, 60.0)
+        return "%d:%06.3f" % (int(minutes), seconds)
+
+
+@dataclass
+class RaceTiming:
+    """Laps, sectors and the clock, driven by where the car is.
+
+    Feed it :meth:`update` once a frame. It answers :attr:`current`, the lap in
+    progress, :attr:`laps`, the ones completed, and :attr:`best`, the quickest.
+    A car that has not yet reached the far side of the circuit cannot complete a
+    lap by turning round at the line and coming back.
+    """
+
+    course: Any
+    sectors: int = SECTORS
+    laps: list[Lap] = field(default_factory=list)
+    #: Seconds since the current lap began.
+    current: float = 0.0
+    #: Which sectors have been visited this lap.
+    visited: set[int] = field(default_factory=set)
+    #: How far round the car is, 0 at the line and 1 back at it.
+    progress: float = 0.0
+    started: bool = False
+
+    def __post_init__(self) -> None:
+        self._last_sector: int | None = None
+
+    @property
+    def best(self) -> Lap | None:
+        """The quickest lap so far."""
+        return min(self.laps, default=None, key=lambda lap: lap.seconds)
+
+    @property
+    def last(self) -> Lap | None:
+        return self.laps[-1] if self.laps else None
+
+    def sector_of(self, position: Any) -> int:
+        """Which sector of the circuit a point is nearest."""
+        index, _ = self.course.nearest(position)
+        return int(index * self.sectors // len(self.course.centreline))
+
+    def update(self, position: Any, dt: float) -> Lap | None:
+        """Advance the clock; return a lap if one has just been completed."""
+        index, _ = self.course.nearest(position)
+        total = len(self.course.centreline)
+        self.progress = index / total
+        sector = int(index * self.sectors // total)
+
+        if not self.started or self._last_sector is None:
+            # The clock starts when the car first moves off the line, not when
+            # the world finishes loading.
+            self.started = True
+            self._last_sector = sector
+            self.visited = {sector}
+            return None
+
+        self.current += max(0.0, dt)
+        finished = None
+        if sector != self._last_sector:
+            forward = (sector - self._last_sector) % self.sectors == 1
+            if forward and sector == 0 and self._complete():
+                finished = Lap(number=len(self.laps) + 1, seconds=self.current)
+                self.laps.append(finished)
+                self.current = 0.0
+                self.visited = set()
+            self._last_sector = sector
+        self.visited.add(sector)
+        return finished
+
+    def _complete(self) -> bool:
+        """Whether every sector has been visited since the last line crossing."""
+        return len(self.visited) >= self.sectors
+
+    def restart(self) -> None:
+        """Abandon the lap in progress -- the car has been put back on the grid."""
+        self.current = 0.0
+        self.visited = set()
+        self.started = False
+        self._last_sector = None
+
+
+def off_course(course: Any, position: Any, tolerance: float = 12.0) -> bool:
+    """Whether a car has left the road by more than a car's width or two.
+
+    Not a penalty -- a car that has slid onto the verge is still racing. This is
+    what a "return to track" key asks before moving anything.
+    """
+    _, distance = course.nearest(np.asarray(position, dtype='d'))
+    return bool(distance > course.total_width / 2.0 + tolerance)

@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glisteel"
+dynamic = ["version"]
+description = "GLinting Steel: a racing game on OpenGLContext, driving a streamed 3D Tiles world"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["license.txt"]
+requires-python = ">=3.10"
+authors = [
+    { name = "Mike C. Fletcher", email = "mcfletch@vrplumber.com" }
+]
+keywords = ["game", "racing", "OpenGLContext", "OpenGL", "3D Tiles", "physics", "3D"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment :: Simulation",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+]
+
+# The engine renders and streams the world; omi_physics holds the car up. The
+# tools that *make* a world are not a dependency of driving one.
+dependencies = [
+    "OpenGLContext[glfw]>=3.0.0a1",
+    "omi_physics>=0.3.0",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+# Baking a world to drive, for a checkout with no world in it.
+bake = ["OpenGLContext-editor"]
+dev = ["glisteel[bake]", "pytest", "pytest-cov", "pytest-timeout", "ruff", "mypy"]
+
+[project.urls]
+Repository = "https://github.com/mcfletch/glisteel"
+
+[project.scripts]
+glisteel = "glisteel.game:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "glisteel.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["glisteel*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "B",    # flake8-bugbear
+    "I",    # import ordering
+    "UP",   # pyupgrade
+    "BLE",  # no blind except
+    "S110", # no silent try/except/pass
+]
+ignore = [
+    "E501",   # line too long -- kept readable by hand, as in the engine
+    "E741",   # ambiguous name -- x/y/z read naturally as coordinates
+    "UP031",  # percent formatting, as the engine uses throughout
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The entry module sets the OPENGLCONTEXT_* environment the engine reads at
+# import time, so its imports deliberately are not all at the top.
+"glisteel/game.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+timeout = 300
