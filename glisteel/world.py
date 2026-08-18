@@ -288,6 +288,23 @@ class RaceWorld:
             self.roads.append(RoadColliders(
                 self.physics, road.centreline, road.road_profile(),
                 closed=road.closed))
+        #: The obstacles: boulders and whatever else a world puts in the way.
+        #: The ones near the car are in the physics world; the rest are not.
+        from OpenGLContext.physics.props import PropColliders
+        self.props = PropColliders(self.physics, self._props())
+
+    def _props(self) -> list:
+        """The obstacles this world carries, read off the tileset.
+
+        Not off the tiles: tile geometry is level-of-detail geometry that
+        arrives and leaves as the car moves, and a collider built from it would
+        be a boulder the car drives through at the moment the tile behind it
+        swaps. The baker writes them into ``extras`` for exactly this.
+        """
+        from OpenGLContext.scenegraph.props import Prop
+        document = json.loads(fetch.read_bytes(self.path))
+        found = (document.get('extras') or {}).get('props') or []
+        return [Prop.from_json(one) for one in found]
 
     def _bores(self) -> Any:
         """Where the ground is not there, because a road runs inside it.
@@ -329,6 +346,7 @@ class RaceWorld:
             self.ground.update(camera)
         for road in self.roads:
             road.update(camera)
+        self.props.update(camera)
         return self.terrain.update_for_camera(
             camera, viewport_height, view_projection=view_projection)
 

@@ -97,6 +97,7 @@ class TestTheRoadsOwnSection:
 
     def test_it_is_read_out_of_a_baked_world(self, tmp_path) -> None:
         import json
+
         from glisteel.world import load_courses
         line = [[float(i) * 8.0, 0.0, 0.0] for i in range(20)]
         document = {'asset': {'version': '1.1'}, 'geometricError': 1.0,
@@ -161,3 +162,53 @@ class TestWhereTheGroundIsOpened:
         course = self._course()
         assert not course.inside('bridge', np.array([600.0]),
                                  np.array([0.0])).any()
+
+
+class TestTheObstaclesInAWorld:
+    """A boulder on the verge is a thing to hit, and a thing to hit has to be
+    there whether or not the tile it is drawn in happens to be loaded. So the
+    props travel in the tileset's extras and the world stands them up itself,
+    the same way it does the road."""
+
+    def test_a_world_reads_the_props_it_carries(self, tmp_path) -> None:
+        assert len(_race(_world_with_props(tmp_path)).props.props) == 2
+
+    def test_a_world_with_none_is_not_an_error(self, tmp_path) -> None:
+        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+        assert _race(build_sample_tileset(str(tmp_path))).props.props == []
+
+    def test_they_are_not_in_the_physics_world_until_it_streams(self, tmp_path) -> None:
+        world = _race(_world_with_props(tmp_path))
+        assert world.props.standing == []
+
+    def test_streaming_near_one_stands_it_up(self, tmp_path) -> None:
+        world = _race(_world_with_props(tmp_path))
+        world.stream((0.0, 2.0, 0.0), 1080.0)
+        assert [one.kind for one in world.props.standing] == ['rock']
+
+    def test_streaming_away_takes_it_down(self, tmp_path) -> None:
+        world = _race(_world_with_props(tmp_path))
+        world.stream((0.0, 2.0, 0.0), 1080.0)
+        world.stream((4000.0, 2.0, 4000.0), 1080.0)
+        assert world.props.standing == []
+
+
+def _race(path):
+    """A race world on a tileset, torn down by the test that made it."""
+    from glisteel.world import RaceWorld
+    return RaceWorld(path)
+
+
+def _world_with_props(directory):
+    """A sample tileset with two boulders written into its extras."""
+    import json
+
+    from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+    path = build_sample_tileset(str(directory))
+    document = json.load(open(path))
+    document.setdefault('extras', {})['props'] = [
+        {'kind': 'rock', 'at': [0.0, 0.0, 6.0], 'radius': 1.0, 'height': 1.5},
+        {'kind': 'boulder', 'at': [900.0, 0.0, 900.0], 'radius': 2.0,
+         'height': 3.0}]
+    json.dump(document, open(path, 'w'))
+    return path

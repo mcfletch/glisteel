@@ -66,6 +66,17 @@ is a wall in the middle of an open road. So the carriageway is swept from the
 centreline and the ground is cut from the landscape's own height field, each in
 chunks held near the car. Nothing streams underneath it.
 
+**The road warns you.** A generated road knows its own curvature, its own grade
+and where its tunnels are, so the signs beside it are worked out from the
+alignment rather than placed by hand: a bend tighter than the design speed
+allows, a dip, a crest, a bore ahead. Each stands a stopping distance before
+what it is about.
+
+**And there are things to hit.** Boulders lie on the verges and in the trees
+either side, close enough that a car leaving the road meets one. They come out
+of the tileset rather than out of the tiles, so a rock is solid whether or not
+the tile it is drawn in happens to be loaded.
+
 **Leaving the road ends the run.** A forest road is as wide as it is and the
 forest starts at the verge. A wheel on the grass loses most of its grip and picks
 up drag; a car that stays off for a couple of seconds is mired, and one that goes
