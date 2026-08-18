@@ -83,6 +83,11 @@ forest starts at the verge. A wheel on the grass loses most of its grip and pick
 up drag; a car that stays off for a couple of seconds is mired, and one that goes
 a long way off is gone. `r` puts it back on the grid.
 
+**The lap has a line.** A chequered banner on a beam spans the road where the
+lap begins and ends, with a chequered line painted across the tarmac under it,
+so the timer turning over is something a driver saw coming. Its two legs are
+solid: clip one and the run ends the way hitting anything else does.
+
 **There is a map.** The whole circuit, bottom left, with the car on it and the
 traffic marked, so a driver knows what is round the next bend and how much of
 the lap is left.
