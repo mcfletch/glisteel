@@ -415,3 +415,49 @@ def _along(course, index):
     ahead = course.point(index + 1) - course.point(index)
     ahead[1] = 0.0
     return ahead / np.linalg.norm(ahead)
+
+
+class TestDrivingBehindSomething:
+    """An autopilot that knows the corners and not the traffic drives into the
+    back of the first car it catches. What it needs is the same rule the traffic
+    uses on itself: the speed it could still stop from in the room it has."""
+
+    def _course(self, count=241, radius=300.0):
+        from glisteel.world import Course
+        angle = np.linspace(0.0, 2.0 * np.pi, count)
+        line = np.stack([np.cos(angle) * radius, np.zeros(count),
+                         np.sin(angle) * radius], axis=-1)
+        steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
+        return Course(name='ring', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True, length=float(steps.sum()))
+
+    def test_an_open_road_is_the_speed_the_corner_allows(self) -> None:
+        driver = Autopilot(self._course())
+        alone = driver.target_speed(10, 30.0)
+        driver.following(gap=None, speed=0.0)
+        assert driver.target_speed(10, 30.0) == pytest.approx(alone)
+
+    def test_something_far_ahead_changes_nothing(self) -> None:
+        driver = Autopilot(self._course())
+        alone = driver.target_speed(10, 30.0)
+        driver.following(gap=250.0, speed=28.0)
+        assert driver.target_speed(10, 30.0) == pytest.approx(alone)
+
+    def test_something_slower_close_ahead_holds_it_back(self) -> None:
+        driver = Autopilot(self._course())
+        alone = driver.target_speed(10, 30.0)
+        driver.following(gap=25.0, speed=12.0)
+        assert driver.target_speed(10, 30.0) < alone
+
+    def test_something_stopped_in_the_way_stops_it(self) -> None:
+        driver = Autopilot(self._course())
+        driver.following(gap=5.0, speed=0.0)
+        assert driver.target_speed(10, 30.0) == pytest.approx(0.0, abs=0.5)
+
+    def test_and_it_brakes_for_it(self) -> None:
+        course = self._course()
+        driver = Autopilot(course)
+        driver.following(gap=8.0, speed=0.0)
+        car = _Car(position=course.point(10), forward=(0, 0, -1), speed=30.0)
+        _throttle, brake, _steer = driver.update(car)
+        assert brake > 0.5

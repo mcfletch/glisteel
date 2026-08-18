@@ -67,6 +67,12 @@ class DriverStyle:
     tracking: float = 4.0
     #: Speed error, in m/s, at which it goes to full throttle or full brake.
     pedal_span: float = 6.0
+    #: How close this driver will get to whatever is in front, in metres, and
+    #: how hard it believes it can brake, in metres per second squared. The two
+    #: together are the following rule: the speed it could still stop from in
+    #: the room it has.
+    standing_gap: float = 7.0
+    braking: float = 6.0
 
 
 class Autopilot:
@@ -86,6 +92,14 @@ class Autopilot:
         #: wants; on a road with something coming the other way it is the
         #: middle of its own half, and the driver keeps a side.
         self.lane = float(lane)
+        #: What is in front in this lane, as (gap in metres, its speed), or
+        #: None for an open road. A driver who knows the corners and not the
+        #: traffic drives into the back of the first car it catches.
+        self.ahead: tuple[float, float] | None = None
+
+    def following(self, gap: float | None, speed: float = 0.0) -> None:
+        """Say what is in front: how far, and how fast it is going."""
+        self.ahead = None if gap is None else (float(gap), float(speed))
 
     def line_at(self, index: int) -> np.ndarray:
         """The point of the line this driver is following, there."""
@@ -164,12 +178,28 @@ class Autopilot:
 
         The tightest bend within braking distance decides it: a straight into a
         hairpin has to be slowed *on the straight*, so the limit is the minimum
-        over what is coming rather than what is underfoot.
+        over what is coming rather than what is underfoot. Whatever is in front
+        of the car holds it back as well -- see :meth:`following`.
         """
         reach = BRAKING_METRES + speed * BRAKING_SECONDS
         ahead = max(2, self._points_for(reach))
         limits = [self._corner_speed(index + step) for step in range(ahead)]
-        return min(min(limits), self.style.maximum_speed) * self.style.margin
+        wanted = min(min(limits), self.style.maximum_speed) * self.style.margin
+        return min(wanted, self._room())
+
+    def _room(self) -> float:
+        """The fastest this driver may go for whatever is in front of it.
+
+        ``v = sqrt(2 a s)`` in the room it has, plus whatever the car ahead is
+        doing: the braking distance read backwards. The same rule the traffic
+        uses on itself, so a queue behaves the same way whoever is in it.
+        """
+        if self.ahead is None:
+            return self.style.maximum_speed
+        gap, speed = self.ahead
+        room = max(gap - self.style.standing_gap, 0.0)
+        return float(max(speed, 0.0)
+                     + math.sqrt(2.0 * self.style.braking * room))
 
     def _corner_speed(self, index: int) -> float:
         """The speed a bend of the road's own radius allows."""

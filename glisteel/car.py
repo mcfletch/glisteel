@@ -55,7 +55,16 @@ class CarSpec:
     tuning: VehicleTuning = field(default_factory=lambda: VehicleTuning(
         engine_force=9000.0, brake_force=16000.0, maximum_steer=0.52,
         steer_speed=3.2, rolling_resistance=0.02, downforce=6.0,
-        steer_falloff_speed=26.0))
+        steer_falloff_speed=26.0,
+        # An electric drivetrain: all of it from a standstill, and constant
+        # power from fifteen metres a second on, so the pull falls away as the
+        # speed rises instead of shoving just as hard at a hundred and sixty.
+        base_speed=15.0,
+        # The air, and what actually decides how fast this car will go. Higher
+        # than a coupe's own drag, which is the honest way to say that the top
+        # speed is chosen -- a little under two hundred, which is what a forest
+        # road with hundred-and-eighty-metre corners is worth driving at.
+        drag=0.9))
 
     def wheels(self) -> list[Any]:
         """The four wheels, rear-driven, front-steered."""
@@ -114,6 +123,17 @@ class Car:
 
     def speed_kph(self) -> float:
         return self.vehicle.speed() * 3.6
+
+    def velocity(self) -> np.ndarray:
+        """How fast it is going and which way, in metres per second.
+
+        What deciding a crash needs: the severity of one is the relative
+        velocity along the line between the two, and a scalar speed cannot say
+        whether the other car is coming or going.
+        """
+        found: np.ndarray = np.asarray(
+            self.world.linear_velocity[self.body], dtype='d')
+        return found
 
     def forward(self) -> np.ndarray:
         return self.vehicle.forward()

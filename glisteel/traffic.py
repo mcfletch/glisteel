@@ -66,6 +66,11 @@ HEADWAY = 45.0
 #: is going.
 STANDING_GAP = 6.5
 
+#: How wide "in the way" is, in metres: about a car and a half, so something in
+#: the other lane is not something you are about to hit. A loose answer here
+#: makes every car coming the other way a crash and the road impassable.
+IN_THE_WAY = 2.8
+
 #: How far ahead a driver looks for something in its own lane, in metres. Long
 #: enough to cover stopping from the limit with room over: a window shorter than
 #: the braking distance is a car that notices the queue too late to join it.
@@ -180,6 +185,10 @@ class TrafficCar:
         centre, right = self._frame()
         out = self.lane * self.heading + self._sideways * self.heading
         return centre + right * out
+
+    def velocity(self) -> np.ndarray:
+        """How fast it is going and which way, in metres per second."""
+        return self.forward() * self.speed
 
     def forward(self) -> np.ndarray:
         """Which way it is pointing, as a unit vector."""
@@ -388,12 +397,14 @@ class Traffic:
         at[1] += BODY_HEIGHT / 2.0 + 0.33
         return at
 
-    def ahead_of(self, position: Any, forward: Any,
-                 reach: float = REACH) -> list[TrafficCar]:
+    def ahead_of(self, position: Any, forward: Any, reach: float = REACH,
+                 width: float = IN_THE_WAY) -> list[TrafficCar]:
         """The cars in front of something looking that way, nearest first.
 
         What an autopilot or a driving aid asks: not "what is near" but "what am
-        I about to arrive at".
+        I about to arrive at". ``width`` is how far to either side still counts
+        -- a car's width by default, so the other lane does not; a driver
+        deciding whether it has room to swerve asks for the whole road.
         """
         at = np.asarray(position, dtype='d').reshape(-1)[:3]
         way = np.asarray(forward, dtype='d').reshape(-1)[:3]
@@ -405,7 +416,8 @@ class Traffic:
         for car in self.cars:
             offset = car.position() - at
             along = float(np.dot(offset, way))
-            if 0.0 < along <= reach and float(np.linalg.norm(offset - way * along)) < 12.0:
+            aside = float(np.linalg.norm(offset - way * along))
+            if 0.0 < along <= reach and aside < width:
                 found.append((along, car))
         return [car for _along, car in sorted(found, key=lambda one: one[0])]
 

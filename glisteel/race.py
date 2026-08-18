@@ -246,3 +246,20 @@ class Collisions:
     def restart(self) -> None:
         """Back on the grid: nothing has happened yet."""
         self.ended = None
+
+
+def closing_speed(mine: Any, theirs: Any, offset: Any) -> float:
+    """How fast two things are coming together, in metres per second.
+
+    The relative velocity along the line between them, which is the number a
+    crash's severity is about. Taken as a difference of speeds instead, two cars
+    meeting head-on at thirty read as closing at nothing, and one being overtaken
+    reads as a crash.
+    """
+    between = np.asarray(offset, dtype='d').reshape(-1)[:3]
+    length = float(np.linalg.norm(between))
+    if length < 1e-9:
+        return 0.0
+    return float(np.dot(np.asarray(mine, dtype='d').reshape(-1)[:3]
+                        - np.asarray(theirs, dtype='d').reshape(-1)[:3],
+                        between / length))

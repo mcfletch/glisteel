@@ -23,6 +23,7 @@ and through a bore where it does not. The second drives it.
 | `down` / `s` | brake, and reverse once stopped |
 | `left` `right` / `a` `d` | steer |
 | `space` | handbrake |
+| mouse | steer, with `--mouse` |
 | `c` | cockpit / chase / bonnet camera |
 | `r` | put the car back on the track |
 | `F2` | screenshot |
@@ -81,6 +82,24 @@ the tile it is drawn in happens to be loaded.
 forest starts at the verge. A wheel on the grass loses most of its grip and picks
 up drag; a car that stays off for a couple of seconds is mired, and one that goes
 a long way off is gone. `r` puts it back on the grid.
+
+**`--traffic 8` puts other people on the road.** They drive at the limit in
+both directions, keep their own side, and decide for themselves: a car brakes
+for something its driver can see and you cannot, or pulls off the road
+altogether. None of them will drive through the car in front, and that includes
+yours -- a car on the grid is a car in the road. They are placed and driven by
+distance along the course rather than simulated as vehicles, which is why there
+can be eight of them for nothing measurable.
+
+**`--mouse` steers with the pointer.** Where it is across the window is where
+the wheel is, the way mouse-look turns a head; the keys still work and override.
+A keyboard gives three states and no amount of tuning makes that feel like a
+car.
+
+**The drivetrain is electric.** All of the force from a standstill and constant
+*power* from fifteen metres a second on, so the pull falls away as the speed
+rises rather than shoving as hard at a hundred and sixty as at thirty. What
+decides the top speed is the air: about a hundred and ninety.
 
 **The car is a rigid body on four spring-loaded rays** — `omi_physics`'
 `RaycastVehicle`. There are no wheels in the simulation: each is a ray cast

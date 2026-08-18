@@ -364,3 +364,59 @@ def _drawn(node) -> bool:
         if isinstance(child, Switch):
             return bool(child.renderedChildren())
     return bool(node.children)          # pragma: no cover - the shell is a Switch
+
+
+class TestHowItAccelerates:
+    """A constant force at every speed is not what any drivetrain gives, and
+    nothing pushing back is not what any road does. What a motor gives is
+    constant torque to a base speed and constant power above it; what decides
+    how fast a car will actually go is the air."""
+
+    def test_the_pull_falls_away_with_speed(self) -> None:
+        tuning = CarSpec().tuning
+        assert tuning.drive_force(50.0) < tuning.drive_force(5.0) * 0.6
+
+    def test_and_something_pushes_back(self) -> None:
+        assert CarSpec().tuning.drag > 0.0
+
+    def test_it_still_gets_off_the_line(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        _drive(floor, car, 4.0, throttle=1.0)
+        assert car.speed() > 15.0
+
+    def test_and_reaches_a_road_speed(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        _drive(floor, car, 30.0, throttle=1.0)
+        assert 35.0 < car.speed() < 70.0
+
+    def test_and_stops_there_rather_than_creeping_up(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        _drive(floor, car, 30.0, throttle=1.0)
+        settled = car.speed()
+        _drive(floor, car, 8.0, throttle=1.0)
+        assert abs(car.speed() - settled) < 2.0
+
+    def test_lifting_off_slows_it(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        _drive(floor, car, 14.0, throttle=1.0)
+        rolling = car.speed()
+        _drive(floor, car, 6.0, throttle=0.0)
+        assert car.speed() < rolling - 1.5
+
+
+class TestWhichWayItIsGoing:
+    def test_a_standing_car_is_going_nowhere(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        _drive(floor, car, 1.0)
+        assert float(np.linalg.norm(car.velocity())) < 1.0
+
+    def test_a_driven_one_is_going_the_way_it_points(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        _drive(floor, car, 4.0, throttle=1.0)
+        assert float(np.dot(car.velocity(), car.forward())) > 8.0
+
+    def test_and_its_length_is_its_speed(self, floor) -> None:
+        car = Car(floor, position=(0, 1.0, 0))
+        _drive(floor, car, 4.0, throttle=1.0)
+        assert float(np.linalg.norm(car.velocity())) \
+            == pytest.approx(car.speed(), rel=0.15)

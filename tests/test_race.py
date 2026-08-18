@@ -297,3 +297,33 @@ class TestHittingSomething:
     def test_a_caller_may_set_where_the_line_is(self) -> None:
         watch = self._watch(survivable=40.0)
         assert watch.update(closing=28.0, dt=0.1) is None
+
+
+class TestHowFastTwoCarsAreClosing:
+    """Head-on, the closing speed is the *sum*: two cars at thirty are meeting
+    at sixty. Taken as the difference it is nothing at all, which is how a car
+    passing the other way reads as a gentle touch and a real head-on reads as
+    nothing."""
+
+    def _closing(self, mine, theirs, offset):
+        from glisteel.race import closing_speed
+        return closing_speed(np.asarray(mine, 'd'), np.asarray(theirs, 'd'),
+                             np.asarray(offset, 'd'))
+
+    def test_catching_something_slower_closes_at_the_difference(self) -> None:
+        assert self._closing((0, 0, -30), (0, 0, -12), (0, 0, -20)) \
+            == pytest.approx(18.0)
+
+    def test_meeting_something_head_on_closes_at_the_sum(self) -> None:
+        assert self._closing((0, 0, -30), (0, 0, 30), (0, 0, -20)) \
+            == pytest.approx(60.0)
+
+    def test_something_pulling_away_is_not_closing_at_all(self) -> None:
+        assert self._closing((0, 0, -12), (0, 0, -30), (0, 0, -20)) < 0.0
+
+    def test_something_alongside_at_the_same_speed_is_not_either(self) -> None:
+        assert self._closing((0, 0, -30), (0, 0, -30), (3.0, 0, 0)) \
+            == pytest.approx(0.0)
+
+    def test_two_cars_at_the_same_place_is_not_a_division(self) -> None:
+        assert self._closing((0, 0, -30), (0, 0, 30), (0, 0, 0)) == 0.0

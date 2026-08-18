@@ -9,6 +9,7 @@ Keys::
     down / s            brake, and reverse once stopped
     left / right, a / d steer
     space               handbrake
+    mouse               steer, with --mouse
     c                   cockpit / chase / bonnet camera
     r                   put the car back on the track
     F2                  save a screenshot
@@ -46,8 +47,10 @@ from glisteel.race import (  # noqa: E402
     Collisions,
     OffRoad,
     RaceTiming,
+    closing_speed,
     off_course,
 )
+from glisteel.steering import MouseWheel  # noqa: E402
 from glisteel.world import RaceWorld  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -57,6 +60,9 @@ BaseContext: Any = testingcontext.getInteractive()
 #: springs is stiff, and integrating it at whatever the display manages makes
 #: the car bounce on a fast machine and sink through the road on a slow one.
 PHYSICS_STEP = 1.0 / 120.0
+
+#: How far up the road a driver looks for something to run into, in metres.
+AHEAD_REACH = 140.0
 
 #: The most simulation one frame may catch up on. Past this the game runs slow
 #: rather than spiralling: a frame that tries to make up a lost second takes
@@ -102,6 +108,8 @@ class GlisteelContext(OverlayMixin, BaseContext):
     timing: RaceTiming | None = None
     watch: OffRoad | None = None
     crashes: Collisions | None = None
+    #: The wheel, when the player is steering with the pointer.
+    wheel: MouseWheel | None = None
     hud: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
@@ -178,6 +186,9 @@ class GlisteelContext(OverlayMixin, BaseContext):
                 for state in (1, 0):
                     self.addEventHandler('keyboard', name=name, state=state,
                                          function=self._on_key)
+        if getattr(self.config, 'mouse', False):
+            self.wheel = MouseWheel()
+            self.addEventHandler('mousemove', function=self._on_pointer)
         self.addEventHandler('keypress', name='c', function=self._on_camera)
         self.addEventHandler('keypress', name='r', function=self._on_reset)
 
@@ -192,6 +203,14 @@ class GlisteelContext(OverlayMixin, BaseContext):
         else:
             self.held.discard(name)
         self.triggerRedraw(1)
+
+    def _on_pointer(self, event: Any) -> None:   # pragma: no cover - needs a window
+        """The pointer moved: the wheel is where it is across the window."""
+        if self.wheel is None:
+            return
+        width, _height = self.getViewPort()
+        self.wheel.resize(int(width or self.wheel.width))
+        self.wheel.moved(int(event.getPickPoint()[0]))
 
     def _on_camera(self, event: Any) -> None:    # pragma: no cover - needs a window
         self.camera.cycle()
@@ -220,6 +239,10 @@ class GlisteelContext(OverlayMixin, BaseContext):
             brake = 1.0
         steer = (1.0 if self._held('left') else 0.0) - \
             (1.0 if self._held('right') else 0.0)
+        if self.wheel is not None and not steer:
+            # The keys still work, and override: a driver reaching for one has
+            # decided the pointer is not where they want the wheel.
+            steer = self.wheel.position
         return throttle, brake, steer
 
     def controls(self) -> tuple[float, float, float]:
@@ -227,6 +250,24 @@ class GlisteelContext(OverlayMixin, BaseContext):
         if self.autopilot is not None and self.car is not None:
             return self.autopilot.update(self.car)
         return self.driver_input()
+
+    def _watch_the_road_ahead(self) -> None:     # pragma: no cover - needs a window
+        """Tell the autopilot what is in front of it.
+
+        A driver who knows the corners and not the traffic drives into the back
+        of the first car it catches.
+        """
+        if self.autopilot is None or self.world.traffic is None:
+            return
+        ahead = self.world.traffic.ahead_of(
+            self.car.position, self.car.forward(), reach=AHEAD_REACH)
+        if not ahead:
+            self.autopilot.following(None)
+            return
+        first = ahead[0]
+        offset = first.position() - self.car.position
+        gap = float(sum(float(v) * float(v) for v in offset) ** 0.5)
+        self.autopilot.following(gap, first.speed)
 
     def return_to_track(self) -> None:           # pragma: no cover - needs a window
         """Put the car back on the road, facing the right way, stopped."""
@@ -273,7 +314,9 @@ class GlisteelContext(OverlayMixin, BaseContext):
             self._accumulated -= PHYSICS_STEP
         self.car.follow(elapsed)
         if self.world.traffic is not None and not self._over():
-            self.world.traffic.update(self.car.position, elapsed)
+            self.world.traffic.update(self.car.position, elapsed,
+                                      speed=self.car.speed())
+            self._watch_the_road_ahead()
             self._watch_for_a_crash(elapsed)
         self._recover_if_stuck(elapsed)
         pose = self.camera.update(self.car, elapsed)
@@ -332,7 +375,9 @@ class GlisteelContext(OverlayMixin, BaseContext):
                                             self.car.forward(), reach=6.0)
         if not ahead:
             return
-        closing = float(self.car.speed()) - float(ahead[0].speed)
+        other = ahead[0]
+        closing = closing_speed(self.car.velocity(), other.velocity(),
+                                other.position() - self.car.position)
         self.crashes.update(max(closing, 0.0), dt)
 
     def _ended(self) -> str | None:              # pragma: no cover - needs a window
@@ -432,9 +477,13 @@ def build_parser() -> argparse.ArgumentParser:
                              'sharper and slower (default: %(default)s)')
     parser.add_argument('--hud', action=argparse.BooleanOptionalAction,
                         default=True, help='draw the speed and lap readouts')
-    parser.add_argument('--traffic', type=int, default=8, metavar='CARS',
-                        help='how many other cars are on the road at once '
-                             '(0 for an empty circuit)')
+    parser.add_argument('--mouse', action='store_true',
+                        help='steer with the pointer: where it is across the '
+                             'window is where the wheel is')
+    parser.add_argument('--traffic', type=int, default=0, metavar='CARS',
+                        help='how many other cars are on the road at once; '
+                             'the default is an empty circuit, which is what a '
+                             'timed lap is')
     parser.add_argument('--autopilot', action='store_true',
                         help='let the car drive itself round the circuit')
     parser.add_argument('--size', default='1280x720', metavar='WxH',

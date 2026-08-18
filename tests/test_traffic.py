@@ -405,3 +405,56 @@ class TestNotDrivingIntoTheCarInFront:
                 closest = min(closest,
                               float(np.linalg.norm(car.position() - at)))
         assert closest > 3.0
+
+
+class TestWhatIsActuallyInTheWay:
+    """A car in the other lane is not in your way, and a car coming the other
+    way is not closing on you at the difference of your speeds. Both of those
+    read as a crash if the question is asked loosely enough, and a road you
+    cannot pass anybody on is not a road."""
+
+    def _straight(self):
+        course = _course(length=2000.0, count=201)
+        traffic = Traffic(course=course, count=0, seed=1)
+        return course, traffic
+
+    def test_something_in_the_other_lane_is_not_ahead(self) -> None:
+        course, traffic = self._straight()
+        traffic.cars = [TrafficCar(course=course, station=140.0, heading=-1,
+                                   limit=LIMIT)]
+        at = course.lane_point(10, course.driving_lane)
+        assert traffic.ahead_of(at, np.array([0.0, 0.0, 1.0]),
+                                reach=200.0) == []
+
+    def test_something_in_this_one_is(self) -> None:
+        course, traffic = self._straight()
+        traffic.cars = [TrafficCar(course=course, station=140.0, heading=1,
+                                   limit=LIMIT)]
+        at = course.lane_point(10, course.driving_lane)
+        assert len(traffic.ahead_of(at, np.array([0.0, 0.0, 1.0]),
+                                    reach=200.0)) == 1
+
+    def test_a_wider_question_finds_both(self) -> None:
+        """A driver deciding whether it can swerve wants the whole road."""
+        course, traffic = self._straight()
+        traffic.cars = [
+            TrafficCar(course=course, station=140.0, heading=-1, limit=LIMIT),
+            TrafficCar(course=course, station=160.0, heading=1, limit=LIMIT)]
+        at = course.lane_point(10, course.driving_lane)
+        assert len(traffic.ahead_of(at, np.array([0.0, 0.0, 1.0]), reach=200.0,
+                                    width=8.0)) == 2
+
+    def test_a_car_knows_how_fast_it_is_travelling_and_where(self) -> None:
+        course, _traffic = self._straight()
+        car = TrafficCar(course=course, station=100.0, heading=1, limit=LIMIT,
+                         speed=20.0)
+        assert float(np.linalg.norm(car.velocity())) == pytest.approx(20.0)
+        assert float(np.dot(car.velocity(), car.forward())) > 0.0
+
+    def test_and_one_going_the_other_way_travels_the_other_way(self) -> None:
+        course, _traffic = self._straight()
+        along = TrafficCar(course=course, station=100.0, heading=1,
+                           limit=LIMIT, speed=20.0)
+        against = TrafficCar(course=course, station=100.0, heading=-1,
+                             limit=LIMIT, speed=20.0)
+        assert float(np.dot(along.velocity(), against.velocity())) < 0.0
