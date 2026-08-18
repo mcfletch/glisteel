@@ -83,6 +83,10 @@ forest starts at the verge. A wheel on the grass loses most of its grip and pick
 up drag; a car that stays off for a couple of seconds is mired, and one that goes
 a long way off is gone. `r` puts it back on the grid.
 
+**There is a map.** The whole circuit, bottom left, with the car on it and the
+traffic marked, so a driver knows what is round the next bend and how much of
+the lap is left.
+
 **`--traffic 8` puts other people on the road.** They drive at the limit in
 both directions, keep their own side, and decide for themselves: a car brakes
 for something its driver can see and you cannot, or pulls off the road

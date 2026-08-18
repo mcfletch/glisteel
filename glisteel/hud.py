@@ -1,16 +1,23 @@
 """What the driver is told, and where on the screen it goes.
 
-Four readouts and nothing else. A racing HUD earns its space: the speed,
-because it is the one number a driver acts on; the lap clock, because that is
-what the lap is for; the last and best laps, because a lap is only meaningful
-against another one; and a warning when the car is off the road, because at
-speed that is not always obvious from the picture.
+Four readouts and a map, and nothing else. A racing HUD earns its space: the
+speed, because it is the one number a driver acts on; the lap clock, because
+that is what the lap is for; the last and best laps, because a lap is only
+meaningful against another one; a warning when the car is off the road, because
+at speed that is not always obvious from the picture; and the map, because a
+driver on an eight-kilometre circuit cannot see round the next bend and has no
+idea how much of the lap is left.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from OpenGLContext.ui.hudwidgets import HUDGroup, HUDLayer, Readout
+from OpenGLContext.ui.hudwidgets import (
+    HUDGroup,
+    HUDLayer,
+    MiniMap,
+    Readout,
+)
 
 __all__ = ['RaceHUD']
 
@@ -29,18 +36,27 @@ class RaceHUD(HUDLayer):
         self.best = Readout(label='BEST', value='--:--.---')
         self.last = Readout(label='LAST', value='--:--.---')
         self.warning = Readout(anchor='center', align='center', value='')
+        self.map = MiniMap(anchor='bottom-left')
         # The three clocks are one block in the corner: anchored separately they
         # would each take the same corner and be drawn on top of one another.
         self.times = HUDGroup(anchor='top-left',
                               children=[self.lap, self.last, self.best])
-        self.children = [self.times, self.speed, self.warning]
+        self.children = [self.times, self.speed, self.warning, self.map]
+
+    def route(self, course: Any) -> None:
+        """The circuit the map draws. Set once; a world's shape does not change."""
+        self.map.route = None if course is None else course.centreline
+        self.map.closed = bool(course is not None and course.closed)
 
     def show(self, speed_kph: float, timing: Any = None,
-             off: bool = False, ended: str | None = None) -> None:
+             off: bool = False, ended: str | None = None,
+             at: Any = None, others: Any = ()) -> None:
         """Put this frame's numbers on the readouts.
 
         ``ended`` is the reason the run is over, and displaces the off-track
         warning: once a car is mired there is nothing left to warn about.
+        ``at`` is where the car is and ``others`` where anything else worth
+        marking is, both for the map.
         """
         self.speed.value = '%3.0f' % max(0.0, speed_kph)
         self.speed.critical = bool(speed_kph >= FAST_KPH)
@@ -54,6 +70,10 @@ class RaceHUD(HUDLayer):
         else:
             self.warning.value = 'OFF TRACK' if off else ''
         self.warning.critical = bool(ended or off)
+        marks = [(float(one[0]), float(one[2]), 'hudText') for one in others]
+        if at is not None:
+            marks.append((float(at[0]), float(at[2]), 'crosshair'))
+        self.map.marks = marks
 
 
 def _clock(seconds: float) -> str:

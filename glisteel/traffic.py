@@ -199,9 +199,16 @@ class TrafficCar:
         return along * self.heading
 
     def heading_angle(self) -> float:
-        """Its yaw in radians, for a node that wants an angle."""
+        """The yaw that turns the car's own mesh to face the way it is going.
+
+        The mesh's nose is down -Z, and a yaw of ``t`` about the vertical sends
+        that to ``(-sin t, 0, -cos t)`` -- so the angle is read off the
+        *negated* direction. Taken from the direction itself the car is
+        sideways across the road on every axis but one, which is exactly the
+        sort of thing one road running the other way finds.
+        """
         forward = self.forward()
-        return math.atan2(float(forward[0]), -float(forward[2]))
+        return math.atan2(-float(forward[0]), -float(forward[2]))
 
     def _decide(self, dt: float) -> None:
         """Whether this driver does something, and what."""
@@ -261,8 +268,9 @@ class Traffic:
         self.limit = float(limit) if limit is not None else _limit(course)
         self.seed = int(seed)
         self.physics = physics
-        #: The ground a car sits on, ``ground(x, z) -> height``; without it a
-        #: car rides the centreline's own height, which is the road's.
+        #: The ground a car sits on, ``ground(position) -> height or None``;
+        #: without it a car rides the centreline's own height, which is the
+        #: road's -- right wherever the road is on the ground.
         self.ground = ground
         #: Every car on the road right now.
         self.cars: list[TrafficCar] = []
@@ -391,9 +399,9 @@ class Traffic:
         from glisteel.car import BODY_HEIGHT
         at = np.asarray(car.position(), dtype='d').copy()
         if self.ground is not None:
-            found = self.ground(at[0], at[2])
+            found = self.ground(at)
             if found is not None:
-                at[1] = float(np.asarray(found).ravel()[0])
+                at[1] = float(found)
         at[1] += BODY_HEIGHT / 2.0 + 0.33
         return at
 

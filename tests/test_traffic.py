@@ -458,3 +458,80 @@ class TestWhatIsActuallyInTheWay:
         against = TrafficCar(course=course, station=100.0, heading=-1,
                              limit=LIMIT, speed=20.0)
         assert float(np.dot(along.velocity(), against.velocity())) < 0.0
+
+
+class TestWhichWayACarIsPointing:
+    """The mesh's nose is down -Z, so the yaw that turns it to face a direction
+    is not the same as the yaw a heading is quoted in. Get it wrong and every
+    car on the road is sideways across it."""
+
+    def test_a_car_going_down_the_road_points_down_it(self) -> None:
+        course = _course(length=1000.0, count=101)   # runs towards +Z
+        car = TrafficCar(course=course, station=100.0, heading=1, limit=LIMIT)
+        assert _pointing(car.heading_angle()) == pytest.approx(
+            tuple(car.forward()), abs=1e-6)
+
+    def test_and_one_going_the_other_way_points_the_other_way(self) -> None:
+        course = _course(length=1000.0, count=101)
+        car = TrafficCar(course=course, station=100.0, heading=-1, limit=LIMIT)
+        assert _pointing(car.heading_angle()) == pytest.approx(
+            tuple(car.forward()), abs=1e-6)
+
+    def test_on_a_road_running_the_other_axis_too(self) -> None:
+        from glisteel.world import Course
+        count = 101
+        x = np.linspace(0.0, 1000.0, count)
+        course = Course(name='road', centreline=np.stack(
+            [x, np.zeros(count), np.zeros(count)], axis=-1),
+            carriageway_width=7.2, total_width=10.6, closed=False,
+            length=1000.0)
+        car = TrafficCar(course=course, station=100.0, heading=1, limit=LIMIT)
+        assert _pointing(car.heading_angle()) == pytest.approx(
+            tuple(car.forward()), abs=1e-6)
+
+
+def _pointing(yaw):
+    """Where the car mesh's nose ends up after a yaw about the vertical."""
+    nose = np.array([0.0, 0.0, -1.0])
+    turn = np.array([[np.cos(yaw), 0.0, np.sin(yaw)],
+                     [0.0, 1.0, 0.0],
+                     [-np.sin(yaw), 0.0, np.cos(yaw)]])
+    return tuple(turn @ nose)
+
+
+class TestStandingOnTheGround:
+    """A car's station says where along the road it is, not how high the road
+    is where it goes off it -- and a ground function asked the wrong question
+    puts the whole fleet in the air."""
+
+    def _fleet(self, ground=None):
+        from omi_physics.world import PhysicsWorld
+        world = PhysicsWorld()
+        return world, Traffic(course=_ring(), count=1, seed=2, physics=world,
+                              ground=ground)
+
+    def test_without_a_ground_it_rides_the_road(self) -> None:
+        _world, traffic = self._fleet()
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert float(traffic._standing(traffic.cars[0])[1]) < 1.5
+
+    def test_a_ground_is_asked_where_the_car_is(self) -> None:
+        asked = []
+
+        def under(position):
+            asked.append(np.asarray(position, dtype='d').copy())
+            return -12.0
+        _world, traffic = self._fleet(ground=under)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert asked and len(asked[0]) == 3
+        assert float(np.hypot(asked[0][0], asked[0][2])) > 200.0
+
+    def test_and_the_car_ends_up_on_it(self) -> None:
+        _world, traffic = self._fleet(ground=lambda position: -12.0)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert -12.0 < float(traffic._standing(traffic.cars[0])[1]) < -10.5
+
+    def test_ground_that_says_nothing_leaves_it_on_the_road(self) -> None:
+        _world, traffic = self._fleet(ground=lambda position: None)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert float(traffic._standing(traffic.cars[0])[1]) < 1.5

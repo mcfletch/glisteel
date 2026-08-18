@@ -139,6 +139,8 @@ class GlisteelContext(OverlayMixin, BaseContext):
         self._start_the_car()
         self.hud = RaceHUD()
         self.hud.visible = self.config.hud
+        # After the car, because the map is the course the car was put on.
+        self.hud.route(self.world.course)
         self.addHUDLayer(self.hud)
         self._bind_keys()
 
@@ -418,7 +420,10 @@ class GlisteelContext(OverlayMixin, BaseContext):
             return
         self.hud.show(speed_kph=self.car.speed_kph(), timing=self.timing,
                       off=self.watch.off if self.watch else False,
-                      ended=self._ended())
+                      ended=self._ended(), at=self.car.position,
+                      others=[car.position() for car in
+                              (self.world.traffic.cars
+                               if self.world.traffic is not None else ())])
 
     def _off_course(self) -> bool:               # pragma: no cover - needs a window
         assert self.world is not None and self.car is not None
