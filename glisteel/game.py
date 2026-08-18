@@ -26,7 +26,6 @@ import argparse
 import logging
 import os
 import sys
-import time
 from typing import Any
 
 os.environ.setdefault('OPENGLCONTEXT_PROFILE', 'core')
@@ -34,8 +33,10 @@ os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')
 os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')
 
 from OpenGLContext import testingcontext  # noqa: E402
+from OpenGLContext.events.systemtime import systemTime  # noqa: E402
 from OpenGLContext.scenegraph.scenegraph import SceneGraph  # noqa: E402
 from OpenGLContext.ui.overlay import OverlayMixin  # noqa: E402
+from OpenGLContext.video.recorder import RecordingMixin  # noqa: E402
 from OpenGLContext.viewer import environment  # noqa: E402
 from OpenGLContext.viewer.sceneviewer import ViewerContext  # noqa: E402
 
@@ -97,7 +98,7 @@ CONTROLS = {
 }
 
 
-class GlisteelContext(OverlayMixin, BaseContext):
+class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     """The game window: a streamed world, a car in it, and a camera behind."""
 
     config: Any = None
@@ -119,7 +120,10 @@ class GlisteelContext(OverlayMixin, BaseContext):
 
     def OnInit(self) -> None:                    # pragma: no cover - needs a window
         self.held: set[str] = set()
-        self._clock = time.time()
+        # The engine's clock rather than the wall clock directly: a recording
+        # replaces it with one that advances a frame at a time, and the car has
+        # to move on that same clock or the video is not what was driven.
+        self._clock = systemTime()
         self._accumulated = 0.0
         self._stuck_for = 0.0
         self.camera = ChaseCamera()
@@ -293,7 +297,7 @@ class GlisteelContext(OverlayMixin, BaseContext):
     # -- the frame -------------------------------------------------------------
 
     def OnIdle(self, *args: Any) -> int:         # pragma: no cover - needs a window
-        now = time.time()
+        now = systemTime()
         elapsed = min(now - self._clock, MAXIMUM_CATCHUP)
         self._clock = now
         self.advance(elapsed)
@@ -435,8 +439,11 @@ class GlisteelContext(OverlayMixin, BaseContext):
 
         A capture is settled by *drawn frames*, so it is ticked here rather than
         on a clock: the world streams in while the count runs, and the picture
-        is of a world that has arrived.
+        is of a world that has arrived. A recording takes the same frame, for
+        the same reason: the back buffer holds it only until it is swapped away.
         """
+        if self.recording:
+            self.tickRecording()
         capture = getattr(self, '_capture', None)
         if capture is not None and capture.tick():
             result = super().SwapBuffers(*args)
@@ -450,6 +457,11 @@ class GlisteelContext(OverlayMixin, BaseContext):
         return super().SwapBuffers(*args)
 
     def OnQuit(self, *args: Any) -> None:        # pragma: no cover - needs a window
+        # Finish the file first: a recording closed after the world has gone is
+        # a recording missing its last frames and its sample tables.
+        if self.recorder is not None:
+            self.recorder.close()
+            self.recorder = None
         if self.world is not None:
             self.world.shutdown()
         super().OnQuit(*args)
@@ -500,6 +512,24 @@ def build_parser() -> argparse.ArgumentParser:
                         metavar='SECONDS',
                         help='how long to let the world stream in before '
                              '--capture (default: %(default)s)')
+    parser.add_argument('--record', metavar='PATH',
+                        help='record the drive to PATH (an .mp4) and exit when '
+                             'the recording is done')
+    parser.add_argument('--record-seconds', type=float, default=20.0,
+                        metavar='SECONDS',
+                        help='how long a recording runs for '
+                             '(default: %(default)s)')
+    parser.add_argument('--record-fps', type=int, default=60, metavar='FPS',
+                        help='frames a second in the recording; the world is '
+                             'advanced by exactly one frame of time per frame '
+                             'recorded (default: %(default)s)')
+    parser.add_argument('--record-delay', type=float, default=6.0,
+                        metavar='SECONDS',
+                        help='let the world stream in for this long before the '
+                             'recording starts (default: %(default)s)')
+    parser.add_argument('--record-bitrate', type=int, default=0, metavar='BITS',
+                        help='bits a second; 0 lets the encoder choose from the '
+                             'frame size and rate')
     parser.add_argument('--drive-seconds', type=float, default=0.0,
                         metavar='SECONDS',
                         help='drive for this long before capturing, so the '
@@ -515,8 +545,38 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - needs a wi
     if options.capture:
         _capture(options, int(width), int(height))
         return 0
+    if options.record:
+        _record(options, int(width), int(height))
+        return 0
     GlisteelContext.ContextMainLoop(size=(int(width), int(height)))
     return 0
+
+
+def _record(options: Any, width: int, height: int) -> None:  # pragma: no cover
+    """Drive, recording the drive to a video file, and exit when it is done.
+
+    The recording drives the clock: the world is advanced by exactly one frame
+    of time for every frame written, so the video is smooth whatever the frame
+    rate was and the same drive records the same way twice. What that costs is
+    that the run is no longer real time -- a heavy frame takes as long as it
+    takes -- which is why this is a mode rather than something the game does
+    while someone is playing it.
+    """
+    encoder: dict[str, Any] = {}
+    if options.record_bitrate:
+        encoder['bitrate'] = options.record_bitrate
+
+    class RecordingContext(GlisteelContext):
+        config = options
+
+        def OnInit(self) -> None:
+            super().OnInit()
+            self.setupRecording(
+                options.record, fps=options.record_fps,
+                seconds=options.record_seconds, start_after=options.record_delay,
+                **encoder)
+
+    RecordingContext.ContextMainLoop(size=(width, height))
 
 
 def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover

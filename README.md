@@ -31,6 +31,29 @@ and through a bore where it does not. The second drives it.
 `glisteel --autopilot` drives itself, which is the quickest way to see a lap and
 the same code an opponent car would use.
 
+### Recording a drive
+
+```bash
+glisteel /tmp/world/tileset.json --autopilot --record lap.mp4 \
+    --record-seconds 20 --record-fps 60 --size 1280x720
+```
+
+writes an H.264 video of the drive and exits when it is done. The frame goes
+from the framebuffer into a texture the GPU's video encoder reads in place, so
+recording costs a blit rather than a read back through host memory.
+
+**The recording drives the clock.** The world is advanced by exactly one frame
+of time for every frame written, so the video is smooth whatever the frame rate
+was and the same drive records the same way twice. That means a recorded run is
+not real time — a heavy frame takes as long as it takes — which is why it is a
+mode rather than something the game does while someone is playing it.
+`--record-delay` (six seconds by default) lets the world stream in before the
+recording starts, so the video is of a world that has arrived; `--record-bitrate`
+overrides what the encoder picks from the frame size and rate.
+
+Recording needs the engine's video extra, `pip install OpenGLContext[video]`, and
+an encoder it can reach — today an NVIDIA card on Linux.
+
 **The default view is the driver's seat.** A route is a thing you drive
 *through*, and a forest read from seven metres up and behind reads as scenery
 rather than as trees you are passing between. `c` cycles cockpit, chase and
