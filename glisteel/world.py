@@ -188,13 +188,49 @@ class Course:
         """Whether a point is on the carriageway rather than beside it."""
         return self.nearest(position)[1] <= self.carriageway_width / 2.0
 
+    @property
+    def driving_lane(self) -> float:
+        """How far from the centreline a car keeps, on a road with two ways.
+
+        The middle of its own half of the carriageway, which is where a driver
+        sits when something may be coming the other way.
+        """
+        return float(self.carriageway_width) / 4.0
+
+    def across(self, index: int) -> np.ndarray:
+        """The unit vector across the road there, pointing to its own right.
+
+        The same frame everything swept along a road uses
+        (:func:`OpenGLContext.scenegraph.road.sweep_frames`), so the driving
+        line, the grid, the signs and the traffic all agree which side is
+        which.
+        """
+        # A closed course's last point is its first, so the segment between
+        # them has no direction. Looking on to the next one that does is what
+        # keeps the seam agreeing with the road either side of it.
+        here = self.point(index)
+        for step in range(1, min(len(self.centreline), 8)):
+            along = self.point(index + step) - here
+            right = np.cross(along, (0.0, 1.0, 0.0))
+            length = float(np.linalg.norm(right))
+            if length > 1e-9:
+                found: np.ndarray = right / length
+                return found
+        return np.array([1.0, 0.0, 0.0])         # pragma: no cover - a point
+
+    def lane_point(self, index: int, offset: float = 0.0) -> np.ndarray:
+        """A point of the centreline, moved ``offset`` metres to its right."""
+        return self.point(index) + self.across(index) * float(offset)
+
     def grid_position(self, index: int = 0, height: float = 1.0,
-                      offset: float = 0.0) -> tuple[np.ndarray, float]:
+                      offset: float = 0.0, lane: float = 0.0
+                      ) -> tuple[np.ndarray, float]:
         """Where to put a car on the grid, and the heading to give it.
 
         ``offset`` moves it across the road, for a second car on the row.
+        ``lane`` moves it to its own side of a road with traffic on it.
         """
-        point = self.point(index)
+        point = self.lane_point(index, lane)
         heading = self.heading_at(index)
         across = np.array([math.cos(heading), 0.0, math.sin(heading)])
         return point + np.array([0.0, height, 0.0]) + across * offset, heading
@@ -256,10 +292,15 @@ class RaceWorld:
     colliders instead: the landscape is one height field, cut into chunks and
     held near the car. It settles the moment it is built, because there is
     nothing to wait for.
+
+    ``traffic`` is how many other cars are on the road at once; zero is an empty
+    circuit. They are kept near the player and topped up as they pass, so a lap
+    meets a road's worth of traffic without a world's worth existing.
     """
 
     def __init__(self, tileset_path: str, memory: int = DEFAULT_MEMORY,
-                 max_sse: float = DEFAULT_SSE, gravity: float = 9.81) -> None:
+                 max_sse: float = DEFAULT_SSE, gravity: float = 9.81,
+                 traffic: int = 0) -> None:
         if not os.path.exists(tileset_path) and not fetch.is_url(tileset_path):
             raise SystemExit(
                 "no world at %s -- bake one with 'oglc-bake --output %s'"
@@ -292,6 +333,13 @@ class RaceWorld:
         #: The ones near the car are in the physics world; the rest are not.
         from OpenGLContext.physics.props import PropColliders
         self.props = PropColliders(self.physics, self._props())
+        #: The other cars using the road, or None for a world with no course.
+        self.traffic: Any = None
+        if traffic and self.course is not None:
+            from glisteel.traffic import Traffic
+            self.traffic = Traffic(self.course, count=int(traffic),
+                                   physics=self.physics,
+                                   ground=self.ground_under)
 
     def _props(self) -> list:
         """The obstacles this world carries, read off the tileset.

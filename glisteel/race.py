@@ -212,3 +212,37 @@ class OffRoad:
     def _over(self, why: str) -> str:
         self.ended = why
         return why
+
+
+#: How fast a car may meet something solid and drive on, in metres per second.
+#: Brushing a wing at walking pace is a scrape; meeting the back of a lorry at
+#: forty metres a second is not.
+SURVIVABLE = 9.0
+
+
+@dataclass
+class Collisions:
+    """Whether the car hit something hard enough to end the run.
+
+    Fed the *closing speed* rather than a contact: a car is always touching the
+    road, and what decides a crash is how fast it arrived at whatever else it
+    found. Which cars and boulders are near enough to matter is the physics
+    world's business; this is only the rule about what counts.
+    """
+
+    survivable: float = SURVIVABLE
+    #: Set once the run is over, and the reason why.
+    ended: str | None = None
+
+    def update(self, closing: float, dt: float) -> str | None:
+        """Read a closing speed; return the reason the run ended, once."""
+        if self.ended is not None:
+            return None
+        if float(closing) <= self.survivable:
+            return None
+        self.ended = 'HIT A CAR'
+        return self.ended
+
+    def restart(self) -> None:
+        """Back on the grid: nothing has happened yet."""
+        self.ended = None

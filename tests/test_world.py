@@ -212,3 +212,95 @@ def _world_with_props(directory):
          'height': 3.0}]
     json.dump(document, open(path, 'w'))
     return path
+
+
+class TestKeepingToALane:
+    """A road with traffic coming the other way is a road you drive on a side
+    of. The lane a car keeps is the same "right" everything swept along the road
+    uses, so the driving line, the grid and the traffic all agree about which
+    side is which."""
+
+    def _course(self, count=101, length=1000.0):
+        from glisteel.world import Course
+        z = np.linspace(0.0, length, count)
+        return Course(name='road', centreline=np.stack(
+            [np.zeros(count), np.zeros(count), z], axis=-1),
+            carriageway_width=7.2, total_width=10.6, closed=False,
+            length=length)
+
+    def test_the_centreline_is_the_lane_of_no_offset(self) -> None:
+        course = self._course()
+        assert np.allclose(course.lane_point(10, 0.0), course.point(10))
+
+    def test_a_positive_offset_is_the_road_s_own_right(self) -> None:
+        """Which for a course running towards +Z is -X."""
+        course = self._course()
+        assert float(course.lane_point(10, 2.0)[0]) < -1.0
+
+    def test_and_a_negative_one_the_other_side(self) -> None:
+        course = self._course()
+        assert float(course.lane_point(10, -2.0)[0]) > 1.0
+
+    def test_it_stays_on_the_road_along_its_length(self) -> None:
+        course = self._course()
+        for index in (0, 25, 50, 99):
+            offset = course.lane_point(index, 1.8)
+            assert course.nearest(offset)[1] < 2.0
+
+    def test_the_driving_lane_is_a_quarter_of_the_carriageway(self) -> None:
+        course = self._course()
+        assert course.driving_lane == pytest.approx(1.8)
+
+    def test_the_grid_can_be_put_in_it(self) -> None:
+        course = self._course()
+        middle, _heading = course.grid_position()
+        lane, _again = course.grid_position(lane=course.driving_lane)
+        assert float(np.linalg.norm(lane - middle)) == pytest.approx(1.8,
+                                                                     abs=0.01)
+
+    def test_and_it_is_the_same_side_traffic_keeps(self) -> None:
+        from glisteel.traffic import TrafficCar
+        course = self._course()
+        car = TrafficCar(course=course, station=100.0, heading=1, limit=20.0)
+        lane, _heading = course.grid_position(index=10,
+                                              lane=course.driving_lane)
+        assert float(np.sign(car.position()[0])) == float(np.sign(lane[0]))
+
+
+class TestTheWayAcrossAClosedRoad:
+    """A closed course's last point is its first, so the segment between them
+    has no length and no direction. Asking which way is across the road there
+    has to look on to the next one that does, or the answer is a fallback with
+    the wrong sign in it -- and everything that keeps a side of the road ends up
+    on the other one for the length of a tile."""
+
+    def _ring(self, count=61, radius=200.0):
+        from glisteel.world import Course
+        angle = np.linspace(0.0, 2.0 * np.pi, count)
+        line = np.stack([np.cos(angle) * radius, np.zeros(count),
+                         np.sin(angle) * radius], axis=-1)
+        steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
+        return Course(name='ring', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True, length=float(steps.sum()))
+
+    def test_the_seam_agrees_with_the_point_before_it(self) -> None:
+        course = self._ring()
+        assert float(np.dot(course.across(len(course.centreline) - 1),
+                            course.across(len(course.centreline) - 2))) > 0.9
+
+    def test_and_with_the_point_after_it(self) -> None:
+        course = self._ring()
+        assert float(np.dot(course.across(len(course.centreline) - 1),
+                            course.across(0))) > 0.9
+
+    def test_a_lane_does_not_jump_sides_at_the_seam(self) -> None:
+        course = self._ring()
+        last = len(course.centreline) - 1
+        assert float(np.linalg.norm(course.lane_point(last, 1.8)
+                                    - course.lane_point(0, 1.8))) < 0.5
+
+    def test_it_is_still_a_unit_vector(self) -> None:
+        course = self._ring()
+        for index in (0, 30, len(course.centreline) - 1):
+            assert float(np.linalg.norm(course.across(index))) \
+                == pytest.approx(1.0, abs=1e-9)

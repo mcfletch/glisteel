@@ -26,7 +26,8 @@ from OpenGLContext.scenegraph.shape import Shape
 from OpenGLContext.scenegraph.switch import Switch
 from OpenGLContext.scenegraph.transform import Transform
 
-__all__ = ['Car', 'CarSpec', 'car_body_mesh', 'wheel_mesh']
+__all__ = ['Car', 'CarSpec', 'car_body_mesh', 'car_nodes',
+           'wheel_mesh']
 
 #: The car's own dimensions, in metres: a low two-seat coupé.
 BODY_LENGTH = 4.2
@@ -172,6 +173,32 @@ class Car:
         shell = Switch(choice=[Transform(children=[body, cabin, *wheels])],
                        whichChoice=0)
         return Transform(children=[shell]), shell, wheels
+
+
+def car_nodes(paint: tuple[float, float, float] = (0.62, 0.09, 0.07),
+              wheel_radius: float = 0.33) -> Transform:
+    """A car to look at: body, cabin and four wheels, and nothing to drive it.
+
+    What a car standing in the world is made of, without the physics that makes
+    one the player's. Traffic is drawn with this: its wheels do not turn and its
+    suspension does not move, which nobody driving past at speed reads, and it
+    costs a transform apiece instead of a raycast vehicle.
+    """
+    body = PBRMaterial(baseColor=paint, metallic=0.55, roughness=0.32)
+    glass = PBRMaterial(baseColor=(0.10, 0.13, 0.16), metallic=0.1,
+                        roughness=0.08)
+    rubber = PBRMaterial(baseColor=(0.045, 0.045, 0.05), metallic=0.0,
+                         roughness=0.85)
+    half_track, half_base = 1.58 / 2.0, 2.55 / 2.0
+    wheels = [
+        Transform(children=[_painted(wheel_mesh(wheel_radius, 0.24, rubber),
+                                     rubber)],
+                  translation=(side * half_track,
+                               -BODY_HEIGHT / 2.0 + wheel_radius,
+                               end * half_base))
+        for side in (-1.0, 1.0) for end in (-1.0, 1.0)]
+    return Transform(children=[_painted(car_body_mesh(body), body),
+                               _painted(cabin_mesh(glass), glass), *wheels])
 
 
 def _painted(mesh: PBRMesh, material: PBRMaterial) -> Shape:

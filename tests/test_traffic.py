@@ -1,0 +1,407 @@
+"""Other people, using the road.
+
+A circuit with nothing on it is a time trial. What makes it a *road* is that
+somebody else is on it, going the speed limit, in both directions -- and that
+what they do next is not entirely predictable, because a car in front braking
+for something the driver cannot see is the thing that makes traffic worth
+overtaking rather than scenery to drive around.
+
+Traffic is placed by *station*: how far along the course it is, which way it is
+going, and which side of the centreline it keeps. Everything about how it moves
+is that number and a speed, which is why none of it needs a window to test.
+"""
+import numpy as np
+import pytest
+
+from glisteel.traffic import (
+    CRUISING,
+    PULLING_OFF,
+    SLOWING,
+    Traffic,
+    TrafficCar,
+)
+from glisteel.world import Course
+
+LIMIT = 25.0
+
+
+def _course(length=2000.0, count=201, closed=False):
+    z = np.linspace(0.0, length, count)
+    return Course(name='road', centreline=np.stack(
+        [np.zeros(count), np.zeros(count), z], axis=-1),
+        carriageway_width=7.2, total_width=10.6, closed=closed, length=length)
+
+
+def _ring(radius=300.0, count=241):
+    angle = np.linspace(0.0, 2.0 * np.pi, count)
+    line = np.stack([np.cos(angle) * radius, np.zeros(count),
+                     np.sin(angle) * radius], axis=-1)
+    steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
+    return Course(name='ring', centreline=line, carriageway_width=7.2,
+                  total_width=10.6, closed=True, length=float(steps.sum()))
+
+
+def _car(course=None, station=100.0, heading=1, **named):
+    return TrafficCar(course=course or _course(), station=station,
+                      heading=heading, limit=LIMIT, seed=1, **named)
+
+
+class TestWhereATrafficCarIs:
+    def test_it_starts_where_it_was_put(self) -> None:
+        assert _car(station=250.0).station == 250.0
+
+    def test_it_is_on_the_road(self) -> None:
+        at = _car().position()
+        assert abs(float(at[2]) - 100.0) < 1.0
+
+    def test_it_keeps_its_own_side_going_one_way(self) -> None:
+        """The road's own "right", which is the frame everything swept along it
+        uses: for a course running towards +Z that is -X."""
+        assert float(_car(heading=1).position()[0]) < -0.5
+
+    def test_and_the_other_side_going_the_other(self) -> None:
+        assert float(_car(heading=-1).position()[0]) > 0.5
+
+    def test_neither_is_off_the_carriageway(self) -> None:
+        for heading in (1, -1):
+            assert abs(float(_car(heading=heading).position()[0])) < 3.6
+
+    def test_it_faces_the_way_it_is_going(self) -> None:
+        along = _car(heading=1).forward()
+        against = _car(heading=-1).forward()
+        assert float(np.dot(along, against)) < -0.9
+
+    def test_driving_moves_it_along(self) -> None:
+        car = _car(station=100.0)
+        for _ in range(60):
+            car.advance(1.0 / 60.0)
+        assert car.station > 120.0
+
+    def test_and_the_other_way_moves_it_back(self) -> None:
+        car = _car(station=500.0, heading=-1)
+        for _ in range(60):
+            car.advance(1.0 / 60.0)
+        assert car.station < 480.0
+
+    def test_it_gets_up_to_the_limit_and_stays_there(self) -> None:
+        car = _car()
+        for _ in range(600):
+            car.advance(1.0 / 60.0)
+        assert abs(car.speed - LIMIT) < LIMIT * 0.2
+
+    def test_it_does_not_run_off_the_end_of_an_open_road(self) -> None:
+        course = _course(length=400.0)
+        car = _car(course=course, station=380.0)
+        for _ in range(600):
+            car.advance(1.0 / 60.0)
+        assert 0.0 <= car.station <= course.length
+
+    def test_a_circuit_wraps_instead(self) -> None:
+        course = _ring()
+        car = _car(course=course, station=course.length - 10.0)
+        for _ in range(300):
+            car.advance(1.0 / 60.0)
+        assert car.station < course.length / 2.0
+
+
+class TestWhatItDoesNext:
+    def test_it_cruises_by_default(self) -> None:
+        assert _car().state == CRUISING
+
+    def test_it_can_be_made_to_slow_for_something(self) -> None:
+        car = _car()
+        car.brake_for('a deer')
+        assert car.state == SLOWING
+        assert car.target_speed() < LIMIT
+
+    def test_slowing_actually_slows_it(self) -> None:
+        car = _car()
+        for _ in range(600):
+            car.advance(1.0 / 60.0)
+        fast = car.speed
+        car.brake_for('a deer')
+        for _ in range(180):
+            car.advance(1.0 / 60.0)
+        assert car.speed < fast * 0.6
+
+    def test_and_it_gets_going_again(self) -> None:
+        car = _car()
+        car.brake_for('a deer')
+        for _ in range(60 * 9):
+            car.advance(1.0 / 60.0)
+        assert car.state == CRUISING
+
+    def test_pulling_off_takes_it_off_the_carriageway(self) -> None:
+        car = _car()
+        car.pull_off()
+        for _ in range(60 * 8):
+            car.advance(1.0 / 60.0)
+        assert car.state == PULLING_OFF
+        assert abs(float(car.position()[0])) > 4.0
+
+    def test_and_it_comes_to_a_stop(self) -> None:
+        car = _car()
+        car.pull_off()
+        for _ in range(60 * 8):
+            car.advance(1.0 / 60.0)
+        assert car.speed < 0.5
+
+    def test_it_decides_for_itself_as_it_goes(self) -> None:
+        """Not scripted: over a few kilometres a car does something."""
+        car = _car(course=_ring(), station=0.0)
+        seen = set()
+        for _ in range(60 * 400):
+            car.advance(1.0 / 60.0)
+            seen.add(car.state)
+        assert len(seen) > 1
+
+    def test_the_same_car_makes_the_same_decisions(self) -> None:
+        def run(seed):
+            car = TrafficCar(course=_ring(), station=0.0, heading=1,
+                             limit=LIMIT, seed=seed)
+            out = []
+            for _ in range(60 * 200):
+                car.advance(1.0 / 60.0)
+                out.append(car.state)
+            return out
+        assert run(7) == run(7)
+
+    def test_two_cars_do_not_make_the_same_ones(self) -> None:
+        def run(seed):
+            car = TrafficCar(course=_ring(), station=0.0, heading=1,
+                             limit=LIMIT, seed=seed)
+            out = []
+            for _ in range(60 * 200):
+                car.advance(1.0 / 60.0)
+                out.append(car.state)
+            return out
+        assert run(7) != run(8)
+
+
+class TestTheTrafficOnARoad:
+    def _traffic(self, **named):
+        named.setdefault('course', _ring())
+        named.setdefault('seed', 4)
+        return Traffic(**named)
+
+    def test_it_starts_with_nothing_on_the_road(self) -> None:
+        assert self._traffic().cars == []
+
+    def test_the_first_update_fills_the_road_around_the_player(self) -> None:
+        traffic = self._traffic()
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert traffic.cars
+
+    def test_they_are_all_near_the_player(self) -> None:
+        traffic = self._traffic(reach=250.0)
+        at = np.array([300.0, 0.0, 0.0])
+        traffic.update(at, 0.0)
+        for car in traffic.cars:
+            assert float(np.linalg.norm(car.position() - at)) < 320.0
+
+    def test_both_ways(self) -> None:
+        traffic = self._traffic(count=12)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert {car.heading for car in traffic.cars} == {1, -1}
+
+    def test_none_of_them_is_on_top_of_another(self) -> None:
+        traffic = self._traffic(count=12)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        for one in traffic.cars:
+            for other in traffic.cars:
+                if one is not other and one.heading == other.heading:
+                    assert abs(one.station - other.station) > 8.0
+
+    def test_driving_away_replaces_them(self) -> None:
+        traffic = self._traffic(reach=200.0)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        first = list(traffic.cars)               # held, or the ids come round again
+        assert first
+        traffic.update(np.array([-300.0, 0.0, 0.0]), 1.0)
+        assert not any(car is other for car in first for other in traffic.cars)
+
+    def test_and_there_are_still_as_many(self) -> None:
+        traffic = self._traffic(count=8, reach=250.0)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        traffic.update(np.array([-300.0, 0.0, 0.0]), 1.0)
+        assert len(traffic.cars) == 8
+
+    def test_a_road_with_no_traffic_asked_for_stays_empty(self) -> None:
+        traffic = self._traffic(count=0)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert traffic.cars == []
+
+    def test_it_says_what_is_in_the_player_s_way(self) -> None:
+        traffic = self._traffic(count=10)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        ahead = traffic.ahead_of(np.array([300.0, 0.0, 0.0]),
+                                 np.array([0.0, 0.0, 1.0]), reach=400.0)
+        assert all(car.heading in (1, -1) for car in ahead)
+
+
+if __name__ == '__main__':
+    raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestTrafficYouCanSeeAndHit:
+    """A car nobody can see is a rumour and a car nobody can hit is scenery.
+
+    The body is *kinematic*: it drives its own position rather than being
+    pushed about by contacts. What a player needs from it is that it is there
+    and that hitting it hurts, and a road full of raycast vehicles buys neither
+    of those for four wheels a second of physics each.
+    """
+
+    def _fleet(self, **named):
+        from omi_physics.world import PhysicsWorld
+        world = PhysicsWorld()
+        named.setdefault('course', _ring())
+        named.setdefault('count', 4)
+        named.setdefault('seed', 2)
+        return world, Traffic(physics=world, **named)
+
+    def test_each_car_gets_a_node_to_draw(self) -> None:
+        _world, traffic = self._fleet()
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert len(traffic.node.children) == len(traffic.cars)
+
+    def test_and_a_body_to_hit(self) -> None:
+        world, traffic = self._fleet()
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert world.live_body_count == len(traffic.cars)
+
+    def test_the_body_is_where_the_car_is(self) -> None:
+        world, traffic = self._fleet(count=1)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        car = traffic.cars[0]
+        at = world.position[traffic.body_of(car)]
+        assert float(np.linalg.norm(np.asarray(at)[[0, 2]]
+                                    - car.position()[[0, 2]])) < 0.2
+
+    def test_it_follows_the_car_as_it_drives(self) -> None:
+        world, traffic = self._fleet(count=1)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        car = traffic.cars[0]
+        before = np.asarray(world.position[traffic.body_of(car)]).copy()
+        traffic.update(np.array([300.0, 0.0, 0.0]), 1.0)
+        after = np.asarray(world.position[traffic.body_of(car)])
+        assert float(np.linalg.norm(after - before)) > 3.0
+
+    def test_a_retired_car_takes_its_body_with_it(self) -> None:
+        world, traffic = self._fleet(count=3, reach=150.0)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        traffic.update(np.array([-300.0, 0.0, 0.0]), 1.0)
+        assert world.live_body_count == len(traffic.cars) == 3
+
+    def test_and_its_node(self) -> None:
+        _world, traffic = self._fleet(count=3, reach=150.0)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        traffic.update(np.array([-300.0, 0.0, 0.0]), 1.0)
+        assert len(traffic.node.children) == 3
+
+    def test_a_car_does_not_fall_over(self) -> None:
+        """Kinematic: it drives its own position, contacts do not move it."""
+        world, traffic = self._fleet(count=1)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        body = traffic.body_of(traffic.cars[0])
+        height = float(world.position[body][1])
+        for _ in range(120):
+            world.step(1.0 / 120.0)
+        assert float(world.position[body][1]) == pytest.approx(height, abs=0.01)
+
+    def test_without_physics_it_still_draws(self) -> None:
+        traffic = Traffic(course=_ring(), count=2, seed=2)
+        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        assert len(traffic.node.children) == 2
+
+
+class TestNotAppearingOnTopOfAnybody:
+    """A car put out where the player already is, is not traffic: it is an
+    ambush, and a kinematic body shoves a dynamic one off the road."""
+
+    def test_nothing_is_placed_next_to_the_player(self) -> None:
+        traffic = Traffic(course=_ring(), count=10, seed=5)
+        at = np.array([300.0, 0.0, 0.0])
+        traffic.update(at, 0.0)
+        assert traffic.cars
+        for car in traffic.cars:
+            assert float(np.linalg.norm(car.position() - at)) > 60.0
+
+    def test_nor_at_any_point_in_a_lap_of_topping_up(self) -> None:
+        """Passing close is the whole idea; *arriving* close is not, so what is
+        checked is each car on the frame it first appears."""
+        traffic = Traffic(course=_ring(), count=8, seed=5)
+        at = np.array([300.0, 0.0, 0.0])
+        seen: set = set()
+        for _ in range(400):
+            traffic.update(at, 0.1)
+            for car in traffic.cars:
+                if id(car) not in seen:
+                    seen.add(id(car))
+                    assert float(np.linalg.norm(car.position() - at)) > 60.0
+        assert len(seen) > 8                     # they really were replaced
+
+
+class TestNotDrivingIntoTheCarInFront:
+    """Two cars in one lane at different speeds is one car driving through
+    another, and a stationary player on the grid is something the traffic
+    behind arrives at. A driver keeps a gap, and closes it no faster than the
+    gap allows."""
+
+    def test_nothing_ahead_means_the_limit(self) -> None:
+        car = _car()
+        car.following(gap=None, speed=0.0)
+        assert car.target_speed() == pytest.approx(LIMIT)
+
+    def test_something_far_ahead_is_still_the_limit(self) -> None:
+        car = _car()
+        car.following(gap=200.0, speed=LIMIT)
+        assert car.target_speed() == pytest.approx(LIMIT)
+
+    def test_something_close_slows_it(self) -> None:
+        car = _car()
+        car.following(gap=18.0, speed=LIMIT * 0.4)
+        assert car.target_speed() < LIMIT
+
+    def test_something_stopped_in_the_way_stops_it(self) -> None:
+        car = _car()
+        car.following(gap=6.0, speed=0.0)
+        assert car.target_speed() == pytest.approx(0.0, abs=0.5)
+
+    def test_it_settles_behind_rather_than_into(self) -> None:
+        course = _course(length=4000.0, count=401)
+        leader = TrafficCar(course=course, station=300.0, heading=1,
+                            limit=8.0, seed=1)
+        follower = TrafficCar(course=course, station=200.0, heading=1,
+                              limit=LIMIT, seed=2)
+        for _ in range(60 * 60):
+            leader.following(gap=None, speed=0.0)
+            follower.following(gap=leader.station - follower.station,
+                               speed=leader.speed)
+            leader.advance(1.0 / 60.0)
+            follower.advance(1.0 / 60.0)
+        assert leader.station - follower.station > 4.0
+
+    def test_the_road_keeps_its_own_cars_apart(self) -> None:
+        traffic = Traffic(course=_ring(), count=10, seed=9)
+        at = np.array([300.0, 0.0, 0.0])
+        for _ in range(600):
+            traffic.update(at, 0.1)
+            for one in traffic.cars:
+                for other in traffic.cars:
+                    if one is not other and one.heading == other.heading:
+                        assert abs(one.station - other.station) > 3.0
+
+    def test_and_does_not_run_the_player_over_from_behind(self) -> None:
+        """A car on the grid has not started yet, and the road behind it has to
+        notice."""
+        course = _ring()
+        traffic = Traffic(course=course, count=8, seed=3)
+        at = course.lane_point(0, course.driving_lane)
+        closest = 1e9
+        for _ in range(900):
+            traffic.update(at, 0.1)
+            for car in traffic.cars:
+                closest = min(closest,
+                              float(np.linalg.norm(car.position() - at)))
+        assert closest > 3.0

@@ -42,7 +42,12 @@ from glisteel.camera import ChaseCamera  # noqa: E402
 from glisteel.car import Car, CarSpec  # noqa: E402
 from glisteel.driver import Autopilot  # noqa: E402
 from glisteel.hud import RaceHUD  # noqa: E402
-from glisteel.race import OffRoad, RaceTiming, off_course  # noqa: E402
+from glisteel.race import (  # noqa: E402
+    Collisions,
+    OffRoad,
+    RaceTiming,
+    off_course,
+)
 from glisteel.world import RaceWorld  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -96,6 +101,7 @@ class GlisteelContext(OverlayMixin, BaseContext):
     autopilot: Autopilot | None = None
     timing: RaceTiming | None = None
     watch: OffRoad | None = None
+    crashes: Collisions | None = None
     hud: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
@@ -109,7 +115,8 @@ class GlisteelContext(OverlayMixin, BaseContext):
         self._accumulated = 0.0
         self._stuck_for = 0.0
         self.camera = ChaseCamera()
-        self.world = RaceWorld(self.config.world, max_sse=self.config.sse)
+        self.world = RaceWorld(self.config.world, max_sse=self.config.sse,
+                               traffic=getattr(self.config, 'traffic', 0))
         # The engine's own sky and light rig, rather than one written here: a
         # world baked for the viewer is lit the way the viewer lights it, and a
         # game that invents its own rig renders the same tiles differently.
@@ -137,7 +144,8 @@ class GlisteelContext(OverlayMixin, BaseContext):
             raise SystemExit(
                 "%s carries no roads, so there is nothing to race on. Bake a "
                 "world with a circuit in it." % self.config.world)
-        position, heading = course.grid_position(height=6.0)
+        lane = self._lane(course)
+        position, heading = course.grid_position(height=6.0, lane=lane)
         self.platform.setPosition(tuple(float(v) for v in position))
         if not self.world.settled(tuple(float(v) for v in position)):
             log.warning("the ground under the grid has not loaded; "
@@ -145,9 +153,14 @@ class GlisteelContext(OverlayMixin, BaseContext):
         self.car = Car(self.world.physics, CarSpec(), position=position,
                        heading=heading)
         self.sg.children.append(self.car.node)
+        if self.world.traffic is not None:
+            # Mounted once; the cars under it come and go as the player passes.
+            self.sg.children.append(self.world.traffic.node)
         self.timing = RaceTiming(course)
         self.watch = OffRoad(course)
-        self.autopilot = Autopilot(course) if self.config.autopilot else None
+        self.crashes = Collisions()
+        self.autopilot = (Autopilot(course, lane=lane)
+                          if self.config.autopilot else None)
         self._settle_onto_the_road()
 
     def _settle_onto_the_road(self) -> None:     # pragma: no cover - needs a window
@@ -223,13 +236,16 @@ class GlisteelContext(OverlayMixin, BaseContext):
         if course is None:
             return
         index, _ = course.nearest(self.car.position)
-        position, heading = course.grid_position(index, height=1.5)
+        position, heading = course.grid_position(
+            index, height=1.5, lane=self._lane(course))
         self.car.place(position, heading)
         self.camera.reset()
         if self.timing is not None:
             self.timing.restart()
         if self.watch is not None:
             self.watch.restart()
+        if self.crashes is not None:
+            self.crashes.restart()
 
     # -- the frame -------------------------------------------------------------
 
@@ -256,6 +272,9 @@ class GlisteelContext(OverlayMixin, BaseContext):
             self.world.physics.step(PHYSICS_STEP)
             self._accumulated -= PHYSICS_STEP
         self.car.follow(elapsed)
+        if self.world.traffic is not None and not self._over():
+            self.world.traffic.update(self.car.position, elapsed)
+            self._watch_for_a_crash(elapsed)
         self._recover_if_stuck(elapsed)
         pose = self.camera.update(self.car, elapsed)
         self.car.hidden = self.camera.inside
@@ -289,8 +308,42 @@ class GlisteelContext(OverlayMixin, BaseContext):
         if reason is not None:
             log.info("run over: %s", reason)
 
+    def _lane(self, course: Any) -> float:       # pragma: no cover - needs a window
+        """Which side of the road to drive on.
+
+        The middle of the road on an empty circuit, because that is the racing
+        line and there is nothing to meet. With traffic coming the other way it
+        is the middle of this car's own half, because that is what a road with
+        two directions on it means.
+        """
+        return (course.driving_lane
+                if getattr(self.config, 'traffic', 0) else 0.0)
+
+    def _watch_for_a_crash(self, dt: float) -> None:  # pragma: no cover - needs a window
+        """End the run if the car met another one hard enough.
+
+        The closing speed against the nearest car in front, which is what the
+        severity of a crash is: a car alongside at the same speed is an
+        overtake, and the back of one at forty metres a second is not.
+        """
+        if self.crashes is None or self.world.traffic is None:
+            return
+        ahead = self.world.traffic.ahead_of(self.car.position,
+                                            self.car.forward(), reach=6.0)
+        if not ahead:
+            return
+        closing = float(self.car.speed()) - float(ahead[0].speed)
+        self.crashes.update(max(closing, 0.0), dt)
+
+    def _ended(self) -> str | None:              # pragma: no cover - needs a window
+        """Why the run is over, or None while it is not."""
+        for watcher in (self.watch, self.crashes):
+            if watcher is not None and watcher.ended:
+                return str(watcher.ended)
+        return None
+
     def _over(self) -> bool:                     # pragma: no cover - needs a window
-        return bool(self.watch is not None and self.watch.ended)
+        return self._ended() is not None
 
     def _recover_if_stuck(self, elapsed: float) -> None:
         """Put the car back on the road if it has got itself stuck.
@@ -320,7 +373,7 @@ class GlisteelContext(OverlayMixin, BaseContext):
             return
         self.hud.show(speed_kph=self.car.speed_kph(), timing=self.timing,
                       off=self.watch.off if self.watch else False,
-                      ended=self.watch.ended if self.watch else None)
+                      ended=self._ended())
 
     def _off_course(self) -> bool:               # pragma: no cover - needs a window
         assert self.world is not None and self.car is not None
@@ -379,6 +432,9 @@ def build_parser() -> argparse.ArgumentParser:
                              'sharper and slower (default: %(default)s)')
     parser.add_argument('--hud', action=argparse.BooleanOptionalAction,
                         default=True, help='draw the speed and lap readouts')
+    parser.add_argument('--traffic', type=int, default=8, metavar='CARS',
+                        help='how many other cars are on the road at once '
+                             '(0 for an empty circuit)')
     parser.add_argument('--autopilot', action='store_true',
                         help='let the car drive itself round the circuit')
     parser.add_argument('--size', default='1280x720', metavar='WxH',

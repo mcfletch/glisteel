@@ -350,3 +350,68 @@ class TestTheCrossTrackTerm:
         beside = _Car(position=(4.0, 0.0, -50.0), forward=(0, 0, -1), speed=20.0)
         assert off.update(beside)[2] == pytest.approx(
             Autopilot(course, DriverStyle(tracking=0.0)).update(beside)[2])
+
+
+class TestDrivingOnItsOwnSide:
+    """On an empty circuit the racing line is the centreline. With something
+    coming the other way it is not: a driver keeps a side, and the autopilot has
+    to do the same or it meets the traffic head-on."""
+
+    def _course(self, count=241, radius=300.0):
+        from glisteel.world import Course
+        angle = np.linspace(0.0, 2.0 * np.pi, count)
+        line = np.stack([np.cos(angle) * radius, np.zeros(count),
+                         np.sin(angle) * radius], axis=-1)
+        steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
+        return Course(name='ring', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True, length=float(steps.sum()))
+
+    def test_by_default_it_drives_the_centreline(self) -> None:
+        from glisteel.driver import Autopilot
+        assert Autopilot(self._course()).lane == 0.0
+
+    def test_it_can_be_told_to_keep_a_side(self) -> None:
+        from glisteel.driver import Autopilot
+        course = self._course()
+        driver = Autopilot(course, lane=course.driving_lane)
+        assert driver.lane == course.driving_lane
+
+    def test_and_then_the_line_it_aims_at_is_over_there(self) -> None:
+        from glisteel.driver import Autopilot
+        course = self._course()
+        middle = Autopilot(course)
+        side = Autopilot(course, lane=course.driving_lane)
+        assert not np.allclose(middle.line_at(10), side.line_at(10))
+        assert float(np.linalg.norm(side.line_at(10) - middle.line_at(10))) \
+            == pytest.approx(course.driving_lane, abs=0.01)
+
+    def test_a_car_on_its_lane_is_not_corrected_back(self) -> None:
+        """The cross-track term measures against the line being driven, so a
+        car sitting on it is where it should be."""
+        from glisteel.driver import Autopilot
+        course = self._course()
+        driver = Autopilot(course, lane=course.driving_lane)
+        at = course.lane_point(10, course.driving_lane)
+        forward = _along(course, 10)
+        assert abs(driver._back_to_the_line(_Car(forward=forward), at, 10,
+                                            20.0)) < 0.02
+
+    def test_and_a_car_on_the_centreline_is_pulled_onto_it(self) -> None:
+        from glisteel.driver import Autopilot
+        course = self._course()
+        driver = Autopilot(course, lane=course.driving_lane)
+        forward = _along(course, 10)
+        middle = driver._back_to_the_line(_Car(forward=forward),
+                                          course.point(10), 10, 20.0)
+        assert abs(middle) > 0.05
+        # Towards its own side, which is the way a positive lane offset lies.
+        beyond = course.lane_point(10, course.driving_lane * 2.0)
+        past = driver._back_to_the_line(_Car(forward=forward), beyond, 10, 20.0)
+        assert float(np.sign(middle)) == -float(np.sign(past))
+
+
+def _along(course, index):
+    """Which way the road runs there, as a unit vector."""
+    ahead = course.point(index + 1) - course.point(index)
+    ahead[1] = 0.0
+    return ahead / np.linalg.norm(ahead)

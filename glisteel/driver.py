@@ -77,9 +77,21 @@ class Autopilot:
     car and a fresh one can be dropped in mid-race.
     """
 
-    def __init__(self, course: Any, style: DriverStyle | None = None) -> None:
+    def __init__(self, course: Any, style: DriverStyle | None = None,
+                 lane: float = 0.0) -> None:
         self.course = course
         self.style = style or DriverStyle()
+        #: How far to its own right of the centreline this driver holds, in
+        #: metres. Zero is the racing line, which is what an empty circuit
+        #: wants; on a road with something coming the other way it is the
+        #: middle of its own half, and the driver keeps a side.
+        self.lane = float(lane)
+
+    def line_at(self, index: int) -> np.ndarray:
+        """The point of the line this driver is following, there."""
+        found: np.ndarray = (self.course.point(index) if not self.lane
+                             else self.course.lane_point(index, self.lane))
+        return found
 
     def update(self, car: Any) -> tuple[float, float, float]:
         """The throttle, brake and steer this driver would use right now."""
@@ -99,8 +111,7 @@ class Autopilot:
     def _aim_point(self, index: int, speed: float) -> np.ndarray:
         """The point up the road the car steers at."""
         reach = LOOK_AHEAD_METRES + speed * LOOK_AHEAD_SECONDS
-        aim: np.ndarray = self.course.point(index + self._points_for(reach))
-        return aim
+        return self.line_at(index + self._points_for(reach))
 
     def _steer_towards(self, car: Any, position: np.ndarray,
                        aim: np.ndarray) -> float:
@@ -124,7 +135,7 @@ class Autopilot:
 
     def _back_to_the_line(self, car: Any, position: np.ndarray, index: int,
                           speed: float) -> float:
-        """The correction for being off the centreline where the car is now.
+        """The correction for being off the line where the car is now.
 
         ``atan2(k * error, speed)``: a heading that closes the error at
         ``k`` metres per second sideways, which is a smaller angle the faster
@@ -138,7 +149,7 @@ class Autopilot:
         if not np.any(forward):                          # pragma: no cover
             return 0.0
         forward /= np.linalg.norm(forward)
-        offset = position - self.course.point(index)
+        offset = position - self.line_at(index)
         offset[1] = 0.0
         # Positive to the car's left, which is the direction a positive steer
         # turns towards -- so the correction is its negative.

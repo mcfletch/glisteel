@@ -255,3 +255,45 @@ class TestWhatTheGroundIsUnderTheWheels:
         near.update((100.0, 0.0, 4.6), 0.1)
         far.update((100.0, 0.0, 12.0), 0.1)
         assert far.surface().rolling > near.surface().rolling
+
+
+class TestHittingSomething:
+    """Leaving the road ends a run and so does running into a car. What ends it
+    is the *impact*, not the contact: brushing a wing at walking pace is a
+    scrape, and meeting the back of a lorry at forty metres a second is not.
+    """
+
+    def _watch(self, **named):
+        from glisteel.race import Collisions
+        return Collisions(**named)
+
+    def test_nothing_has_happened_yet(self) -> None:
+        assert self._watch().ended is None
+
+    def test_a_gentle_touch_is_not_a_crash(self) -> None:
+        watch = self._watch()
+        assert watch.update(closing=1.5, dt=0.1) is None
+        assert watch.ended is None
+
+    def test_meeting_something_at_speed_is(self) -> None:
+        watch = self._watch()
+        assert watch.update(closing=28.0, dt=0.1) is not None
+
+    def test_it_says_so_once(self) -> None:
+        watch = self._watch()
+        watch.update(closing=28.0, dt=0.1)
+        assert watch.update(closing=28.0, dt=0.1) is None
+
+    def test_and_says_what_happened(self) -> None:
+        watch = self._watch()
+        assert 'car' in (watch.update(closing=28.0, dt=0.1) or '').lower()
+
+    def test_restarting_clears_it(self) -> None:
+        watch = self._watch()
+        watch.update(closing=28.0, dt=0.1)
+        watch.restart()
+        assert watch.ended is None
+
+    def test_a_caller_may_set_where_the_line_is(self) -> None:
+        watch = self._watch(survivable=40.0)
+        assert watch.update(closing=28.0, dt=0.1) is None
