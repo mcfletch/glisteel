@@ -35,9 +35,11 @@ over one is worth less.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -137,13 +139,30 @@ class Records:
     # -- keeping it ------------------------------------------------------------
 
     def save(self) -> str:
-        """Write the table out; answer where it went."""
-        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        """Write the table out; answer where it went.
+
+        Beside the file and then moved onto it, so a write that fails part way
+        -- a full disk, a machine that goes down -- leaves the times that were
+        there rather than a file with half a table in it. This module already
+        says a corrupt table is worth nothing; this is what stops one being
+        made. In UTF-8, and as its own characters, because a track may be named
+        in any language and the file is meant to be readable.
+        """
+        beside = os.path.dirname(os.path.abspath(self.path))
+        os.makedirs(beside, exist_ok=True)
         document = {track: [one.to_json() for one in table]
                     for track, table in sorted(self._tables.items()) if table}
-        with open(self.path, 'w', encoding='utf-8') as handle:
-            json.dump(document, handle, indent=2, sort_keys=True)
-            handle.write('\n')
+        handle, temporary = tempfile.mkstemp(dir=beside, suffix='.times-new')
+        try:
+            with os.fdopen(handle, 'w', encoding='utf-8') as writing:
+                json.dump(document, writing, indent=2, sort_keys=True,
+                          ensure_ascii=False)
+                writing.write('\n')
+            os.replace(temporary, self.path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
+            raise
         return self.path
 
     def _read(self) -> dict[str, list[Record]]:

@@ -331,36 +331,63 @@ class Traffic:
         The player counts: a car sitting on the grid is a car in the road, and
         traffic that drove through it would be traffic nobody could race.
         """
-        here = self._station_of(at)
-        mine = float(np.sign(self._offset_of(at)) or 1.0)
+        here, side = self._where_is(at)
+        mine = float(np.sign(side) or 1.0)
+        # Grouped by direction and answered a group at a time. Every car in a
+        # group is looking at the same set of stations, so the comparison is one
+        # array operation each rather than one Python step per pair of cars --
+        # which is what stops a busy road costing the square of what a quiet one
+        # does.
+        groups: dict[int, list[TrafficCar]] = {}
         for car in self.cars:
-            found = None
-            for other in self.cars:
-                if other is car or other.heading != car.heading:
+            groups.setdefault(car.heading, []).append(car)
+        for heading, group in groups.items():
+            stations = np.array([one.station for one in group], dtype='d')
+            speeds = np.array([one.speed for one in group], dtype='d')
+            if mine == float(heading):
+                # The player is a car in the road, and traffic that drove
+                # through them would be traffic nobody could race.
+                stations = np.append(stations, here)
+                speeds = np.append(speeds, float(speed))
+            for index, car in enumerate(group):
+                gaps = self._reaches(car, stations)
+                gaps[index] = np.nan             # not itself
+                if np.all(np.isnan(gaps)):
+                    car.following(None)
                     continue
-                gap = self._reach(car, other.station)
-                if gap is not None and (found is None or gap < found[0]):
-                    found = (gap, other.speed)
-            if mine == float(car.heading):
-                gap = self._reach(car, here)
-                if gap is not None and (found is None or gap < found[0]):
-                    found = (gap, float(speed))
-            car.following(*(found if found is not None else (None, 0.0)))
+                nearest = int(np.nanargmin(gaps))
+                car.following(float(gaps[nearest]), float(speeds[nearest]))
+
+    def _reaches(self, car: TrafficCar, stations: Any) -> np.ndarray:
+        """How far in front of ``car`` each station is; NaN for anything behind.
+
+        The array form of :meth:`_reach`, which is what a group of cars on one
+        side of the road is answered with in one go.
+        """
+        gaps = (np.asarray(stations, dtype='d') - car.station) * car.heading
+        if self.course.closed:
+            length = self.course.length
+            gaps = np.mod(gaps, length)
+            gaps = np.where(gaps > length / 2.0, gaps - length, gaps)
+        return np.where((gaps > 0.0) & (gaps <= LOOK_AHEAD), gaps, np.nan)
 
     def _reach(self, car: TrafficCar, station: float) -> float | None:
         """How far in front of ``car`` a station is, or None if it is behind."""
-        gap = (station - car.station) * car.heading
-        if self.course.closed:
-            gap %= self.course.length
-            if gap > self.course.length / 2.0:
-                gap -= self.course.length
-        return gap if 0.0 < gap <= LOOK_AHEAD else None
+        found = float(self._reaches(car, [station])[0])
+        return None if np.isnan(found) else found
 
-    def _offset_of(self, at: Any) -> float:
-        """Which side of the centreline something is on, and how far."""
-        index, _distance = self.course.nearest(at)
-        offset = np.asarray(at, dtype='d')[:3] - self.course.point(index)
-        return float(np.dot(offset, self.course.across(index)))
+    def _where_is(self, at: Any) -> tuple[float, float]:
+        """How far along the road something is, and which side of it it is on.
+
+        One question rather than two: both answers come from the same nearest
+        point of the centreline, and finding that is a pass over the whole line.
+        """
+        point = np.asarray(at, dtype='d')[:3]
+        index, _distance = self.course.nearest(point)
+        stations = self.course.stations
+        station = float(stations[int(np.clip(index, 0, len(stations) - 1))])
+        offset = point - self.course.point(index)
+        return station, float(np.dot(offset, self.course.across(index)))
 
     def body_of(self, car: TrafficCar) -> int:
         """The physics body driving along under one car."""
@@ -524,9 +551,8 @@ class Traffic:
         return gap
 
     def _station_of(self, at: Any) -> float:
-        index, _offset = self.course.nearest(at)
-        stations = self.course.stations
-        return float(stations[int(np.clip(index, 0, len(stations) - 1))])
+        """How far along the road something is, in metres."""
+        return self._where_is(at)[0]
 
 
 def _limit(course: Any) -> float:

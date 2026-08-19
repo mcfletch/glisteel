@@ -43,7 +43,7 @@ os.environ.setdefault('OPENGLCONTEXT_PROFILE', 'core')
 os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')
 os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')
 
-from OpenGLContext import testingcontext  # noqa: E402
+from OpenGLContext import quaternion, testingcontext  # noqa: E402
 from OpenGLContext.events.systemtime import systemTime  # noqa: E402
 from OpenGLContext.scenegraph.scenegraph import SceneGraph  # noqa: E402
 from OpenGLContext.ui.overlay import OverlayMixin  # noqa: E402
@@ -462,7 +462,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.show_finish(result, self._record(result))
 
     def _aim(self, pose: Any) -> None:           # pragma: no cover - needs a window
-        from OpenGLContext import quaternion
         self.platform.setPosition(tuple(float(v) for v in pose.position))
         aim = (quaternion.fromXYZR(1, 0, 0, -pose.pitch())
                * quaternion.fromXYZR(0, 1, 0, pose.heading()))

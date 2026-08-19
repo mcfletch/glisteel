@@ -159,3 +159,75 @@ class TestWhereTheyAreKept:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestTheTableSurvivesBeingWritten:
+    """A score table is small, but it is the only record of what was driven.
+
+    The module already says a corrupt table is worth nothing; the way one is
+    made is a write interrupted half way through. It is written the way a
+    project file is (:meth:`glisteel_editor.project.Project.save`) -- beside the
+    target, then moved onto it -- so a table is either the old one or the new
+    one and never half of each.
+    """
+
+    def _half_written(self, path):
+        """A table that fails part way through being serialised.
+
+        Not before: what a truncating write loses is the file it had already
+        begun to overwrite, so the failure has to happen once some of it is on
+        disk. ``aaa`` is sorted first and writes cleanly; ``zzz`` cannot be
+        serialised at all.
+        """
+        table = Records(path)
+        table.offer('aaa', 84.115)
+        table._tables['zzz'] = [_Unwritable()]
+        return table
+
+    def test_a_failed_write_leaves_the_previous_table(self, tmp_path) -> None:
+        path = str(tmp_path / 'times.json')
+        first = Records(path)
+        first.offer('ashdown', 84.115)
+        first.save()
+        with pytest.raises(TypeError):
+            self._half_written(path).save()
+        assert Records(path).record('ashdown').seconds == pytest.approx(84.115)
+
+    def test_nothing_is_left_beside_it_when_a_write_fails(self, tmp_path) -> None:
+        path = str(tmp_path / 'times.json')
+        first = Records(path)
+        first.offer('ashdown', 84.115)
+        first.save()
+        with pytest.raises(TypeError):
+            self._half_written(path).save()
+        assert [one.name for one in tmp_path.iterdir()] == ['times.json']
+
+    def test_a_track_named_outside_ascii_reads_back(self, tmp_path) -> None:
+        path = str(tmp_path / 'times.json')
+        table = Records(path)
+        table.offer('nürburgring — nordschleife', 400.5)
+        table.save()
+        assert Records(path).record('nürburgring — nordschleife') is not None
+
+    def test_it_is_written_as_utf_8_whatever_the_locale_is(self, tmp_path) -> None:
+        path = str(tmp_path / 'times.json')
+        table = Records(path)
+        table.offer('ålesund', 84.0)
+        table.save()
+        assert 'ålesund' in open(path, 'rb').read().decode('utf-8')
+
+    def test_an_ordinary_save_still_writes_the_table(self, tmp_path) -> None:
+        path = str(tmp_path / 'nested' / 'times.json')
+        table = Records(path)
+        table.offer('ashdown', 84.115)
+        assert table.save() == path
+        assert Records(path).record('ashdown').seconds == pytest.approx(84.115)
+
+
+class _Unwritable:
+    """A record that cannot be turned into JSON, so the write fails part way."""
+
+    seconds = 0.0
+
+    def to_json(self):
+        return {'seconds': {1, 2, 3}}            # a set is not JSON

@@ -20,6 +20,7 @@ not a reason to make one.
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -32,6 +33,8 @@ from OpenGLContext.loaders.tiles3d.manifest import (
 
 __all__ = ['PICTURE', 'Track', 'home', 'library', 'named',
            'remember_picture', 'tracks_directory']
+
+log = logging.getLogger(__name__)
 
 #: The directory this game keeps a player's own files in, under the platform's
 #: application-data directory.
@@ -84,8 +87,8 @@ class Track:
             return None
         directory = os.path.abspath(where if os.path.isdir(where)
                                     else os.path.dirname(where))
-        tileset = os.path.join(directory, manifest.tileset)
-        if not os.path.exists(tileset):
+        tileset = _beside(directory, manifest.tileset)
+        if tileset is None:
             return None
         return cls(name=manifest.name, directory=directory, tileset=tileset,
                    picture=_beside(directory, manifest.picture),
@@ -190,8 +193,22 @@ def _named_after(directory: str) -> str:
 
 
 def _beside(directory: str, relative: Any) -> str | None:
-    """A file the manifest named, if it is actually there."""
+    """A file the manifest named, if it is there and is *inside* the track.
+
+    A world is a directory that can be moved or copied, and a manifest names
+    what it carries relative to itself. It is also something a player collects
+    from somebody else, so the name in it is input rather than data: a manifest
+    naming ``../../..`` or an absolute path is describing a file that is not
+    part of the world it came with, and there is no reason to follow it.
+    Anything outside reads as no file at all, which is what a track with no
+    picture already is.
+    """
     if not relative:
         return None
-    where = os.path.join(directory, str(relative))
+    root = os.path.realpath(directory)
+    where = os.path.realpath(os.path.join(root, str(relative)))
+    if os.path.commonpath([root, where]) != root:
+        log.warning('%s names %r, which is outside the track it came with',
+                    directory, str(relative))
+        return None
     return where if os.path.exists(where) else None

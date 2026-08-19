@@ -30,6 +30,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from OpenGLContext.passes import ibl
 
 __all__ = ['CONTEXTS', 'FOREST', 'TUNNEL', 'VIADUCT', 'OPEN',
            'Reflections', 'context_at', 'panorama']
@@ -117,7 +118,6 @@ class Reflections:
 
 def _register(environment: np.ndarray) -> None:
     """Hand an environment to the renderer's probe."""
-    from OpenGLContext.passes import ibl
     ibl.set_equirect_env(environment)
 
 

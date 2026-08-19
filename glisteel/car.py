@@ -180,8 +180,13 @@ class Car:
                                 float(local[2]))
             # Roll the wheel at the speed the car is going, and steer the ones
             # that steer. A wheel that does not turn makes a car look towed.
-            self._wheel_spin[index] -= self.vehicle.forward_speed() * dt \
-                / max(wheel.spec.radius, 1e-3)
+            # Kept inside one turn. The angle only ever grows otherwise, and a
+            # long race is tens of thousands of revolutions -- far enough out
+            # that the float it is drawn with can no longer tell one degree of
+            # wheel from the next.
+            self._wheel_spin[index] = math.remainder(
+                self._wheel_spin[index] - self.vehicle.forward_speed() * dt
+                / max(wheel.spec.radius, 1e-3), 2.0 * math.pi)
             node.rotation = (0.0, 1.0, 0.0, wheel.steer_angle)
             node.children[0].rotation = (1.0, 0.0, 0.0, self._wheel_spin[index])
         self._turn_the_rim()

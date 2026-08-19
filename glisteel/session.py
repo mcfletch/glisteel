@@ -65,10 +65,22 @@ STUCK_SPEED = 1.0
 CONTACT_REACH = 6.0
 
 #: How high over the grid a car is put before it is dropped onto it, in metres,
-#: and how long it is left to settle. The player is handed a car that is already
-#: standing on its wheels rather than one still falling.
+#: and the longest it is left to settle. The player is handed a car that is
+#: already standing on its wheels rather than one still falling; the settle
+#: stops as soon as it is standing, so this is a limit rather than a cost.
 GRID_HEIGHT = 6.0
 SETTLE_SECONDS = 1.5
+
+#: How slowly the car has to be moving to count as standing, in metres per
+#: second. Not zero: a car resting on springs is never exactly still, and
+#: waiting for exactly nothing is waiting for the whole budget every time.
+SETTLED_SPEED = 0.05
+
+#: How far over the road the car is put when the world can say where its road
+#: is, in metres. Enough that the wheels are clear of the surface and the
+#: suspension drops onto it rather than starting compressed; short enough that
+#: the fall is over in a few frames of simulation rather than a second of it.
+GRID_DROP = 0.9
 
 #: How many laps a race is unless a caller says otherwise. One: an empty
 #: circuit and a single lap is what a timed lap is, and it is what a record
@@ -176,8 +188,12 @@ class Session:
         if not world.settled(tuple(float(v) for v in standing)):
             log.warning("the ground under the grid has not loaded; "
                         "the car may fall")
-        position, heading = course.grid_position(self.grid, height=GRID_HEIGHT,
-                                                 lane=self.lane)
+        # Where the grid's own ground is, asked once and before the car exists:
+        # a raycast does not exclude the car's own bodies, and the answer is
+        # what a restart needs as much as a start. None where the world cannot
+        # say, and then the car is dropped from a height as it always was.
+        self._grid_ground = world.ground_under(standing)
+        position, heading = self._grid_placement()
         self.car = Car(world.physics, spec or CarSpec(), position=position,
                        heading=heading)
         #: What the car is lit and reflected by, which follows the road.
@@ -320,8 +336,7 @@ class Session:
     def restart(self) -> None:
         """A fresh race, from the grid, on the lights."""
         self.grid = self.course.start_index
-        position, heading = self.course.grid_position(
-            self.grid, height=GRID_HEIGHT, lane=self.lane)
+        position, heading = self._grid_placement()
         self.car.place(position, heading)
         self.timing.restart()
         self.watch.restart()
@@ -331,6 +346,22 @@ class Session:
         self._settle()
 
     # -- inside the frame ------------------------------------------------------
+
+    def _grid_placement(self) -> tuple[Any, float]:
+        """Where to put the car to start, and which way to face it.
+
+        Just over the road where the world knows where its road is, and
+        :data:`GRID_HEIGHT` over the grid where it does not. The difference is a
+        second of free fall that has to be simulated before the player sees the
+        car -- once when the session is built and again on every restart, which
+        is the one the player waits for.
+        """
+        position, heading = self.course.grid_position(
+            self.grid, height=GRID_HEIGHT, lane=self.lane)
+        if self._grid_ground is not None:
+            position = np.asarray(position, dtype='d').copy()
+            position[1] = float(self._grid_ground) + GRID_DROP
+        return position, heading
 
     def _replace(self) -> None:
         """Stand the car on the road nearest where it got to, stopped."""
@@ -416,17 +447,37 @@ class Session:
                 pose.position, pose.target, (width or 1) / (height or 1)))
 
     def _settle(self) -> None:
-        """Drop the car the last few metres before the player gets it.
+        """Drop the car onto the grid before the player gets it.
 
         On the brake all the way down, because what is being handed over is a
         car standing on the grid: one that lands on a slope with the brake off
         is already rolling by the time anybody sees it, and a car rolling when
         the player takes it is a car they did not put in motion.
+
+        It runs until the car has *stopped*, rather than for a fixed time.
+        :data:`SETTLE_SECONDS` is the longest it will wait -- for a car that
+        landed badly, or has nothing under it -- but a car dropped onto flat
+        road is standing within a fraction of that, and the rest was a machine
+        simulating a car that was already still. That is spent once when a
+        session is built and again on every restart, where it is a hitch the
+        player sees.
         """
         for _ in range(int(SETTLE_SECONDS / PHYSICS_STEP)):
             self.car.control(brake=1.0)
             self.car.update(PHYSICS_STEP)
             self.world.physics.step(PHYSICS_STEP)
+            if self._standing_still():
+                break
         self.car.control()
         self.car.follow(PHYSICS_STEP)
         self.camera.reset()
+
+    def _standing_still(self) -> bool:
+        """Whether the car has stopped moving, in any direction.
+
+        Both parts matter: a car that has come to rest horizontally may still be
+        dropping onto its springs, and one whose suspension has taken up may
+        still be rolling down a slope.
+        """
+        return bool(self.car.speed() < SETTLED_SPEED
+                    and abs(float(self.car.velocity()[1])) < SETTLED_SPEED)

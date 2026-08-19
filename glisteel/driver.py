@@ -139,20 +139,30 @@ class Autopilot:
         every car it was put in.
         """
         speed = float(car.speed())
-        index, _ = self.course.nearest(np.asarray(car.position, dtype='d'))
+        position = np.asarray(car.position, dtype='d')
+        index, _ = self.course.nearest(position)
         return (*self._pedals(speed, self.target_speed(index, speed)),
-                self.steering(car))
+                self.steering(car, index=index, position=position, speed=speed))
 
-    def steering(self, car: Any) -> float:
+    def steering(self, car: Any, index: int | None = None,
+                 position: Any = None, speed: float | None = None) -> float:
         """The steering input that puts this car back on the line.
 
         Separate from the pedals, because holding a car on a line and choosing
         how fast to go are different jobs and something may want only the first
         -- :class:`~glisteel.assist.Straighten` is the case that does.
+
+        ``index``, ``position`` and ``speed`` are what :meth:`update` has
+        already worked out about this car this step; a caller that has them
+        passes them rather than having the course asked a second time about a
+        car that has not moved in between.
         """
-        position = np.asarray(car.position, dtype='d')
-        speed = float(car.speed())
-        index, _ = self.course.nearest(position)
+        if position is None:
+            position = np.asarray(car.position, dtype='d')
+        if speed is None:
+            speed = float(car.speed())
+        if index is None:
+            index, _ = self.course.nearest(position)
         aim = self._aim_point(index, speed)
         heading = (self._error_towards(car, position, aim)
                    * self.style.steering_gain
@@ -254,8 +264,14 @@ class Autopilot:
         """
         reach = BRAKING_METRES + speed * BRAKING_SECONDS
         ahead = max(2, self._points_for(reach))
-        limits = [self._corner_speed(index + step) for step in range(ahead)]
-        wanted = min(min(limits), self.style.maximum_speed) * self.style.margin
+        # One pass over the road's own radii rather than working each bend out
+        # again: the shape of a course is settled when it is read, and this is
+        # asked for by every driver on the road every frame.
+        radii = self.course.radii
+        wanted_indices = (index + np.arange(ahead)) % len(radii)
+        tightest = float(radii[wanted_indices].min())
+        limit = math.sqrt(self.style.grip * 9.81 * tightest)
+        wanted = min(limit, self.style.maximum_speed) * self.style.margin
         return min(wanted, self._room())
 
     def _room(self) -> float:
@@ -274,30 +290,18 @@ class Autopilot:
 
     def _corner_speed(self, index: int) -> float:
         """The speed a bend of the road's own radius allows."""
-        radius = self.curve_radius(index)
-        return math.sqrt(self.style.grip * 9.81 * radius)
+        return math.sqrt(self.style.grip * 9.81 * self.curve_radius(index))
 
     def curve_radius(self, index: int) -> float:
-        """The radius of the circle through three consecutive course points.
+        """The radius of the bend at one point of the road, in metres.
 
-        A straight gives an enormous radius rather than an infinite one, which
-        the speed limit then caps; the alternative is a special case in the one
-        place the number is used.
+        The course works this out for the whole line at once and keeps it
+        (:attr:`glisteel.world.Course.radii`), since it is geometry and cannot
+        change while the car drives round it. This is the single-point way in,
+        for anything asking about one bend rather than about the road ahead.
         """
-        a = self.course.point(index - 1)[[0, 2]]
-        b = self.course.point(index)[[0, 2]]
-        c = self.course.point(index + 1)[[0, 2]]
-        first, second, third = (float(np.linalg.norm(b - a)),
-                                float(np.linalg.norm(c - b)),
-                                float(np.linalg.norm(c - a)))
-        # Twice the triangle's area, from the two-dimensional cross product of
-        # two of its sides. Written out because numpy 2 dropped the 2-D form.
-        first_side, second_side = b - a, c - a
-        area2 = abs(float(first_side[0] * second_side[1]
-                          - first_side[1] * second_side[0]))
-        if area2 < 1e-9:
-            return 1e6
-        return first * second * third / (2.0 * area2)
+        radii = self.course.radii
+        return float(radii[index % len(radii)])
 
     def _pedals(self, speed: float, target: float) -> tuple[float, float]:
         """Throttle and brake from how far off the target speed the car is."""

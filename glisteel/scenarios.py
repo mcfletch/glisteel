@@ -98,6 +98,9 @@ class Scenario:
     total_width: float = 10.6
     #: Boulders on the verges, as (station along the road, which side).
     boulders: tuple[tuple[float, float], ...] = ()
+    #: What has been worked out from the above and need not be again. A frozen
+    #: scenario describes one piece of road, so anything derived from it is
+    #: derived once.
     _cache: dict = field(default_factory=dict, compare=False, repr=False)
 
     # -- one piece of road, or two ---------------------------------------------
@@ -133,7 +136,19 @@ class Scenario:
         return np.stack([plan[:, 0], height, plan[:, 1]], axis=-1)
 
     def course(self) -> Course:
-        """This piece of road as the game reads one."""
+        """This piece of road as the game reads one.
+
+        Kept: :meth:`world` wants it three times over -- for the road itself,
+        for the depth the ground sits at, and for placing what stands beside it
+        -- and it is the same road each time. A scenario is frozen, so there is
+        nothing that could make the answer change.
+        """
+        found = self._cache.get('course')
+        if found is None:
+            found = self._cache['course'] = self._course()
+        return found
+
+    def _course(self) -> Course:
         line = self.centreline()
         ends = np.vstack([line, line[:1]]) if self.closed else line
         return Course(

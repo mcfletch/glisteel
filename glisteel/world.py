@@ -14,6 +14,7 @@ which way it faces, and tells the timing where the lap begins.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import math
 import os
@@ -22,11 +23,13 @@ from typing import Any
 
 import numpy as np
 from omi_physics import model
+from omi_physics.raycast import raycast
 from omi_physics.world import PhysicsWorld
 from OpenGLContext.loaders.tiles3d import fetch
+from OpenGLContext.loaders.tiles3d.frustum import view_projection as frustum_matrix
 from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
 
-__all__ = ['Course', 'RaceWorld', 'load_courses']
+__all__ = ['Course', 'RaceWorld', 'courses_in', 'load_courses']
 
 #: How much memory the streamer may hold in tiles. A racing camera sees a long
 #: way and returns to the same ground every lap, so a circuit is worth keeping
@@ -117,11 +120,87 @@ class Course:
                            shoulder_width=beside * 0.4,
                            verge_width=beside * 0.6)
 
-    @property
+    @functools.cached_property
     def stations(self) -> np.ndarray:
-        """Distance along the road to each centreline point."""
+        """Distance along the road to each centreline point.
+
+        Worked out once. A course is read from a baked world and does not move
+        after that, and this is asked for by everything that places anything
+        along the road -- every traffic car, every frame. Call :meth:`moved` if
+        the line is ever replaced under it.
+        """
         steps = np.linalg.norm(np.diff(self.centreline, axis=0), axis=1)
         return np.concatenate([[0.0], np.cumsum(steps)])
+
+    @functools.cached_property
+    def segments(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The road's segments on the ground: where each starts, where it goes,
+        and the square of how long it is.
+
+        What :meth:`nearest` measures against, worked out once rather than per
+        question: the alternative is a fresh copy of the whole centreline, two
+        dot products and a division every time anything asks where the car is,
+        which several things do about the same car in the same frame.
+        """
+        line = self.centreline[:, [0, 2]]
+        if self.closed:
+            starts = line
+            delta = np.roll(line, -1, axis=0) - line
+        else:
+            starts, delta = line[:-1], line[1:] - line[:-1]
+        length2 = np.einsum('ij,ij->i', delta, delta)
+        return starts, delta, np.where(length2 > 0, length2, 1.0)
+
+    @functools.cached_property
+    def radii(self) -> np.ndarray:
+        """The radius of the bend at each point of the line, in metres.
+
+        The circle through each point and its two neighbours, measured on the
+        ground. Pure geometry, and therefore settled the moment the course is:
+        how fast a bend may be taken depends on the driver, but how tight it is
+        does not. A straight gives an enormous radius rather than an infinite
+        one, which whatever reads it then caps -- the alternative is a special
+        case in every caller.
+
+        What reads it is :meth:`glisteel.driver.Autopilot.target_speed`, which
+        wants the tightest bend within braking distance and would otherwise work
+        out sixty of these per driver per frame.
+        """
+        line = self.ground_line
+        before = np.roll(line, 1, axis=0)
+        after = np.roll(line, -1, axis=0)
+        if not self.closed:
+            # An open road has no bend at its ends: hold the first and last to
+            # their neighbours rather than wrapping onto the other end of the
+            # world.
+            before[0], after[-1] = line[0], line[-1]
+        first = np.linalg.norm(line - before, axis=1)
+        second = np.linalg.norm(after - line, axis=1)
+        third = np.linalg.norm(after - before, axis=1)
+        side, other = line - before, after - before
+        area2 = np.abs(side[:, 0] * other[:, 1] - side[:, 1] * other[:, 0])
+        return np.where(area2 < 1e-9, 1e6,
+                        first * second * third / (2.0 * np.maximum(area2, 1e-30)))
+
+    #: The last position :meth:`nearest` was asked about and what it answered.
+    _last_nearest: tuple[tuple[float, float], tuple[int, float]] | None = None
+
+    def moved(self) -> None:
+        """The line has been replaced: forget what was worked out from it.
+
+        Nothing in the game does this -- a baked world's road is what it is --
+        but a tool that edits a course in place has to be able to say so, and a
+        cache with no way to clear it is a trap rather than a saving.
+        """
+        for name in ('stations', 'segments', 'ground_line', 'radii'):
+            self.__dict__.pop(name, None)
+        self._last_nearest = None
+
+    @functools.cached_property
+    def ground_line(self) -> np.ndarray:
+        """The centreline seen from above, which is what distances are taken in."""
+        found: np.ndarray = self.centreline[:, [0, 2]]
+        return found
 
     def inside(self, kind: str, x: Any, z: Any, margin: float = 0.0,
                along: float = 0.0) -> Any:
@@ -141,20 +220,48 @@ class Course:
             return found
         reach = self.total_width / 2.0 + margin
         stations = self.stations
-        line = self.centreline
+        line = self.ground_line
         points = np.stack([np.asarray(x, 'd').ravel(),
                            np.asarray(z, 'd').ravel()], axis=-1)
+        flat = found.reshape(-1)
         for one in wanted:
             run = one.holds(stations, along=along)
             if not run.any():
                 continue
-            near = line[run][:, [0, 2]]
-            # Distance to the run's own points rather than to its segments: the
-            # centreline is written densely enough that the difference is under
-            # a metre, and the margin is metres.
-            gaps = np.linalg.norm(points[:, None, :] - near[None, :, :], axis=-1)
-            found |= (gaps.min(axis=1) <= reach).reshape(found.shape)
+            near = line[run]
+            self._within(points, near, reach, flat)
         return found
+
+    #: How many ground samples are measured against a structure at a time. The
+    #: work is samples times road points, and a field terrain asks about a whole
+    #: chunk at once against a road that may be thousands of points long -- so
+    #: the whole product is never held, only a slice of it. Large enough that
+    #: numpy is doing the work rather than the loop around it.
+    CHUNK = 4096
+
+    def _within(self, points: np.ndarray, near: np.ndarray, reach: float,
+                found: np.ndarray) -> None:
+        """Mark every point within ``reach`` of any of ``near``, in place.
+
+        Distance to the run's own points rather than to its segments: the
+        centreline is written densely enough that the difference is under a
+        metre, and the margin is metres.
+
+        Two things keep this off the point-by-point matrix it reads as. Only the
+        samples inside the run's own bounding box, grown by ``reach``, can be
+        near it at all -- which on a road that crosses a landscape is nearly all
+        of them ruled out by two comparisons. What is left is measured
+        :attr:`CHUNK` samples at a time, so the largest array in flight is a
+        slice rather than the product.
+        """
+        low = near.min(axis=0) - reach
+        high = near.max(axis=0) + reach
+        maybe = np.flatnonzero(np.all((points >= low) & (points <= high), axis=1))
+        for start in range(0, len(maybe), self.CHUNK):
+            batch = maybe[start:start + self.CHUNK]
+            gaps = points[batch][:, None, :] - near[None, :, :]
+            close = np.einsum('ijk,ijk->ij', gaps, gaps).min(axis=1) <= reach ** 2
+            found[batch[close]] = True
 
     def point(self, index: int) -> np.ndarray:
         """One point of the centreline, wrapping round a closed circuit."""
@@ -184,17 +291,30 @@ class Course:
 
         Measured across the ground, so a car in the air over the track is still
         on it.
+
+        The last answer is kept. Within one physics step the lap timing, the
+        off-road watch, whoever is driving and the steering aid all ask about
+        the same car, which has not moved in between -- so the second and third
+        of those are answered without another pass over the line.
         """
-        point = np.asarray(position, dtype='d')[[0, 2]]
-        line = self.centreline[:, [0, 2]]
+        wanted = np.asarray(position, dtype='d').reshape(-1)
+        key = (float(wanted[0]), float(wanted[2]))
+        if self._last_nearest is not None and self._last_nearest[0] == key:
+            found: tuple[int, float] = self._last_nearest[1]
+            return found
+        answer = self._nearest(key)
+        self._last_nearest = (key, answer)
+        return answer
+
+    def _nearest(self, where: tuple[float, float]) -> tuple[int, float]:
+        """:meth:`nearest`, without the memo in front of it."""
+        point = np.asarray(where, dtype='d')
+        line = self.ground_line
         gaps = np.linalg.norm(line - point, axis=1)
         index = int(gaps.argmin())
-        start = line if self.closed else line[:-1]
-        delta = np.roll(line, -1, axis=0) - line if self.closed \
-            else line[1:] - line[:-1]
-        length2 = np.einsum('ij,ij->i', delta, delta)
-        along = np.clip(np.einsum('ij,ij->i', point - start, delta)
-                        / np.where(length2 > 0, length2, 1.0), 0.0, 1.0)
+        start, delta, length2 = self.segments
+        along = np.clip(np.einsum('ij,ij->i', point - start, delta) / length2,
+                        0.0, 1.0)
         off = np.linalg.norm(start + along[:, None] * delta - point, axis=1)
         return index, float(off.min())
 
@@ -266,7 +386,16 @@ class Course:
 
 def load_courses(tileset_path: str) -> list[Course]:
     """The roads a baked world carries, or an empty list if it has none."""
-    document = json.loads(fetch.read_bytes(tileset_path))
+    return courses_in(json.loads(fetch.read_bytes(tileset_path)))
+
+
+def courses_in(document: Any) -> list[Course]:
+    """The roads in a tileset document already read.
+
+    Separate from :func:`load_courses` because a world wants the roads, the
+    obstacles and the lamps out of one file, and reading it three times to get
+    them is three parses of a document that can be large.
+    """
     roads = (document.get('extras') or {}).get('roads') or []
     out = []
     for road in roads:
@@ -288,6 +417,48 @@ def load_courses(tileset_path: str) -> list[Course]:
                 for one in road.get('structures') or ())))
     return out
 
+
+def _baked_props(extras: Any) -> list:
+    """The obstacles a world carries, out of its tileset's ``extras``.
+
+    Not off the tiles: tile geometry is level-of-detail geometry that arrives
+    and leaves as the car moves, and a collider built from it would be a boulder
+    the car drives through at the moment the tile behind it swaps. The baker
+    writes them into ``extras`` for exactly this.
+    """
+    from OpenGLContext.scenegraph.props import Prop
+    return [Prop.from_json(one) for one in (extras.get('props') or [])]
+
+
+def _baked_luminaires(extras: Any) -> Any:
+    """Where the lamps hang in a world's bores, out of its tileset's ``extras``.
+
+    The pool each throws is baked onto the lining and needs nothing from the
+    game. These are for lighting what is *in* the bore -- the car, and the road
+    under it -- which the lining cannot do.
+    """
+    wanted = extras.get('luminaires') or []
+    if len(wanted) > MOST_LUMINAIRES:
+        raise ValueError(
+            'this world declares %d luminaires, which is more than a world has '
+            '(the limit is %d)' % (len(wanted), MOST_LUMINAIRES))
+    try:
+        found = np.asarray(wanted, dtype='d')
+    except (TypeError, ValueError) as error:
+        raise ValueError('the luminaires in this world are not numbers: %s'
+                         % (error,)) from error
+    if found.size % 3 or (found.size and found.ndim not in (1, 2)):
+        raise ValueError(
+            'the luminaires in this world are %d numbers, which is not a whole '
+            'number of points' % found.size)
+    return found.reshape(-1, 3)
+
+
+#: The most lamps a world may declare. A bore has one every twenty-five metres,
+#: so a world of them is thousands rather than millions: past this the number is
+#: not a world but an allocation, and a tileset is something a player may have
+#: been handed by somebody else.
+MOST_LUMINAIRES = 1_000_000
 
 #: How far under a starting position its ground may be, in metres, before the
 #: world counts as settled. A grid slot sits about a metre over the surface it
@@ -360,9 +531,14 @@ class RaceWorld:
         # instead, each from the thing itself rather than from a drawing of it.
         self.terrain = TilesTerrain(tileset_path, memory_budget=memory,
                                     max_sse=max_sse)
-        self._assemble(load_courses(tileset_path), field=self.terrain.field,
-                       props=self._baked_props(), traffic=traffic,
-                       gravity=gravity, luminaires=self._baked_luminaires())
+        # One read and one parse. The roads, the obstacles and the lamps are
+        # three readers of one file, and a tileset for a world worth driving is
+        # not a small one.
+        document = json.loads(fetch.read_bytes(tileset_path))
+        extras = (document.get('extras') or {})
+        self._assemble(courses_in(document), field=self.terrain.field,
+                       props=_baked_props(extras), traffic=traffic,
+                       gravity=gravity, luminaires=_baked_luminaires(extras))
 
     @classmethod
     def from_course(cls, courses: Any, field: Any = None, props: Any = (),
@@ -424,30 +600,6 @@ class RaceWorld:
             self.traffic = Traffic(self.course, count=int(traffic),
                                    physics=self.physics,
                                    ground=self.ground_under)
-
-    def _baked_props(self) -> list:
-        """The obstacles this world carries, read off the tileset.
-
-        Not off the tiles: tile geometry is level-of-detail geometry that
-        arrives and leaves as the car moves, and a collider built from it would
-        be a boulder the car drives through at the moment the tile behind it
-        swaps. The baker writes them into ``extras`` for exactly this.
-        """
-        from OpenGLContext.scenegraph.props import Prop
-        document = json.loads(fetch.read_bytes(self.path))
-        found = (document.get('extras') or {}).get('props') or []
-        return [Prop.from_json(one) for one in found]
-
-    def _baked_luminaires(self) -> Any:
-        """Where the lamps hang in this world's bores, read off the tileset.
-
-        The pool each throws is baked onto the lining and needs nothing from
-        the game. These are for lighting what is *in* the bore -- the car, and
-        the road under it -- which the lining cannot do.
-        """
-        document = json.loads(fetch.read_bytes(self.path))
-        found = (document.get('extras') or {}).get('luminaires') or []
-        return np.asarray(found, dtype='d').reshape(-1, 3)
 
     def _bores(self) -> Any:
         """Where the ground is not there, because a road runs inside it.
@@ -523,8 +675,7 @@ class RaceWorld:
         back from the renderer, because the streaming runs before the frame it
         is preparing tiles for.
         """
-        from OpenGLContext.loaders.tiles3d.frustum import view_projection
-        return view_projection(tuple(float(v) for v in eye),
+        return frustum_matrix(tuple(float(v) for v in eye),
                                tuple(float(v) for v in target), (0.0, 1.0, 0.0),
                                fov, aspect, near,
                                far if far is not None else VIEW_DISTANCE)
@@ -568,7 +719,6 @@ class RaceWorld:
         The car's own bodies are not excluded, so ask before adding them or
         about a point that is not inside one.
         """
-        from omi_physics.raycast import raycast
         point = np.asarray(position, dtype='d')
         hit = raycast(self.physics, point + np.array([0.0, 1.0, 0.0]),
                       (0.0, -1.0, 0.0), max_distance=reach)
