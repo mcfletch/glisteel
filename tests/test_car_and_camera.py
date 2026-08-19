@@ -10,9 +10,18 @@ import math
 import numpy as np
 import pytest
 from omi_physics.world import PhysicsWorld
+from OpenGLContext.loaders.assets import bounds
 
+from glisteel import models
 from glisteel.camera import ChaseCamera
-from glisteel.car import Car, CarSpec, car_body_mesh, wheel_mesh
+from glisteel.car import (
+    BODY_HEIGHT,
+    CABIN_HEIGHT,
+    Car,
+    CarSpec,
+    car_body_mesh,
+    wheel_mesh,
+)
 from glisteel.world import static_ground
 
 STEP = 1.0 / 120.0
@@ -150,9 +159,11 @@ class TestHowItIsDrawn:
         assert np.allclose(radius, 0.4, atol=1e-5)
         assert points[:, 0].max() - points[:, 0].min() == pytest.approx(0.2)
 
-    def test_the_car_has_a_body_a_cabin_and_four_wheels(self, floor) -> None:
+    def test_the_car_has_its_shells_and_four_wheels(self, floor) -> None:
+        """The outside of the car -- bodywork and wheels -- switches together."""
         car = Car(floor, position=(0, 1.0, 0))
-        assert len(car.node.children[0].choice[0].children) == 6
+        assert len(car.node.children[0].choice[0].children) == 5
+        assert len(car._wheel_nodes) == 4
 
 
 class TestTheCamera:
@@ -260,7 +271,15 @@ class TestTheCarIsPaintedWhereTheRendererLooks:
             assert shape.appearance is not None
             assert shape.appearance.material is not None
 
-    def test_the_body_wears_the_paint_it_was_given(self, floor) -> None:
+    def test_the_fallback_body_wears_the_paint_it_was_given(self, floor,
+                                                            monkeypatch) -> None:
+        """``CarSpec.paint`` is what the primitive car is painted.
+
+        The model carries its own paint and keeps it; the spec's colour is for
+        the car drawn when there is no model to load.
+        """
+        monkeypatch.setattr(models.ART, 'load', lambda relative: None)
+        monkeypatch.setattr(models.ART, 'shared', lambda relative: None)
         car = Car(floor, CarSpec(paint=(0.8, 0.1, 0.05)), position=(0, 1.0, 0))
         colours = [tuple(round(float(v), 3)
                          for v in shape.appearance.material.baseColor)
@@ -268,7 +287,7 @@ class TestTheCarIsPaintedWhereTheRendererLooks:
         assert (0.8, 0.1, 0.05) in colours
 
     def test_the_tyres_are_black_and_the_glass_is_not_the_paint(self, floor) -> None:
-        car = Car(floor, CarSpec(paint=(0.8, 0.1, 0.05)), position=(0, 1.0, 0))
+        car = Car(floor, position=(0, 1.0, 0))
         colours = {tuple(round(float(v), 2)
                          for v in shape.appearance.material.baseColor)
                    for shape in _shapes(car.node)}
@@ -420,3 +439,126 @@ class TestWhichWayItIsGoing:
         _drive(floor, car, 4.0, throttle=1.0)
         assert float(np.linalg.norm(car.velocity())) \
             == pytest.approx(car.speed(), rel=0.15)
+
+
+class TestTheCarIsTheModel:
+    """The car draws the shipped model, and drives what the model carries."""
+
+    def test_it_draws_the_shipped_shells(self, floor) -> None:
+        car = Car(floor)
+        drawn = [one.DEF for one in _named(car.node)]
+        for name in (models.BODY, models.INTERIOR, models.GLASS):
+            assert name in drawn, 'the car does not draw its %s' % (name,)
+
+    def test_the_cockpit_view_keeps_the_interior_and_the_glass(self, floor) -> None:
+        """Only the bodywork goes: the driver looks at a dash through a screen."""
+        car = Car(floor)
+        car.hidden = True
+        drawn = [one.DEF for one in _named(car.node)]
+        assert models.BODY not in drawn
+        assert models.INTERIOR in drawn and models.GLASS in drawn
+
+    def test_the_cockpit_view_takes_the_wheels_with_the_bodywork(self, floor) -> None:
+        """Wheels without the arches around them are four discs in mid-air."""
+        car = Car(floor)
+        car.hidden = True
+        assert not any(_shapes(node) and _visible(node, car)
+                       for node in car._wheel_nodes)
+
+    def test_the_rim_follows_the_front_wheels(self, floor) -> None:
+        """Steering left turns the rim one way, right the other, straight none."""
+        car = Car(floor)
+        angles = {}
+        for name, steer in (('left', 1.0), ('straight', 0.0), ('right', -1.0)):
+            _drive(floor, car, 0.4, throttle=0.2, steer=steer)
+            angles[name] = _rim_angle(car)
+        assert angles['left'] > angles['straight'] > angles['right']
+
+    def test_it_rolls_on_the_wheel_models(self, floor) -> None:
+        car = Car(floor)
+        assert len(car._wheel_nodes) == 4
+        for node in car._wheel_nodes:
+            assert _shapes(node), 'a wheel with nothing drawn in it'
+
+    def test_a_missing_model_leaves_a_car_that_still_drives(self, floor, monkeypatch) -> None:
+        """Art is not rules: without its model the car is drawn from primitives."""
+        monkeypatch.setattr(models.ART, 'load', lambda relative: None)
+        monkeypatch.setattr(models.ART, 'shared', lambda relative: None)
+        car = Car(floor)
+        _drive(floor, car, 1.0, throttle=0.5)
+        assert _shapes(car.node), 'nothing at all is drawn'
+        assert float(car.speed()) > 0.0
+
+
+def _visible(node, car):
+    """Whether a node is drawn: it is, unless a switched-off shell holds it."""
+    return node in _reachable(car.node)
+
+
+def _reachable(node, out=None):
+    out = [] if out is None else out
+    out.append(node)
+    for child in ((getattr(node, 'children', None) or [])
+                  + (getattr(node, 'choice', None) or [])[
+                      :max(getattr(node, 'whichChoice', -1) + 1, 0)]):
+        _reachable(child, out)
+    return out
+
+
+def _named(node, out=None):
+    """Every node in a subtree that carries a DEF name."""
+    out = [] if out is None else out
+    if getattr(node, 'DEF', ''):
+        out.append(node)
+    for child in getattr(node, 'children', None) or ():
+        _named(child, out)
+    for choice in getattr(node, 'choice', None) or ():
+        if getattr(node, 'whichChoice', -1) >= 0:
+            _named(choice, out)
+    return out
+
+
+def _rim_angle(car):
+    rim = car.rim
+    assert rim is not None
+    axis = np.asarray(rim.rotation[:3], dtype='d')
+    return float(rim.rotation[3]) * (1.0 if axis[1] >= 0.0 else -1.0)
+
+
+class TestTheDriverSitsWhereTheModelPutsThem:
+    """The cockpit eye against the interior it is inside of.
+
+    The seat, the wheel and the roof are the model's; where the eye goes has to
+    agree with them, or the driver looks through the dashboard, out of the roof
+    or from the passenger's chair.
+    """
+
+    def _eye(self, floor):
+        """The cockpit eye, in the car's own space: the car is at the origin."""
+        car = Car(floor, position=(0.0, 0.0, 0.0))
+        camera = ChaseCamera('cockpit')
+        return np.asarray(camera.update(car, 0.0).position, dtype='d'), car
+
+    def test_the_eye_is_inside_the_cabin(self, floor) -> None:
+        eye, car = self._eye(floor)
+        low, high = bounds(models.ART.load(models.HERO).getDEF(models.INTERIOR))
+        assert low[1] < eye[1] < BODY_HEIGHT / 2.0 + CABIN_HEIGHT, 'through the roof'
+        assert low[2] - 0.3 < eye[2] < high[2] + 0.3, 'not in the cabin at all'
+
+    def test_the_eye_is_behind_the_wheel(self, floor) -> None:
+        """A driver looks past the rim, not from in front of it."""
+        eye, car = self._eye(floor)
+        wheel = bounds(models.ART.load(models.HERO).getDEF(models.COLUMN))
+        assert eye[2] > wheel[1][2], 'the eye is ahead of the steering wheel'
+
+    def test_the_eye_is_over_the_driver_s_seat(self, floor) -> None:
+        """The player sits where the model puts the wheel, wherever that is.
+
+        This car seats two in single file down the centreline, so both the seat
+        and the wheel are there; a model that moved the wheel to one side would
+        have to bring the eye with it, which is what this holds.
+        """
+        eye, car = self._eye(floor)
+        wheel = bounds(models.ART.load(models.HERO).getDEF(models.COLUMN))
+        side = (wheel[0][0] + wheel[1][0]) / 2.0
+        assert abs(eye[0] - side) < 0.20, 'the eye is not over the wheel'

@@ -40,7 +40,7 @@ from OpenGLContext.video.recorder import RecordingMixin  # noqa: E402
 from OpenGLContext.viewer import environment  # noqa: E402
 from OpenGLContext.viewer.sceneviewer import ViewerContext  # noqa: E402
 
-from glisteel.camera import ChaseCamera  # noqa: E402
+from glisteel.camera import VIEWS, ChaseCamera  # noqa: E402
 from glisteel.car import Car, CarSpec  # noqa: E402
 from glisteel.driver import Autopilot  # noqa: E402
 from glisteel.hud import RaceHUD  # noqa: E402
@@ -51,6 +51,7 @@ from glisteel.race import (  # noqa: E402
     closing_speed,
     off_course,
 )
+from glisteel.reflections import Reflections  # noqa: E402
 from glisteel.steering import KeyboardWheel, MouseWheel  # noqa: E402
 from glisteel.world import RaceWorld  # noqa: E402
 
@@ -115,6 +116,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     #: :class:`~glisteel.steering.KeyboardWheel`.
     keys: KeyboardWheel | None = None
     hud: Any = None
+    reflections: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
     addEventHandler: Any
@@ -130,7 +132,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self._clock = systemTime()
         self._accumulated = 0.0
         self._stuck_for = 0.0
-        self.camera = ChaseCamera()
+        self.camera = ChaseCamera(getattr(self.config, 'view', None) or VIEWS[0])
         self.world = RaceWorld(self.config.world, max_sse=self.config.sse,
                                traffic=getattr(self.config, 'traffic', 0))
         # The engine's own sky and light rig, rather than one written here: a
@@ -174,6 +176,9 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         if self.world.traffic is not None:
             # Mounted once; the cars under it come and go as the player passes.
             self.sg.children.append(self.world.traffic.node)
+        # What the car is lit and reflected by, which follows the road: a
+        # canopy overhead in the forest, a bore's walls in a tunnel.
+        self.reflections = Reflections(course)
         self.timing = RaceTiming(course)
         self.watch = OffRoad(course)
         self.crashes = Collisions()
@@ -339,6 +344,11 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         pose = self.camera.update(self.car, elapsed)
         self.car.hidden = self.camera.inside
         self._aim(pose)
+        if self.reflections is not None:
+            changed = self.reflections.update(self.car.position)
+            if changed is not None:
+                log.info('the road is %s now: rebuilding what the car reflects',
+                         changed)
         if self.timing is not None and not self._over():
             self.timing.update(self.car.position, elapsed)
         self._update_hud()
@@ -460,6 +470,12 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             result = super().SwapBuffers(*args)
             self.setCurrent()
             sys.stdout.write('captured %s\n' % (self.config.capture,))
+            # What the drive cost, machine-readably: a picture that is unchanged
+            # while the frame rate has halved is still a regression, and the
+            # numbers in the README are measured this way.
+            counter = getattr(self, 'frameCounter', None)
+            if counter is not None:
+                sys.stdout.write('DRIVE_STATS fps=%s\n' % (counter.recentFps(),))
             sys.stdout.flush()
             if self.world is not None:
                 self.world.shutdown()
@@ -516,6 +532,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help='let the car drive itself round the circuit')
     parser.add_argument('--size', default='1280x720', metavar='WxH',
                         help='window size (default: %(default)s)')
+    parser.add_argument('--view', choices=VIEWS, default=VIEWS[0],
+                        help='which view to start in, which `c` then cycles '
+                             '(default: %(default)s)')
     parser.add_argument('--capture', metavar='PATH',
                         help='render to PATH (PNG) once the world has settled, '
                              'then exit')

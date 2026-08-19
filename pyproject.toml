@@ -49,6 +49,12 @@ version = { attr = "glisteel.__version__" }
 where = ["."]
 include = ["glisteel*"]
 
+# The vehicles ship with the game: they are ours, they are small, and a car
+# fetched at first run is a car missing on a machine with no network. The
+# script that builds them is tools/cars.py, which is not packaged.
+[tool.setuptools.package-data]
+glisteel = ["assets/**/*.glb", "assets/**/CREDITS.md"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

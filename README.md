@@ -29,7 +29,8 @@ and through a bore where it does not. The second drives it.
 | `F2` | screenshot |
 
 `glisteel --autopilot` drives itself, which is the quickest way to see a lap and
-the same code an opponent car would use.
+the same code an opponent car would use; `--view chase` starts in a view other
+than the driver's seat.
 
 ### Recording a drive
 
@@ -57,8 +58,11 @@ an encoder it can reach — today an NVIDIA card on Linux.
 **The default view is the driver's seat.** A route is a thing you drive
 *through*, and a forest read from seven metres up and behind reads as scenery
 rather than as trees you are passing between. `c` cycles cockpit, chase and
-bonnet; the chase view is what a player catching a slide wants. The player's own
-car is not drawn for the cockpit view, because the eye is inside its shell.
+bonnet; the chase view is what a player catching a slide wants. For the cockpit
+view the player's own bodywork is left out of the frame — the eye is inside it —
+and the interior and the canopy stay, because they are what that view is *of*: a
+dashboard, a wheel that turns as you steer, and the road seen through glass the
+light bends going through.
 
 ## What is where
 
@@ -70,11 +74,39 @@ what makes it a *game*.
 |---|---|
 | `world.py` | a baked world: its tiles, its physics, and the roads it carries |
 | `car.py` | the car — its body, its wheels, and how it is drawn |
+| `models.py` | which model is which, and the names the game drives one by |
+| `reflections.py` | what the car reflects, and how that follows the road |
 | `camera.py` | where the player watches from |
 | `driver.py` | the autopilot: pure pursuit, and a speed the corner allows |
 | `race.py` | lap timing that a shortcut does not fool, and leaving the road |
 | `hud.py` | the four numbers a driver acts on |
 | `game.py` | the window, the loop, and the keys |
+
+**The car is a model, and so is everything else on the road.** The vehicles in
+`glisteel/assets/cars/` are ours, built by `tools/cars.py` — a Blender script
+that writes `models/cars.blend` for editing and the `.glb` files the game
+loads. Each carries its bodywork, its interior and its glass as three named
+subtrees, and the player's car carries the travel of its steering wheel as an
+animation clip the game poses at whatever fraction of lock the front wheels are
+actually turned to. The canopy is refractive glass
+(`KHR_materials_transmission`, with a thickness to bend the light through), so
+the cabin you see through it is the cabin that is there. A model that will not
+load leaves the car drawn from primitives and the game running: art is not
+rules. To rebuild them:
+
+```bash
+/workspaces/OpenGL-dev/.venv-bpy/bin/python tools/cars.py   # any bpy-capable interpreter
+```
+
+**A car reflects where it is.** Painted metal is almost entirely its
+surroundings, so a car lit by a bare sky gradient reads as a toy however
+carefully it is modelled. The road already knows what it is running through —
+its structures say where the bores and the bridges are, and everywhere else is
+forest — so `reflections.py` hands the renderer a small panorama of that place:
+a canopy overhead with sky broken through it, a bore with a lit portal fore and
+aft, open sky over a treeline on a viaduct. The engine's IBL probe notices the
+environment changed and rebuilds, which happens at a portal rather than at a
+frame.
 
 **The road comes with the world.** A pile of triangles does not say where a
 track goes, so the baker writes the centreline, the cross-section and the
@@ -163,6 +195,13 @@ seconds each:
 The shipped 4096 m world — 575k trees, ground cover, and a shaded canopy —
 drives at 62–80 fps at 1080p on the same machine, an autopilot lap of 3:32 over
 8.3 km.
+
+The vehicles are a few thousand triangles against half a million trees, and
+where the world sets the frame rate they do not show up in it at all. Where it
+does not — the driver's own view, which pulls in far less of the world than a
+camera seven metres up — ten traffic vehicles cost a few milliseconds a frame,
+because each is its own copy of a model so that each can be painted its own
+colour.
 
 The frame rate is set by how much of the world is on screen and how finely it is
 drawn. `--sse` trades sharpness for speed (higher is coarser); a shallower world

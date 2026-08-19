@@ -39,9 +39,13 @@ CHASE_AHEAD = 9.0
 
 #: Where a driver's eyes are, relative to the car body's own centre: a little
 #: back of it and above it. The body sits about two thirds of a metre off the
-#: road, so this puts the eye at about the height of a real one.
-COCKPIT_BACK = 0.25
-COCKPIT_UP = 0.52
+#: road, so this puts the eye at about the height of a
+#: real one. The car seats two in single file down the centreline, so the eye
+#: goes there too: ``glisteel.models`` names the column the model puts the wheel
+#: on, and ``tests/test_car_and_camera.py`` holds the two together.
+COCKPIT_BACK = 0.10
+COCKPIT_UP = 0.40
+COCKPIT_SIDE = 0.0
 
 #: Where the bonnet camera sits, ahead of the centre and lower.
 BONNET_AHEAD = 1.1
@@ -151,7 +155,11 @@ class ChaseCamera:
         length = float(np.linalg.norm(flat))
         flat = flat / length if length > 1e-6 else np.array([0.0, 0.0, -1.0])
         if self.mode == 'cockpit':
-            eye = position - flat * COCKPIT_BACK + UP * COCKPIT_UP
+            # Across the car, which is what puts the eye in the driver's seat
+            # rather than between the two.
+            across = np.cross(flat, UP)
+            eye = (position - flat * COCKPIT_BACK + UP * COCKPIT_UP
+                   + across * COCKPIT_SIDE)
             return eye, eye + flat * AHEAD_VIEW
         if self.mode == 'bonnet':
             eye = position + flat * BONNET_AHEAD + UP * BONNET_UP

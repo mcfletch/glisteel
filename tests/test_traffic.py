@@ -12,7 +12,9 @@ is that number and a speed, which is why none of it needs a window to test.
 """
 import numpy as np
 import pytest
+from omi_physics.world import PhysicsWorld
 
+from glisteel import models
 from glisteel.traffic import (
     CRUISING,
     PULLING_OFF,
@@ -527,11 +529,89 @@ class TestStandingOnTheGround:
         assert float(np.hypot(asked[0][0], asked[0][2])) > 200.0
 
     def test_and_the_car_ends_up_on_it(self) -> None:
+        """It stands on the ground, and is hit about its own middle."""
         _world, traffic = self._fleet(ground=lambda position: -12.0)
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
-        assert -12.0 < float(traffic._standing(traffic.cars[0])[1]) < -10.5
+        car = traffic.cars[0]
+        assert float(traffic._standing(car)[1]) == pytest.approx(-12.0)
+        assert float(traffic._centre(car)[1]) == pytest.approx(
+            -12.0 + car.kind.height / 2.0)
 
     def test_ground_that_says_nothing_leaves_it_on_the_road(self) -> None:
         _world, traffic = self._fleet(ground=lambda position: None)
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
         assert float(traffic._standing(traffic.cars[0])[1]) < 1.5
+
+
+class TestWhatTheTrafficIsMadeOf:
+    """Five kinds of vehicle, each its own size to see and to hit."""
+
+    def _traffic(self, physics=None, count=5):
+        course = _course()
+        return Traffic(course, count=count, seed=3, physics=physics)
+
+    def test_a_car_is_one_of_the_kinds(self) -> None:
+        traffic = self._traffic()
+        traffic.update((0.0, 0.0, 0.0), 0.1)
+        assert traffic.cars
+        for car in traffic.cars:
+            assert car.kind in models.TRAFFIC
+
+    def test_the_kinds_are_not_all_the_same(self) -> None:
+        """A road of one model repeated is a convoy, not traffic."""
+        traffic = self._traffic(count=10)
+        traffic.update((0.0, 0.0, 0.0), 0.1)
+        assert len({car.kind.name for car in traffic.cars}) > 1
+
+    def test_it_draws_the_model_its_kind_names(self) -> None:
+        traffic = self._traffic(count=1)
+        traffic.update((0.0, 0.0, 0.0), 0.1)
+        car = traffic.cars[0]
+        drawn = traffic.node_of(car)
+        names = _names(drawn)
+        assert models.BODY in names and models.GLASS in names
+        assert models.SEATS in names, 'nobody is sitting in it'
+
+    def test_each_car_is_painted_its_own_colour(self) -> None:
+        """One model repainted, and only its paint: the glass stays glass."""
+        traffic = self._traffic(count=6)
+        traffic.update((0.0, 0.0, 0.0), 0.1)
+        painted = {tuple(round(float(v), 3) for v in _material(traffic, car, models.PAINT))
+                   for car in traffic.cars}
+        assert len(painted) > 1
+        glass = {tuple(round(float(v), 3) for v in _material(traffic, car, models.GLASS))
+                 for car in traffic.cars}
+        assert len(glass) == 1
+
+    def test_a_van_is_as_big_to_hit_as_it_is_to_see(self) -> None:
+        """The collider comes from the kind's own dimensions, not one box for all."""
+        world = PhysicsWorld()
+        traffic = self._traffic(physics=world, count=10)
+        traffic.update((0.0, 0.0, 0.0), 0.1)
+        sizes = {car.kind.name: traffic.collider_size(car) for car in traffic.cars}
+        assert len(set(sizes.values())) > 1
+        for name, size in sizes.items():
+            kind = next(one for one in models.TRAFFIC if one.name == name)
+            assert size == pytest.approx(kind.size(), abs=1e-6)
+
+    def test_it_stands_on_the_road_rather_than_in_it(self) -> None:
+        """The model's origin is where it meets the road."""
+        traffic = self._traffic(count=1)
+        traffic.update((0.0, 0.0, 0.0), 0.1)
+        car = traffic.cars[0]
+        assert traffic.node_of(car).translation[1] == pytest.approx(
+            float(car.position()[1]), abs=1e-6)
+
+
+def _names(node, out=None):
+    out = [] if out is None else out
+    if getattr(node, 'DEF', ''):
+        out.append(node.DEF)
+    for child in getattr(node, 'children', None) or ():
+        _names(child, out)
+    return out
+
+
+def _material(traffic, car, name):
+    scene = traffic.art_of(car)
+    return scene.materials[name].baseColor

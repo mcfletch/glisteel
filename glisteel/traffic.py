@@ -25,6 +25,8 @@ import numpy as np
 from omi_physics import model
 from OpenGLContext.scenegraph.transform import Transform
 
+from glisteel import models
+
 __all__ = ['TrafficCar', 'Traffic', 'CRUISING', 'SLOWING', 'PULLING_OFF']
 
 #: What a traffic car is doing. Cruising is the speed limit and its own lane;
@@ -86,8 +88,9 @@ class TrafficCar:
 
     ``station`` is metres along the course, ``heading`` +1 with the course's
     direction and -1 against it, and ``limit`` the speed it drives at in metres
-    per second. ``seed`` decides what this driver does and when, so a car
-    behaves the same way every time the same world is driven.
+    per second. ``seed`` decides what this driver does and when, and what kind of
+    vehicle it is, so a car behaves and looks the same way every time the same
+    world is driven.
     """
 
     def __init__(self, course: Any, station: float, heading: int,
@@ -107,6 +110,8 @@ class TrafficCar:
         #: None for an open road. Set by :class:`Traffic` each update.
         self.ahead: tuple[float, float] | None = None
         self.paint = _paint(self.seed)
+        #: What kind of vehicle this is: its model, and how big it is to hit.
+        self.kind = models.TRAFFIC[self.seed % len(models.TRAFFIC)]
         self._rng = np.random.default_rng(self.seed)
         self._until = 0.0
         self._sideways = 0.0
@@ -279,8 +284,11 @@ class Traffic:
         self._rng = np.random.default_rng(seed)
         self._next = 0
         self._drawn: dict[int, Any] = {}
+        self._scenes: dict[int, Any] = {}
         self._bodies: dict[int, int] = {}
-        self._shape: Any = None
+        #: One collider shape per kind, since a van and a hatchback are not the
+        #: same thing to run into.
+        self._shapes: dict[str, Any] = {}
 
     def update(self, position: Any, dt: float, speed: float = 0.0) -> None:
         """Drive every car, retire the ones left behind, and put out more.
@@ -356,23 +364,60 @@ class Traffic:
         self.cars = []
 
     def _show(self, car: TrafficCar) -> None:
-        """Give a new car something to draw and something to hit."""
-        from glisteel.car import BODY_HEIGHT, car_nodes
-        node = car_nodes(car.paint)
+        """Give a new car something to draw and something to hit.
+
+        Its own copy of its kind's model, because it is repainted: a road full
+        of one colour is a convoy. The collider is the kind's own dimensions, so
+        a van is as big to hit as it is to see.
+        """
+        node = self._art(car)
         self._drawn[id(car)] = node
         self.node.children = list(self.node.children) + [node]
         if self.physics is None:
             return
-        if self._shape is None:
-            from glisteel.car import BODY_LENGTH, BODY_WIDTH
-            self._shape = self.physics.add_shape(model.Shape.box(
-                (BODY_WIDTH, BODY_HEIGHT + 0.3, BODY_LENGTH)))
+        shape = self._shapes.get(car.kind.name)
+        if shape is None:
+            shape = self.physics.add_shape(model.Shape.box(car.kind.size()))
+            self._shapes[car.kind.name] = shape
         self._bodies[id(car)] = int(self.physics.add_body(
             model.Motion(type=model.KINEMATIC, mass=1200.0),
-            collider=model.Collider(shape=self._shape),
-            position=tuple(self._standing(car))))
+            collider=model.Collider(shape=shape),
+            position=tuple(self._centre(car))))
+
+    def _art(self, car: TrafficCar) -> Any:
+        """One vehicle to look at, painted in this car's own colour.
+
+        Only the paint moves: the glass, the bright trim and what is inside are
+        the model's own, and repainting those would cost the car its windows.
+        """
+        scene = models.ART.load(car.kind.model)
+        if scene is not None:
+            self._scenes[id(car)] = scene
+            paint = scene.materials.get(models.PAINT)
+            if paint is not None:
+                paint.baseColor = car.paint
+            return Transform(children=[scene.group])
+        from glisteel.car import BODY_HEIGHT, car_nodes
+        # Without a model, the primitive car -- which is drawn about its own
+        # middle, where a vehicle model stands on its wheels.
+        return Transform(children=[Transform(
+            children=[car_nodes(car.paint)],
+            translation=(0.0, BODY_HEIGHT / 2.0 + 0.33, 0.0))])
+
+    def art_of(self, car: TrafficCar) -> Any:
+        """The loaded scene one car is drawn from, for anything asking about it."""
+        return self._scenes.get(id(car))
+
+    def node_of(self, car: TrafficCar) -> Any:
+        """What draws one car."""
+        return self._drawn.get(id(car))
+
+    def collider_size(self, car: TrafficCar) -> tuple[float, float, float]:
+        """How big this car is to hit, in metres."""
+        return car.kind.size()
 
     def _retire(self, car: TrafficCar) -> None:
+        self._scenes.pop(id(car), None)
         node = self._drawn.pop(id(car), None)
         if node is not None:
             self.node.children = [one for one in self.node.children
@@ -391,18 +436,22 @@ class Traffic:
                 node.rotation = (0.0, 1.0, 0.0, car.heading_angle())
             body = self._bodies.get(id(car))
             if body is not None and self.physics is not None:
-                self.physics.position[body] = at
+                self.physics.position[body] = self._centre(car)
                 self.physics.orientation[body] = _yaw(car.heading_angle())
 
     def _standing(self, car: TrafficCar) -> np.ndarray:
-        """Where a car's body centre is: on the road, up off it by its own half."""
-        from glisteel.car import BODY_HEIGHT
+        """Where a car meets the road: its own position, on the surface."""
         at = np.asarray(car.position(), dtype='d').copy()
         if self.ground is not None:
             found = self.ground(at)
             if found is not None:
                 at[1] = float(found)
-        at[1] += BODY_HEIGHT / 2.0 + 0.33
+        return at
+
+    def _centre(self, car: TrafficCar) -> np.ndarray:
+        """Where the middle of a car is: half its own height off the road."""
+        at = self._standing(car)
+        at[1] += car.kind.height / 2.0
         return at
 
     def ahead_of(self, position: Any, forward: Any, reach: float = REACH,

@@ -5,13 +5,16 @@ a rigid chassis on four spring-loaded rays. What is here is everything that
 makes it *this* car: the shape it is drawn as, the numbers that give it its
 handling, and the scenegraph nodes that follow the simulation each frame.
 
-The car is drawn from primitives rather than loaded from a file, so the game
-runs from a checkout with no assets to fetch. :func:`car_body_mesh` is a
-low-slung coupé built out of two tapered boxes; the wheels are cylinders that
-turn with the steering and roll with the speed.
+The car is drawn from the model :mod:`glisteel.models` names -- bodywork,
+interior and canopy as three named subtrees, and its wheels from their own
+files, so that four of them turn and roll. A model that will not load leaves
+the primitive car in :func:`car_body_mesh` and :func:`wheel_mesh` drawn in its
+place: art is not rules, and a game that would not start without its ``.glb``
+files has made a picture into a dependency.
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,14 +29,18 @@ from OpenGLContext.scenegraph.shape import Shape
 from OpenGLContext.scenegraph.switch import Switch
 from OpenGLContext.scenegraph.transform import Transform
 
+from glisteel import models
+
+log = logging.getLogger(__name__)
+
 __all__ = ['Car', 'CarSpec', 'car_body_mesh', 'car_nodes',
            'wheel_mesh']
 
-#: The car's own dimensions, in metres: a low two-seat coupé.
+#: The car's own dimensions, in metres: a low sports car seating two in single file.
 BODY_LENGTH = 4.2
 BODY_WIDTH = 1.85
 BODY_HEIGHT = 0.62
-CABIN_HEIGHT = 0.42
+CABIN_HEIGHT = 0.19
 
 
 @dataclass
@@ -89,6 +96,12 @@ class Car:
                  position: Any = (0.0, 2.0, 0.0), heading: float = 0.0) -> None:
         self.spec = spec or CarSpec()
         self.world = world
+        # The lower body, not the whole car. A collider is centred on the body
+        # it belongs to, so a box tall enough to take in the canopy would reach
+        # as far below the floor as the canopy stands above it and catch on the
+        # road the wheels are holding the car off. What the taller box would add
+        # is a glass roof to hit things with; what it would cost is the car
+        # riding on its own collider.
         chassis = world.add_shape(model.Shape.box(
             (BODY_WIDTH, BODY_HEIGHT, BODY_LENGTH)))
         self.body = world.add_body(
@@ -98,6 +111,11 @@ class Car:
         self.vehicle = RaycastVehicle(world, self.body, self.spec.wheels(),
                                       self.spec.tuning)
         self.vehicle.place(position, heading)
+        #: What poses the steering wheel, or None where the model carries no
+        #: ``steer`` clip -- the primitive car, or a model exported without it.
+        self._steering: Any = None
+        #: The rim the clip turns, for anything that wants to look at it.
+        self.rim: Any = None
         self.node, self._shell, self._wheel_nodes = self._build_nodes()
         self._wheel_spin = [0.0] * len(self.vehicle.wheels)
 
@@ -160,15 +178,40 @@ class Car:
                 / max(wheel.spec.radius, 1e-3)
             node.rotation = (0.0, 1.0, 0.0, wheel.steer_angle)
             node.children[0].rotation = (1.0, 0.0, 0.0, self._wheel_spin[index])
+        self._turn_the_rim()
+
+    def _turn_the_rim(self) -> None:
+        """Pose the steering wheel at the fraction of lock the front wheels are at.
+
+        The rim's travel is a clip in the model rather than an angle here, so
+        how far it turns is the artist's decision: this only says how far
+        through that travel the car is. The fraction comes from the wheels
+        rather than from the driver's input because the steering lock eases off
+        with speed -- a rim driven from the key would show full lock at a
+        hundred and eighty while the front wheels were barely turned.
+        """
+        if self._steering is None:
+            return
+        lock = max(float(self.spec.tuning.maximum_steer), 1e-6)
+        steered = [wheel.steer_angle for wheel in self.vehicle.wheels
+                   if wheel.spec.steering]
+        if not steered:                          # pragma: no cover - four fixed wheels
+            return
+        fraction = max(-1.0, min(1.0, float(np.mean(steered)) / lock))
+        # The clip runs from full left at its first key to full right at its
+        # last, and a positive steer angle is a turn to the left.
+        self._steering.evaluate((0.5 - 0.5 * fraction) * self._steering.duration)
 
     @property
     def hidden(self) -> bool:
         """Whether the car's own bodywork is left out of the frame.
 
         For the view from the driver's seat, which is a point inside it: what
-        that view would otherwise show is the inside of this car's shell. The
-        node stays in the scene and keeps following the physics, so nothing has
-        to be added or removed as the player changes view.
+        that view would otherwise show is the outside of this car's bodywork,
+        from within. The interior and the canopy stay -- they are what that view
+        is *of* -- and the node stays in the scene and keeps following the
+        physics, so nothing has to be added or removed as the player changes
+        view.
         """
         return self._shell.whichChoice < 0
 
@@ -177,22 +220,56 @@ class Car:
         self._shell.whichChoice = -1 if value else 0
 
     def _build_nodes(self) -> tuple[Transform, Switch, list[Transform]]:
+        """The scenegraph the car is drawn as: shells, wheels, and the rim.
+
+        The bodywork sits in a ``Switch`` of its own so the cockpit view can
+        drop it without touching anything else; everything the driver looks at
+        from inside hangs outside that switch.
+        """
+        wheels = [Transform(children=[Transform(children=self._wheel_art(spec))])
+                  for spec in self.vehicle.wheels]
+        exterior, inside = self._shell_art()
+        # The wheels are switched with the bodywork rather than with the
+        # interior: they belong to the outside of the car, and four wheels
+        # without the arches around them are discs rolling along in mid-air.
+        # They keep following the suspension either way; a switch that is off
+        # simply does not draw them.
+        shell = Switch(choice=[Transform(children=[*exterior, *wheels])],
+                       whichChoice=0)
+        return Transform(children=[shell, *inside]), shell, wheels
+
+    def _shell_art(self) -> tuple[list[Any], list[Any]]:
+        """What is drawn outside the car, and what is drawn inside it."""
+        scene = models.ART.load(models.HERO)
+        if scene is not None:
+            outside = [scene.getDEF(models.BODY)]
+            inside = [scene.getDEF(models.INTERIOR), scene.getDEF(models.GLASS)]
+            if all(node is not None for node in outside + inside):
+                self._steering = scene.player_named(models.STEER_CLIP, loop=False)
+                self.rim = scene.getDEF(models.RIM)
+                return outside, inside
+            log.warning('%s is missing one of its named shells', models.HERO)
         paint = PBRMaterial(baseColor=self.spec.paint, metallic=0.55,
                             roughness=0.32)
         glass = PBRMaterial(baseColor=(0.10, 0.13, 0.16), metallic=0.1,
                             roughness=0.08)
+        return ([_painted(car_body_mesh(paint), paint)],
+                [_painted(cabin_mesh(glass), glass)])
+
+    def _wheel_art(self, spec: Any) -> list[Any]:
+        """One wheel's geometry: the shipped model, or a cylinder.
+
+        Both sides of an axle are the one model, mounted twice: a wheel is the
+        same wheel wherever it is bolted on.
+        """
+        front = float(spec.spec.position[2]) < 0.0
+        scene = models.ART.shared(models.HERO_WHEEL_FRONT if front
+                                  else models.HERO_WHEEL_REAR)
+        if scene is not None:
+            return [scene.group]
         rubber = PBRMaterial(baseColor=(0.045, 0.045, 0.05), metallic=0.0,
                              roughness=0.85)
-        wheels: list[Transform] = []
-        for spec in self.vehicle.wheels:
-            spin = Transform(children=[_painted(
-                wheel_mesh(spec.spec.radius, 0.24, rubber), rubber)])
-            wheels.append(Transform(children=[spin]))
-        body = _painted(car_body_mesh(paint), paint)
-        cabin = _painted(cabin_mesh(glass), glass)
-        shell = Switch(choice=[Transform(children=[body, cabin, *wheels])],
-                       whichChoice=0)
-        return Transform(children=[shell]), shell, wheels
+        return [_painted(wheel_mesh(spec.spec.radius, 0.24, rubber), rubber)]
 
 
 def car_nodes(paint: tuple[float, float, float] = (0.62, 0.09, 0.07),
