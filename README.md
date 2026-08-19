@@ -82,6 +82,7 @@ what makes it a *game*.
 | `driver.py` | the autopilot: pure pursuit, and a speed the corner allows |
 | `race.py` | lap timing that a shortcut does not fool, and leaving the road |
 | `run.py` | which part of the race this is, and what it lets through to the car |
+| `assist.py` | the steering the game puts in while the player is not steering |
 | `tracks.py` | the worlds a player can choose between, and where their files live |
 | `records.py` | the best times driven on each track |
 | `menu.py` | the screens around the outside of the race |
@@ -298,6 +299,38 @@ throttle, brake, steer = run.allow(*whatever_the_driver_asked_for)
 A scripted drive (`glisteel.trace.drive`) begins at the green light: what it
 measures is the car, and a start sequence in front of it would put every hold in
 the script six seconds later than it reads.
+
+### Steering, and what the game does about it
+
+A keyboard says a key is down or it is not, and a real driver's hands say a
+great deal more than that. Two things bridge the gap:
+
+**The wheel winds.** A key does not put the car on full lock; it moves the wheel
+toward that lock at `WIND_ON` (0.9) of its travel a second, so a tap is a nudge
+and a hold builds. The rate is deliberately slower than the shortest input a
+player can give, which is one frame — at ten frames a second that is a tenth of
+the wheel.
+
+**The game straightens what the player is not steering.** Between the deliberate
+inputs, a real driver puts in a continuous small correction holding the car on
+the line, and a keyboard cannot express it. Without that, every tap is a
+*permanent* change of direction: the wheel centres, the car keeps the heading,
+and it crosses the road until the road runs out. So with nothing held, the wheel
+is put where it needs to be to bring the car back to the way the road goes
+(`glisteel.assist`).
+
+`--assist` is how much of that correction is used, and it is the steering
+difficulty dial: **0 hands the car back entirely** and is the car as the physics
+has it; 1 holds the line for you. What a 0.3 s tap — about the shortest input at
+the frame rates a full world runs at — does to the car:
+
+| speed | `--assist 0` | `--assist 0.55` |
+|---|---|---|
+| 32 km/h | 5.4 m off the line | **0.3 m** |
+| 86 km/h | 7.6 m off the line | **0.4 m** |
+| 86 km/h, 0.6 s hold | 19.6 m | **1.7 m** |
+
+The carriageway is 7.2 m wide.
 
 ### Tracks, and the times driven on them
 

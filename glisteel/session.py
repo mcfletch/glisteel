@@ -27,6 +27,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
+from glisteel.assist import STRENGTH, Straighten
 from glisteel.camera import VIEWS, CameraPose, ChaseCamera
 from glisteel.car import Car, CarSpec
 from glisteel.race import Collisions, OffRoad, RaceTiming, closing_speed, off_course
@@ -150,7 +151,7 @@ class Session:
     def __init__(self, world: Any, spec: CarSpec | None = None,
                  view: str = VIEWS[0], driver: Any = None,
                  viewport: tuple[int, int] = VIEWPORT,
-                 laps: int = RACE_LAPS) -> None:
+                 laps: int = RACE_LAPS, assist: float = STRENGTH) -> None:
         course = world.course
         if course is None:
             raise ValueError(
@@ -182,6 +183,8 @@ class Session:
         self.crashes = Collisions()
         #: Which part of the race this is, and what it lets through to the car.
         self.run = Run(laps=laps)
+        #: The steering the game puts in while the player is not steering.
+        self.assist = Straighten(course, strength=assist, lane=self.lane)
         self._accumulated = 0.0
         self._stuck_for = 0.0
         self._settle()
@@ -331,11 +334,17 @@ class Session:
         self.run.resume()
 
     def _controls(self, dt: float) -> tuple[float, float, float]:
-        """Whoever is driving, or nothing at all where nobody is."""
+        """Whoever is driving, or nothing at all where nobody is.
+
+        What the driver asks for goes through :class:`~glisteel.assist.Straighten`
+        on its way to the wheel, which puts in the small correction a driver's
+        hands make continuously and a keyboard cannot say. A driver already
+        steering -- the autopilot, or a player with a key down -- is left alone.
+        """
         if self.driver is None:
             return 0.0, 0.0, 0.0
         throttle, brake, steer = self.driver.controls(self, dt)
-        return float(throttle), float(brake), float(steer)
+        return float(throttle), float(brake), self.assist.steer(self, steer)
 
     def _read_the_ground(self, dt: float) -> None:
         """What the wheels are on, and whether the run is over.

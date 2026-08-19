@@ -343,86 +343,38 @@ Two defects the first scenario turned up, both fixed as part of step 2:
 Neither is a scenario's problem: both are what the game does with any world.
 
 
-### 4.10 What "too jerky" actually measures — **decided: less lock at speed**
+### 4.10 What "too jerky" actually measures — **fixed**
 
-The harness answers it, and the answer is not what §4.3 assumed. A tenth of a
-second on a steering key, at 31 m/s (113 km/h), on level straight road:
+Three things together, and none of them was enough on its own.
 
-| | |
-|---|---|
-| wheel reached | 0.33 of lock |
-| front wheels reached | 4.5° |
-| peak yaw rate | 0.9 rad/s |
-| peak lateral acceleration | 2.9 g |
-| direction changed by | 6.3° |
-| off the carriageway | 0.3 s later |
-| run over | at 8 s, "mired off the road" |
+**Less lock at speed.** The steering lock falls with the *square* of the speed
+(`omi_physics`), since cornering is `v²/radius` and a lock that only halves as
+the speed doubles still asks the tyres for twice as much. Full lock is a 5 m
+circle standing and 87 m at 41 m/s.
 
-Two things make that so, and neither is a fault in the code:
+**A wheel that winds slowly.** `WIND_ON` 2.2 → 0.9 of the wheel's travel a
+second. The old rate put the wheel at two thirds of full lock in three tenths of
+a second, which is roughly the shortest input a player can give when the frame
+rate decides how briefly they can press a key.
 
-**The car has 2.9 g at that speed, and it is meant to.** The tyres' own grip is
-1.9 g and `downforce=6.0` presses on the rest; `omi_physics` shares one friction
-budget between driving and cornering and the corner is inside it. The response is
-also exactly kinematic — the radius comes out as wheelbase over steer angle to
-three figures — so nothing is slipping and nothing is spiking. It is a car with
-more grip than a road car, doing what it was told.
+**A straightening assist** (`glisteel/assist.py`). The first two shorten the
+input; neither brings the *heading* back, and any residual heading crosses the
+carriageway at a steady rate until the road runs out. A real driver corrects
+continuously and a keyboard cannot say so, so with nothing held the game puts
+the wheel where it needs to be to bring the car back to the way the road goes.
+`--assist` is how much of that is used: 0 is the car as the physics has it.
 
-**Nothing brings the heading back, and nothing should.** The wheel centres by
-itself; the *car* keeps whichever way the input left it pointing, which is what
-a real one does. What a real driver does next is counter-steer by the right
-amount, and a keyboard cannot meter that: the only inputs are none and all, over
-a wheel that winds at a fixed rate.
+Measured, a 0.3 s tap:
 
-So 4.5° of front wheel at speed buys 6° of heading, and 6° crosses a
-seven-metre road in about thirty metres. The car is not badly behaved; it is
-**over-geared for the input device**. The choices, in the order I would try them:
-
-1. **Less lock at speed.** `steer_falloff_speed` is 26 m/s and already takes the
-   lock from 0.52 to 0.24 rad at 31 m/s. Taking it further is one number and
-   costs nothing anywhere else.
-2. **Less downforce.** `downforce=6.0` is what puts the cornering at 2.9 g; a
-   road car's figure would put a tap back inside the road on its own.
-3. **A stability assist**: a small yaw damping while no steering key is held, so
-   letting go straightens the car rather than only the wheel. This is what an
-   arcade racer does and what a keyboard really wants, and it is the one that
-   changes what the car *is* rather than how much of it the player gets.
-
-**Decided: the first lever, taken properly.** The lock now falls with the
-*square* of the speed rather than in step with it — cornering is `v**2 / radius`,
-so a radius that only widens as fast as the speed rises is a demand on the tyres
-that still doubles with it. Against `steer_falloff_speed` squared, what full lock
-asks for settles at a corner the car can hold. `steer_falloff_speed` is 10 m/s
-here, chosen so that full lock at the top end asks for about two g against the
-2.9 g the tyres and the wings have.
-
-The turning circle full lock will give: **5 m** standing, 10 m at 10 m/s, 25 m at
-20, 49 m at 30, 87 m at 41. A tap at speed is now a lane change:
-
-| 0.15 s on a steering key at speed | before | after |
+| speed | before | after |
 |---|---|---|
-| direction changed by | 4.5° | **1.2°** |
-| the run ended | mired off the road | **it did not** |
-| autopilot lap, 420×300 m circuit at 47 m/s | 57.7 s, 0.40 m off the line | 57.9 s, **1.89 m** |
+| 32 km/h | 6.4°, **5.4 m** off the line | 0.2°, **0.3 m** |
+| 86 km/h | 4.1°, **7.6 m** | 0.1°, **0.4 m** |
+| 86 km/h, 0.6 s | 20.8°, **19.6 m** | 0.6°, **1.7 m** |
 
-Two of the three tests it was written against now pass and their markers are off.
-The third stands: a driver who *never* corrects still runs out of road, six
-seconds later rather than one, because the wheel centres and the car keeps the
-direction the tap left it pointing — which is what a real one does.
-`test_a_tap_and_a_counter_tap_bring_it_back` is the other half of that, and it
-passes: the same touch of the other key puts the car back on the line. Whether
-the game should straighten the car for a player who cannot meter a counter-tap —
-the third lever — is still open, and is now a smaller question than it was.
-
-Two smaller findings from the same runs:
-
-- **The camera from the driver's seat passes on 5.5× the vertical acceleration
-  the chase view does** — 88 m/s² against 16 through a chicane, 2.7 against 1.4
-  over a crest — and about 1.4× the yaw jerk. That is §4.2, now with numbers.
-- **A car given no steering at all drifts six metres off the crown in twelve
-  seconds**, down the road's 2% camber, which takes it off a 7.2 m carriageway.
-  Physically right, and worth knowing before the camber is blamed on something
-  else.
-
+The carriageway is 7.2 m. `test_and_a_driver_who_never_corrects_stays_on_the_road`
+is no longer an xfail, and `tests/test_assist.py` keeps the defect the assist
+exists for as a measurement with the assist switched off.
 
 ### 4.11 Three defects under the car — *omi_physics* — **fixed**
 

@@ -62,10 +62,12 @@ class MouseWheel:
 
 
 #: How quickly the keyboard wheel winds on toward a lock the driver is holding,
-#: in wheel units -- full lock is one -- a second. A tap is then a nudge and a
-#: hold builds to lock over a fraction of a second; fed the keys directly the
-#: wheel is at full lock the instant one goes down, and a tap at speed is a spin.
-WIND_ON = 2.2
+#: in wheel units -- full lock is one -- a second. Slow: it is a hand moving a
+#: wheel, and a hand does not put a road car on full lock in half a second. It
+#: also has to be slower than the shortest input a player can actually give,
+#: which is one frame; at thirty frames a second that is a thirtieth of full
+#: lock, and at ten it is a tenth.
+WIND_ON = 0.9
 
 #: How quickly it returns to centre with nothing held, brisker than it winds on
 #: so letting go of a key straightens the car promptly.

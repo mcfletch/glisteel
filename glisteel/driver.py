@@ -138,6 +138,18 @@ class Autopilot:
         given bend differently at every speed, and would have to be re-tuned for
         every car it was put in.
         """
+        speed = float(car.speed())
+        index, _ = self.course.nearest(np.asarray(car.position, dtype='d'))
+        return (*self._pedals(speed, self.target_speed(index, speed)),
+                self.steering(car))
+
+    def steering(self, car: Any) -> float:
+        """The steering input that puts this car back on the line.
+
+        Separate from the pedals, because holding a car on a line and choosing
+        how fast to go are different jobs and something may want only the first
+        -- :class:`~glisteel.assist.Straighten` is the case that does.
+        """
         position = np.asarray(car.position, dtype='d')
         speed = float(car.speed())
         index, _ = self.course.nearest(position)
@@ -145,9 +157,8 @@ class Autopilot:
         heading = (self._error_towards(car, position, aim)
                    * self.style.steering_gain
                    + self._back_to_the_line(car, position, index, speed))
-        return (*self._pedals(speed, self.target_speed(index, speed)),
-                self._input_for(car, self._front_wheels(car, heading, speed),
-                                speed))
+        return self._input_for(car, self._front_wheels(car, heading, speed),
+                               speed)
 
     def _front_wheels(self, car: Any, heading: float, speed: float) -> float:
         """The front-wheel angle that closes a heading error, in radians.

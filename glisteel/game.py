@@ -49,6 +49,7 @@ from OpenGLContext.viewer import environment  # noqa: E402
 from OpenGLContext.viewer.sceneviewer import ViewerContext  # noqa: E402
 
 from glisteel import menu, tracks  # noqa: E402
+from glisteel.assist import STRENGTH as ASSIST  # noqa: E402
 from glisteel.camera import VIEWS  # noqa: E402
 from glisteel.car import CarSpec  # noqa: E402
 from glisteel.driver import Autopilot  # noqa: E402
@@ -143,7 +144,8 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.track = track
         self.session = Session(world, CarSpec(),
                                view=getattr(self.config, 'view', None) or VIEWS[0],
-                               laps=getattr(self.config, 'laps', RACE_LAPS))
+                               laps=getattr(self.config, 'laps', RACE_LAPS),
+                               assist=getattr(self.config, 'assist', ASSIST))
         self.session.driver = self._driver()
         self._told = False
         # The engine's own sky and light rig, rather than one written here: a
@@ -445,6 +447,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--mouse', action='store_true',
                         help='steer with the pointer: where it is across the '
                              'window is where the wheel is')
+    parser.add_argument('--assist', type=float, default=ASSIST, metavar='FRACTION',
+                        help='how much of the steering the car does for you '
+                             'while you are not steering: 0 hands it back '
+                             'entirely, 1 holds the line for you '
+                             '(default: %(default)s)')
     parser.add_argument('--laps', type=int, default=RACE_LAPS, metavar='N',
                         help='how many laps the race is; 0 drives on with no '
                              'finish (default: %(default)s)')
