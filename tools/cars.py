@@ -27,11 +27,14 @@ Wheel radius           0.33 m    ``WHEEL_RADIUS``
 =====================  ========  =====================================
 
 **The names are the interface.** Each vehicle exports three named subtrees --
-``body``, ``interior`` and ``glass`` -- with ``seats`` and the steering column
-inside the interior, and its materials are named ``paint``, ``trim``, ``glass``,
-``interior`` and ``rubber``. ``glisteel.models`` names them from the other side
-and ``tests/test_models.py`` asserts every one of them, along with the
-dimensions, the budgets and the steering travel.
+``body``, ``interior`` and ``glass`` -- with ``seats``, ``pillars`` and the
+steering column inside the interior, and its materials are named ``paint``,
+``trim``, ``glass``, ``interior`` and ``rubber``. The player's car carries a
+fourth top-level subtree, ``bonnet``: the shell forward of the windscreen,
+split from ``body`` because it is the one piece of the outside a driver still
+sees from inside. ``glisteel.models`` names them from the other side and
+``tests/test_models.py`` asserts every one of them, along with the dimensions,
+the budgets and the steering travel.
 
 **The steering travel is a clip, not a number.** The rim carries an action named
 ``steer``: full left at its first key, centred at its second, full right at its
@@ -989,17 +992,21 @@ def _hero_dash(materials):
             (0.58, 0.94, FLOOR + 0.43), inside),
     ], inside)
 
-    # The binnacle: a cowl hooding forward over the steering column, raised
-    # enough that the dials clear the rim's own top rather than sitting behind
-    # it -- a wheel this close to the eye hides anything mounted at its own
-    # height. Each bezel is a rounded ring rather than a flat one, since a
-    # flat ring faced square at the eye shows one flat tone under this cabin's
-    # own low light and a rounded one sweeps light around its curve the way
-    # the rim's own hoop does -- that sweep is what a bright material needs to
-    # read as a ring rather than sink into the moulding behind it.
-    dial_z = FLOOR + 0.53
+    # The binnacle: a cowl hooding forward over the steering column. The dials
+    # sit *inside* the rim's opening, which is where a driver reads them from
+    # and where they cost nothing: the eye is at COCKPIT_UP, 0.40 above the
+    # body's centre, and anything mounted near that height between the driver
+    # and the screen is a slab across the road rather than an instrument. The
+    # hood tops out a good hand's width below the eye for the same reason.
+    #
+    # Each bezel is a rounded ring rather than a flat one, since a flat ring
+    # faced square at the eye shows one flat tone under this cabin's own low
+    # light and a rounded one sweeps light around its curve the way the rim's
+    # own hoop does -- that sweep is what a bright material needs to read as a
+    # ring rather than sink into the moulding behind it.
+    dial_z = FLOOR + 0.44
     binnacle = join('hero:dash_binnacle', [
-        box('hero:dash_hood', (-0.19, 0.86, FLOOR + 0.40), (0.19, 1.04, FLOOR + 0.65),
+        box('hero:dash_hood', (-0.19, 0.86, FLOOR + 0.34), (0.19, 1.04, FLOOR + 0.56),
             inside),
         bezel('hero:dash_dial_big_bezel', -0.085, 0.82, dial_z, 0.0875, 0.0125, trim,
              segments=24),

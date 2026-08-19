@@ -155,14 +155,16 @@ class TestThePlayersCar:
     def test_the_cockpit_view_has_no_gap_to_the_road(self, hero) -> None:
         """The driver's eye meets the tub, not the ground under the dash.
 
-        A dashboard shallow enough to see over and no floor to match is a hole
-        a driver can see the road straight through. Every downward line of
-        sight from the cockpit eye -- ahead, ahead-and-down, and down beside
-        the pedals -- has to meet the interior or the bonnet before it would
-        leave the car; :func:`glisteel.camera.ChaseCamera` puts the eye at
+        Every line of sight from the cockpit eye more than twenty degrees below
+        the horizontal -- ahead, ahead-and-down, and down beside the pedals --
+        meets the interior or the bonnet before it would leave the car.
+        :class:`glisteel.camera.ChaseCamera` puts the eye at
         :data:`~glisteel.camera.COCKPIT_UP` above the body's centre and
-        :data:`~glisteel.camera.COCKPIT_BACK` behind it, on the centreline,
-        and only the interior and the bonnet draw in that view.
+        :data:`~glisteel.camera.COCKPIT_BACK` behind it, on the centreline, and
+        only the interior and the bonnet draw in that view.
+
+        Shallower than twenty degrees is deliberately not asserted: that is the
+        road ahead, which the driver has to be able to see.
         """
         triangles = np.concatenate([_world_triangles(hero.getDEF(models.INTERIOR)),
                                    _world_triangles(hero.getDEF(models.BONNET))])
