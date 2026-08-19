@@ -123,10 +123,14 @@ yours -- a car on the grid is a car in the road. They are placed and driven by
 distance along the course rather than simulated as vehicles, which is why there
 can be eight of them for nothing measurable.
 
-**`--mouse` steers with the pointer.** Where it is across the window is where
-the wheel is, the way mouse-look turns a head; the keys still work and override.
-A keyboard gives three states and no amount of tuning makes that feel like a
-car.
+**The steering keys wind a wheel on and off.** Left and right are a key each, so
+the raw input is full lock or none; held straight to the car that is a spin at
+speed. The keys drive a wheel that eases toward the held lock and back to centre
+instead, so a tap is a nudge and a hold builds to lock, and the lock the front
+wheels reach eases off as the car speeds up. `--mouse` steers with the pointer:
+where it is across the window is where the wheel is, the way mouse-look turns a
+head, and it gives a position rather than a rate. The keys override the pointer
+while one is down.
 
 **The drivetrain is electric.** All of the force from a standstill and constant
 *power* from fifteen metres a second on, so the pull falls away as the speed

@@ -267,6 +267,39 @@ class TestKeepingToALane:
         assert float(np.sign(car.position()[0])) == float(np.sign(lane[0]))
 
 
+class TestTheGridFacesDownTheRoad:
+    """A car put on the grid faces the way the road runs. The heading the grid
+    hands out and the heading the physics reads it back as are the same
+    convention -- the one a yaw about the vertical actually turns the car
+    through -- so the driver starts looking down the track rather than across
+    it. A road square to an axis never tells them apart; one running diagonally
+    does."""
+
+    def _diagonal(self, count=60, spacing=6.0):
+        from glisteel.world import Course
+        step = spacing / math.sqrt(2.0)
+        t = np.arange(count) * step
+        return Course(name='diagonal', centreline=np.stack(
+            [t, np.zeros(count), t], axis=-1),
+            carriageway_width=7.2, total_width=10.6, closed=False,
+            length=float((count - 1) * spacing))
+
+    def test_a_placed_car_faces_along_the_road(self) -> None:
+        from omi_physics.world import PhysicsWorld
+
+        from glisteel.car import Car
+        from glisteel.world import static_ground
+        course = self._diagonal()
+        start, heading = course.grid_position(index=0, height=1.0)
+        world = PhysicsWorld()
+        static_ground(world, size=2000.0)
+        car = Car(world, position=start, heading=heading)
+        along = course.point(1) - course.point(0)
+        along = along / np.linalg.norm(along)
+        assert float(np.dot(car.forward(), along)) > 0.99, \
+            "the car faces %r, the road runs %r" % (car.forward(), along)
+
+
 class TestTheWayAcrossAClosedRoad:
     """A closed course's last point is its first, so the segment between them
     has no length and no direction. Asking which way is across the road there

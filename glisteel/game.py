@@ -51,7 +51,7 @@ from glisteel.race import (  # noqa: E402
     closing_speed,
     off_course,
 )
-from glisteel.steering import MouseWheel  # noqa: E402
+from glisteel.steering import KeyboardWheel, MouseWheel  # noqa: E402
 from glisteel.world import RaceWorld  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -90,10 +90,10 @@ VISIBILITY = 1800.0
 #: Which keys do what. Each is a set of names, so the arrows and WASD are the
 #: same control rather than two.
 CONTROLS = {
-    'throttle': {'w', 'W', 'up'},
-    'brake': {'s', 'S', 'down'},
-    'left': {'a', 'A', 'left'},
-    'right': {'d', 'D', 'right'},
+    'throttle': {'w', '<up>'},
+    'brake': {'s', '<down>'},
+    'left': {'a', '<left>'},
+    'right': {'d', '<right>'},
     'handbrake': {' '},
 }
 
@@ -111,6 +111,9 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     crashes: Collisions | None = None
     #: The wheel, when the player is steering with the pointer.
     wheel: MouseWheel | None = None
+    #: The steering wheel the arrow and WASD keys wind on and off; see
+    #: :class:`~glisteel.steering.KeyboardWheel`.
+    keys: KeyboardWheel | None = None
     hud: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
@@ -120,6 +123,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
 
     def OnInit(self) -> None:                    # pragma: no cover - needs a window
         self.held: set[str] = set()
+        self.keys = KeyboardWheel()
         # The engine's clock rather than the wall clock directly: a recording
         # replaces it with one that advances a frame at a time, and the car has
         # to move on that same clock or the video is not what was driven.
@@ -228,8 +232,13 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     def _held(self, control: str) -> bool:
         return bool(self.held & CONTROLS[control])
 
-    def driver_input(self) -> tuple[float, float, float]:
-        """The pedals and the wheel, from whatever is held down."""
+    def driver_input(self, dt: float) -> tuple[float, float, float]:
+        """The pedals and the wheel, from whatever is held down.
+
+        ``dt`` is the step the steering is wound over: the keys give full lock
+        or none, and :class:`~glisteel.steering.KeyboardWheel` turns that into a
+        wheel that eases on and off rather than a switch.
+        """
         throttle = 1.0 if self._held('throttle') else 0.0
         brake = 0.0
         if self._held('brake'):
@@ -243,19 +252,21 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
                 throttle = -1.0
         if self._held('handbrake'):
             brake = 1.0
-        steer = (1.0 if self._held('left') else 0.0) - \
+        target = (1.0 if self._held('left') else 0.0) - \
             (1.0 if self._held('right') else 0.0)
-        if self.wheel is not None and not steer:
-            # The keys still work, and override: a driver reaching for one has
-            # decided the pointer is not where they want the wheel.
-            steer = self.wheel.position
-        return throttle, brake, steer
+        if self.wheel is not None and not target:
+            # The pointer has the wheel while no steering key is down; reaching
+            # for a key takes it back, because a driver doing so has decided the
+            # pointer is not where they want the wheel.
+            return throttle, brake, self.wheel.position
+        assert self.keys is not None
+        return throttle, brake, self.keys.toward(target, dt)
 
-    def controls(self) -> tuple[float, float, float]:
+    def controls(self, dt: float) -> tuple[float, float, float]:
         """Whoever is driving: the autopilot, or whoever is at the keyboard."""
         if self.autopilot is not None and self.car is not None:
             return self.autopilot.update(self.car)
-        return self.driver_input()
+        return self.driver_input(dt)
 
     def _watch_the_road_ahead(self) -> None:     # pragma: no cover - needs a window
         """Tell the autopilot what is in front of it.
@@ -314,7 +325,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self._accumulated += elapsed
         while self._accumulated >= PHYSICS_STEP:
             self._read_the_ground(PHYSICS_STEP)
-            self.car.control(*self.controls())
+            self.car.control(*self.controls(PHYSICS_STEP))
             self.car.update(PHYSICS_STEP)
             self.world.physics.step(PHYSICS_STEP)
             self._accumulated -= PHYSICS_STEP

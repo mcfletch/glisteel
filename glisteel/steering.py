@@ -13,7 +13,7 @@ letting go of it in the middle is straight ahead.
 """
 from __future__ import annotations
 
-__all__ = ['MouseWheel', 'TRAVEL', 'CURVE']
+__all__ = ['KeyboardWheel', 'MouseWheel', 'TRAVEL', 'CURVE', 'WIND_ON', 'CENTRE']
 
 #: How much of the window's half-width is full lock. Under 1 so a driver does
 #: not have to reach the very edge of the screen to get all of it.
@@ -58,3 +58,57 @@ class MouseWheel:
         offset = max(-1.0, min(1.0, offset))
         shaped = abs(offset) ** self.curve
         return float(shaped if offset >= 0.0 else -shaped)
+
+
+#: How quickly the keyboard wheel winds on toward a lock the driver is holding,
+#: in wheel units -- full lock is one -- a second. A tap is then a nudge and a
+#: hold builds to lock over a fraction of a second; fed the keys directly the
+#: wheel is at full lock the instant one goes down, and a tap at speed is a spin.
+WIND_ON = 2.2
+
+#: How quickly it returns to centre with nothing held, brisker than it winds on
+#: so letting go of a key straightens the car promptly.
+CENTRE = 4.5
+
+
+class KeyboardWheel:
+    """A steering wheel driven by on/off keys, kept as a smoothed position.
+
+    Left and right are a key each, so the only inputs are full left, straight
+    and full right. Handed to the car as they are, that is a wheel yanked to the
+    stop and back, and at speed a tap is a spin. :meth:`toward` makes it a wheel
+    that *winds*: it moves toward the held lock at ``wind_on`` wheel units a
+    second and back to centre at ``centre``, so a tap is a small angle and a
+    hold builds to full lock.
+
+    ``position`` is where the wheel is, from -1 (full right) to +1 (full left),
+    the sign a positive steering input turns towards -- the same convention as
+    :class:`MouseWheel`, so the two are interchangeable where the car is
+    steered.
+    """
+
+    def __init__(self, wind_on: float = WIND_ON, centre: float = CENTRE) -> None:
+        self.wind_on = max(float(wind_on), 1e-3)
+        self.centre = max(float(centre), 1e-3)
+        #: Where the wheel is, read once a physics step.
+        self.position = 0.0
+
+    def toward(self, target: float, dt: float) -> float:
+        """Wind the wheel toward ``target`` over ``dt`` seconds, and say where
+        it now is.
+
+        ``target`` is where the keys are asking for it: +1 for left held, -1 for
+        right, 0 for neither. Coming back to centre, or crossing it to the other
+        lock, uses the quicker ``centre`` rate; winding further into a lock uses
+        ``wind_on``.
+        """
+        target = max(-1.0, min(1.0, float(target)))
+        returning = target == 0.0 or (
+            self.position != 0.0 and (self.position > 0.0) != (target > 0.0))
+        rate = self.centre if returning else self.wind_on
+        step = rate * max(float(dt), 0.0)
+        if self.position < target:
+            self.position = min(target, self.position + step)
+        else:
+            self.position = max(target, self.position - step)
+        return self.position

@@ -151,13 +151,16 @@ class Course:
         return point
 
     def heading_at(self, index: int) -> float:
-        """Which way the road runs there, as a yaw in radians from -Z.
+        """Which way the road runs there, as a yaw about the vertical.
 
-        The direction from this point to the next, which is the way a car
-        parked here should face.
+        The direction from this point to the next, as the angle that turns a
+        car to face it. A yaw of ``t`` sends the nose, which points down -Z, to
+        ``(-sin t, 0, -cos t)`` -- so the angle is read off the *negated*
+        direction. Taken from the direction itself the car ends up square
+        across the road, which is what any road not lying along an axis finds.
         """
         ahead = self.point(index + 1) - self.point(index)
-        return math.atan2(float(ahead[0]), -float(ahead[2]))
+        return math.atan2(-float(ahead[0]), -float(ahead[2]))
 
     def nearest(self, position: Any) -> tuple[int, float]:
         """The nearest centreline point's index, and how far off the *road* it is.
@@ -232,8 +235,8 @@ class Course:
         """
         point = self.lane_point(index, lane)
         heading = self.heading_at(index)
-        across = np.array([math.cos(heading), 0.0, math.sin(heading)])
-        return point + np.array([0.0, height, 0.0]) + across * offset, heading
+        return (point + np.array([0.0, height, 0.0])
+                + self.across(index) * offset), heading
 
 
 def load_courses(tileset_path: str) -> list[Course]:
