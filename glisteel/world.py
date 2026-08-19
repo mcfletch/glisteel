@@ -346,7 +346,7 @@ class RaceWorld:
                                     max_sse=max_sse)
         self._assemble(load_courses(tileset_path), field=self.terrain.field,
                        props=self._baked_props(), traffic=traffic,
-                       gravity=gravity)
+                       gravity=gravity, luminaires=self._baked_luminaires())
 
     @classmethod
     def from_course(cls, courses: Any, field: Any = None, props: Any = (),
@@ -373,7 +373,7 @@ class RaceWorld:
         return world
 
     def _assemble(self, courses: list[Course], field: Any, props: list,
-                  traffic: int, gravity: float) -> None:
+                  traffic: int, gravity: float, luminaires: Any = None) -> None:
         """Stand up the physics, the surfaces, the obstacles and the traffic."""
         self.physics = PhysicsWorld(gravity=model.Gravity(gravity=abs(gravity)))
         self.courses = courses
@@ -397,6 +397,10 @@ class RaceWorld:
         #: The ones near the car are in the physics world; the rest are not.
         from OpenGLContext.physics.props import PropColliders
         self.props = PropColliders(self.physics, props)
+        #: The lamps in this world's bores, and which of them are worth a real
+        #: light where the car is (:mod:`glisteel.lighting`).
+        from glisteel.lighting import Luminaires
+        self.luminaires = Luminaires(luminaires)
         #: The other cars using the road, or None for a world with no course.
         self.traffic: Any = None
         if traffic and self.course is not None:
@@ -417,6 +421,17 @@ class RaceWorld:
         document = json.loads(fetch.read_bytes(self.path))
         found = (document.get('extras') or {}).get('props') or []
         return [Prop.from_json(one) for one in found]
+
+    def _baked_luminaires(self) -> Any:
+        """Where the lamps hang in this world's bores, read off the tileset.
+
+        The pool each throws is baked onto the lining and needs nothing from
+        the game. These are for lighting what is *in* the bore -- the car, and
+        the road under it -- which the lining cannot do.
+        """
+        document = json.loads(fetch.read_bytes(self.path))
+        found = (document.get('extras') or {}).get('luminaires') or []
+        return np.asarray(found, dtype='d').reshape(-1, 3)
 
     def _bores(self) -> Any:
         """Where the ground is not there, because a road runs inside it.

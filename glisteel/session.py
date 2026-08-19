@@ -209,6 +209,16 @@ class Session:
             others=[car.position() for car in others],
             phase=self.run.phase, lit=self.run.lit, lights=self.run.lights)
 
+    def in_the_dark(self) -> bool:
+        """Whether the car is somewhere it needs its own light.
+
+        Inside a bore, which is the only dark this world has: it is one
+        afternoon everywhere else. What acts on it is the window, which turns
+        the headlights on (:mod:`glisteel.lighting`).
+        """
+        at = self.car.position
+        return bool(self.course.inside('tunnel', at[0], at[2], margin=2.0))
+
     def result(self) -> Result | None:
         """How the run came out, or None while it is still a race.
 

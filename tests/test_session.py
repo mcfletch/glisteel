@@ -397,3 +397,11 @@ class TestHowARunCameOut:
             session.timing.laps.append(Lap(number=number, seconds=90.0))
         session.run.update(0.0, laps=2)
         assert session.result().laps == 2
+
+
+class TestWhenTheCarNeedsItsOwnLight:
+    def test_out_on_the_open_road_it_does_not(self) -> None:
+        assert not _session().in_the_dark()
+
+    def test_a_course_with_no_bores_is_never_dark(self) -> None:
+        assert not _session(scenarios.circuit()).in_the_dark()

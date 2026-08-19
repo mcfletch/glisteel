@@ -36,6 +36,8 @@ import os
 import sys
 from typing import Any
 
+import numpy as np
+
 os.environ.setdefault('OPENGLCONTEXT_PROFILE', 'core')
 os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')
 os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')
@@ -54,6 +56,11 @@ from glisteel.camera import VIEWS  # noqa: E402
 from glisteel.car import CarSpec  # noqa: E402
 from glisteel.driver import Autopilot  # noqa: E402
 from glisteel.hud import RaceHUD  # noqa: E402
+from glisteel.lighting import (  # noqa: E402
+    BEAM_COLOUR,
+    LAMP_COLOUR,
+    Headlights,
+)
 from glisteel.records import Records  # noqa: E402
 from glisteel.session import RACE_LAPS, Session  # noqa: E402
 from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel  # noqa: E402
@@ -78,6 +85,16 @@ VISIBILITY = 1800.0
 #: start line, which every world has and none is recognised by.
 PICTURE_SECONDS = 25.0
 
+#: How far one tunnel luminaire's real light reaches, in metres, how hard it
+#: burns, and how it falls off with distance. Short, and falling off with the
+#: square of the distance the way a real lamp does: what lights the *lining* is
+#: baked into it, and this is only for the car and the road under the fitting.
+#: Without the square term a lamp lights the whole bore evenly and the tunnel
+#: comes out as a brightly lit corridor rather than a dark one with lamps in it.
+LAMP_REACH = 30.0
+LAMP_INTENSITY = 3.0
+LAMP_FALLOFF = (1.0, 0.0, 0.02)
+
 
 class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     """The game window: a run to advance, a scene to draw, and keys to deliver."""
@@ -95,6 +112,10 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     records: Any = None
     #: Whether the finish screen has been shown for the run now over.
     _told: bool = False
+    #: The lights the car carries and the ones the world lends it.
+    headlights: Any = None
+    _beam: Any = None
+    _lamps: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
     addEventHandler: Any
@@ -163,14 +184,76 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         if world.traffic is not None:
             # Mounted once; the cars under it come and go as the player passes.
             self.sg.children.append(world.traffic.node)
+        self._light_the_car(world)
         self.hud.route(world.course)
         self._show_hud()
+
+    def _light_the_car(self, world: Any) -> None:  # pragma: no cover - a window
+        """Mount the lights that move: the beam, and the lamps of a bore.
+
+        Mounted once and moved, rather than made and unmade as the car passes:
+        a light is a shader slot, and a scenegraph that gains and loses one
+        every twenty-five metres recompiles for it.
+        """
+        from OpenGLContext.scenegraph.light import PointLight, SpotLight
+        self.headlights = Headlights(
+            fitted=getattr(self.config, 'headlights', True))
+        self._beam = SpotLight(color=BEAM_COLOUR,
+                               intensity=self.headlights.intensity,
+                               cutOffAngle=self.headlights.spread,
+                               beamWidth=self.headlights.spread * 0.5,
+                               radius=self.headlights.reach,
+                               attenuation=(1.0, 0.0, 0.0), castShadows=False)
+        self._beam.on = False
+        # One point light per luminaire slot, dark until the car is among them.
+        self._lamps = [
+            PointLight(color=LAMP_COLOUR, intensity=0.0,
+                       radius=LAMP_REACH, attenuation=LAMP_FALLOFF,
+                       castShadows=False)
+            for _ in range(world.luminaires.count)]
+        for lamp in self._lamps:
+            lamp.on = False
+        self.sg.children.append(self._beam)
+        self.sg.children.extend(self._lamps)
+
+    def _move_the_lights(self) -> None:          # pragma: no cover - needs a window
+        """Point the beam where the car is going, and put the world's lamps
+        where the nearest fittings are."""
+        assert self.session is not None
+        car = self.session.car
+        dark = self.session.in_the_dark()
+        if self._beam is not None:
+            burning = self.headlights.wanted(dark)
+            self._beam.on = burning
+            if burning:
+                offset = np.asarray(self.headlights.offset, dtype='d')
+                forward = np.asarray(car.forward(), dtype='d')
+                across = np.cross(forward, (0.0, 1.0, 0.0))
+                self._beam.location = tuple(
+                    car.position + forward * -offset[2]
+                    + across * offset[0] + np.array([0.0, offset[1], 0.0]))
+                self._beam.direction = tuple(self.headlights.aim(forward))
+        if not self._lamps:
+            return
+        wanted = (self.session.world.luminaires.nearest(car.position)
+                  if dark else [])
+        for slot, lamp in enumerate(self._lamps):
+            if slot < len(wanted):
+                lamp.location = tuple(
+                    self.session.world.luminaires.at(wanted[slot]))
+                lamp.intensity = LAMP_INTENSITY
+                lamp.on = True
+            else:
+                lamp.on = False
+                lamp.intensity = 0.0
 
     def close(self) -> None:                     # pragma: no cover - needs a window
         """Put away whatever world is loaded."""
         if self.session is not None:
             self.session.world.shutdown()
         self.session = None
+        self._beam = None
+        self._lamps = None
         self.sg.children = [environment.horizon_background()]
         self._show_hud()
 
@@ -339,6 +422,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.session.viewport = self.getViewPort()
         pose = self.session.advance(elapsed)
         self._aim(pose)
+        self._move_the_lights()
         self._update_hud()
         self._tell_them_how_it_went()
 
@@ -447,6 +531,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--mouse', action='store_true',
                         help='steer with the pointer: where it is across the '
                              'window is where the wheel is')
+    parser.add_argument('--headlights', action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help='the light the car carries into a bore')
     parser.add_argument('--assist', type=float, default=ASSIST, metavar='FRACTION',
                         help='how much of the steering the car does for you '
                              'while you are not steering: 0 hands it back '

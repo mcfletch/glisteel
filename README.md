@@ -83,6 +83,7 @@ what makes it a *game*.
 | `race.py` | lap timing that a shortcut does not fool, and leaving the road |
 | `run.py` | which part of the race this is, and what it lets through to the car |
 | `assist.py` | the steering the game puts in while the player is not steering |
+| `lighting.py` | what lights a bore, and what the car carries into one |
 | `tracks.py` | the worlds a player can choose between, and where their files live |
 | `records.py` | the best times driven on each track |
 | `menu.py` | the screens around the outside of the race |
@@ -331,6 +332,23 @@ the frame rates a full world runs at — does to the car:
 | 86 km/h, 0.6 s hold | 19.6 m | **1.7 m** |
 
 The carriageway is 7.2 m wide.
+
+### Lights, and the eight of them there are
+
+A renderer binds eight lights in a frame and a tunnel has one every
+twenty-five metres, so a bore is lit **twice**:
+
+- **The lining lights itself.** The pool each luminaire throws is baked onto its
+  vertices when the world is built, so the whole length of a bore is lit at any
+  distance and costs nothing to draw.
+- **The few fittings the car is among become real lights.** That is what the
+  lamp positions in the tileset's `extras` are for: a car under a lamp has no
+  idea it is under one, and a baked pool cannot tell it.
+
+The budget divides two for the sun and its sky fill, four for the luminaires,
+one for the headlights — seven of eight, with one left for whatever a world
+wants next. `--no-headlights` drives without them; they come on where it is
+dark, which in this world means inside a bore.
 
 ### Tracks, and the times driven on them
 
