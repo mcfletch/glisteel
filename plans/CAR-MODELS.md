@@ -1,6 +1,7 @@
 # Car models: the player's car, its wheels, and the traffic
 
-Status: 📋 Planned — awaiting review, do not implement yet.
+Status: ✅ Built and shipping. The cockpit's second pass — instruments,
+pillars and a bonnet — is recorded under *The view from the seat* below.
 
 The car the player drives, the four wheels it rolls on, and the five ordinary
 vehicles that use the same road, authored as one Blender script and shipped as
@@ -133,11 +134,25 @@ two-tone in it, and the paint is one of the two things — with the canopy — t
 say what kind of car this is. The traffic is the other way round for the same
 reason, since ten vehicles that differ only in colour are one model recoloured.
 
-**Two seats, and a dashboard that says nothing.** The seats are one-piece
+**Two seats, and a dashboard with something on it.** The seats are one-piece
 buckets with visible side bolsters and integrated headrests, sitting in a tub
-floor with a centre spine between them. The dashboard is an unbroken matte
-sweep from door to door — no vents, no switches, no screens, no badges. What
-the driver is told is the road, and the four numbers the HUD carries.
+floor with a centre spine between them.
+
+The dashboard began as an unbroken matte sweep from door to door — no vents, no
+switches, no screens — on the reasoning that what the driver is told is the road
+and the four numbers on the HUD. Driven, that reads as a grey slab across the
+bottom third of every frame: the HUD is what the driver *reads*, and the
+dashboard is what tells them they are sitting in a car at all. So it carries a
+hooded binnacle with two recessed dials over the column, a centre stack with
+vents and switches, and an eyeball vent at each end — all modelled, since the
+car has no textures.
+
+**The view from the seat is framed.** Slim A-pillars up the edges of the screen
+and a header rail across the top of it, and the bonnet forward of the screen
+kept when the rest of the outside is dropped. A seat with no bonnet under it is
+a camera flying down the road, so the exterior loft is split at the screen base:
+`bonnet` forward of it, `body` behind, both painted, and only the first survives
+the cockpit view.
 
 **The wheel is a racing wheel.** A flat-bottomed D-shaped rim, two spokes into a
 deep hub, and in the hub a blank dark panel where an instrument goes. The speed
@@ -146,14 +161,19 @@ change to the glyphs and not to the wheel — see *Future work*.
 
 ### Named subtrees
 
-`hero.glb` carries three top-level named nodes, which
+`hero.glb` carries four top-level named nodes, which
 `load_gltf(path).getDEF(name)` returns as individual Transforms:
 
 | Name | Holds | Drawn in cockpit view |
 |---|---|---|
-| `body` | bodywork, lights, splitter, sills, diffuser | no |
-| `interior` | tub, seats, dash, steering wheel and column | yes |
+| `body` | bodywork behind the screen: lights, splitter, sills, diffuser | no |
+| `bonnet` | the shell forward of the screen base | yes |
+| `interior` | tub, seats, dash, pillars, steering wheel and column | yes |
 | `glass` | canopy, side and rear glass — the transmissive material | yes |
+
+`bonnet` is painted like `body` and is bodywork in every other respect; it is
+named apart because it is the one thing on the outside a driver still sees.
+A vehicle with no `bonnet` is drawn without one, so the traffic needs none.
 
 Under `interior`, two names matter and they nest. `steering` carries the column
 — where it is and how far it rakes — and is never written to at runtime; its
@@ -162,10 +182,10 @@ Splitting them is what keeps the rake: writing a rotation onto a node that
 already carries one overwrites it, which is why a road wheel is a steer
 transform with a spin transform inside it, and this is that arrangement again.
 
-`hidden` on `Car` currently switches the whole shell off for the cockpit view.
-It becomes "the exterior is left out of the frame": the interior and the glass
-stay, which is what puts a dashboard and a windscreen in front of the driver.
-The chase and bonnet views draw all three.
+`hidden` on `Car` is "the exterior is left out of the frame": the interior, the
+glass and the bonnet stay, which is what puts a dashboard, a windscreen and
+something to look over in front of the driver. The chase and bonnet views draw
+all four.
 
 ### Wheels
 

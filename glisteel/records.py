@@ -4,18 +4,34 @@ A lap time on its own is a number. What makes it worth driving for is the table
 it lands in -- so the only question this answers is **where did that lap come**,
 and the answer is what the finish is for::
 
-    >>> table = Records('/tmp/times.json')
+    >>> import os, tempfile
+    >>> table = Records(os.path.join(tempfile.mkdtemp(), 'times.json'))
     >>> table.offer('ashdown', 84.115)
     1
     >>> table.offer('ashdown', 91.0)
     2
-    >>> table.offer('ashdown', 999.0) is None
+    >>> [lap.clock() for lap in table.best('ashdown')]
+    ['1:24.115', '1:31.000']
+
+:data:`KEPT` times per track, quickest first, so a lap is turned away only once
+the table is full and it beat none of them::
+
+    >>> for seconds in (70.0, 71.0, 72.0, 73.0, 74.0):
+    ...     place = table.offer('speedwell', seconds)
+    >>> table.offer('speedwell', 999.0) is None
+    True
+    >>> table.offer('speedwell', 69.0)
+    1
+
+A race that ended without a lap has no time to offer, and gets the same answer::
+
+    >>> table.offer('speedwell', 0.0) is None
     True
 
-Five times per track, quickest first, in a JSON file under the player's own
-directory (:mod:`glisteel.tracks`) written so that a person can read it. A file
-that will not parse loses the times and not the game: a corrupt score table is
-worth nothing, and refusing to start over one is worth less.
+The file is JSON under the player's own directory (:mod:`glisteel.tracks`),
+written so that a person can read it. A file that will not parse loses the times
+and not the game: a corrupt score table is worth nothing, and refusing to start
+over one is worth less.
 """
 from __future__ import annotations
 

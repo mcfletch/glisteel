@@ -89,6 +89,9 @@ ignore_missing_imports = true
 disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-ra"
+# The package as well as the tests: the modules teach with worked examples, and
+# an example nobody runs is documentation that drifts away from the code it
+# describes without anything saying so.
+testpaths = ["tests", "glisteel"]
+addopts = "-ra --doctest-modules"
 timeout = 300

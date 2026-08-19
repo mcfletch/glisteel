@@ -245,12 +245,21 @@ class Car:
         return Transform(children=[shell, *inside]), shell, wheels
 
     def _shell_art(self) -> tuple[list[Any], list[Any]]:
-        """What is drawn outside the car, and what is drawn inside it."""
+        """What is drawn outside the car, and what is drawn inside it.
+
+        The bonnet counts as inside. It is bodywork and painted like the rest of
+        it, but it is also most of what a driver sees, and a seat with no bonnet
+        under it is a camera flying down the road -- so it stays when the rest of
+        the outside goes. A model that carries no bonnet is drawn without one.
+        """
         scene = models.ART.load(models.HERO)
         if scene is not None:
             outside = [scene.getDEF(models.BODY)]
             inside = [scene.getDEF(models.INTERIOR), scene.getDEF(models.GLASS)]
             if all(node is not None for node in outside + inside):
+                bonnet = scene.getDEF(models.BONNET)
+                if bonnet is not None:
+                    inside.append(bonnet)
                 self._steering = scene.player_named(models.STEER_CLIP, loop=False)
                 self.rim = scene.getDEF(models.RIM)
                 return outside, inside
@@ -347,13 +356,17 @@ def wheel_mesh(radius: float = 0.33, width: float = 0.24,
     left = circle - np.array([width / 2.0, 0.0, 0.0])
     right = circle + np.array([width / 2.0, 0.0, 0.0])
     points = np.vstack([left, right])
+    # Wound so every triangle faces out of the tyre. The render pass takes
+    # counter-clockwise as the front face and culls the rest, and :func:`_mesh`
+    # takes the shading normals off the same winding, so a wheel wound the other
+    # way is neither drawn nor lit.
     faces: list[tuple[int, int, int]] = []
     for i in range(sides):
         j = (i + 1) % sides
-        faces += [(i, j, sides + i), (j, sides + j, sides + i)]
+        faces += [(i, sides + i, j), (j, sides + i, sides + j)]
     for i in range(1, sides - 1):                # the two discs
-        faces.append((0, i + 1, i))
-        faces.append((sides, sides + i, sides + i + 1))
+        faces.append((0, i, i + 1))                          # the left face
+        faces.append((sides, sides + i + 1, sides + i))       # the right face
     return _mesh(points, faces, material or PBRMaterial(baseColor=(0.05, 0.05, 0.05)))
 
 
@@ -361,8 +374,12 @@ def _box_mesh(bottom: list[tuple[float, float, float]], height: float,
               material: PBRMaterial) -> PBRMesh:
     """A prism: a closed outline extruded upward by ``height``.
 
-    The outline runs clockwise seen from above, which is what makes the sides
-    face outward and the caps face the way they should.
+    The outline runs **counter-clockwise seen from above** -- which is the
+    order the car's own sections are written in -- and every triangle here is
+    wound so that it faces out of the solid. That matters twice over: the
+    render pass draws counter-clockwise front faces and culls the rest, and
+    :func:`_mesh` takes the shading normals off the same winding, so a face
+    wound inward is neither drawn nor lit.
     """
     floor = np.asarray(bottom, dtype='d')
     roof = floor + np.array([0.0, height, 0.0])
@@ -371,7 +388,7 @@ def _box_mesh(bottom: list[tuple[float, float, float]], height: float,
     faces: list[tuple[int, int, int]] = []
     for i in range(count):
         j = (i + 1) % count
-        faces += [(i, j, count + i), (j, count + j, count + i)]
+        faces += [(i, count + i, j), (j, count + i, count + j)]
     for i in range(1, count - 1):
         faces.append((0, i, i + 1))                          # the floor
         faces.append((count, count + i + 1, count + i))      # the roof

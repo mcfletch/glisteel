@@ -34,6 +34,11 @@ and through a bore where it does not. The second drives it.
 the same code an opponent car would use; `--view chase` starts in a view other
 than the driver's seat.
 
+Naming a world that is not there is a message and a non-zero status, which is
+what a script wants. Picking one from the track chooser that cannot be raced —
+moved since it was listed, or baked without a circuit in it — puts the reason on
+the menu and leaves the game running, which is what a player wants.
+
 ### Recording a drive
 
 ```bash

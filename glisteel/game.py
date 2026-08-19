@@ -34,6 +34,7 @@ import argparse
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -154,14 +155,20 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         return library[0] if len(library) == 1 else None
 
     def open(self, track: Any) -> None:          # pragma: no cover - needs a window
-        """Load a world and stand a car on its grid."""
+        """Load a world and stand a car on its grid.
+
+        A track that cannot be raced -- moved, half-baked, or baked without a
+        circuit in it -- leaves the game where it was with the menu up and the
+        reason under the title. A chooser offers whatever is on disk, so picking
+        one of those is something a player does, not a reason to stop.
+        """
+        try:
+            world = self._world_for(track)
+        except (OSError, ValueError) as error:
+            log.warning('%s', error)
+            self.show_menu(subtitle=str(error))
+            return
         self.close()
-        world = RaceWorld(track.tileset, max_sse=self.config.sse,
-                          traffic=getattr(self.config, 'traffic', 0))
-        if world.course is None:
-            raise SystemExit(
-                "%s carries no roads, so there is nothing to race on. Bake a "
-                "world with a circuit in it." % track.tileset)
         self.track = track
         self.session = Session(world, CarSpec(),
                                view=getattr(self.config, 'view', None) or VIEWS[0],
@@ -187,6 +194,16 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self._light_the_car(world)
         self.hud.route(world.course)
         self._show_hud()
+
+    def _world_for(self, track: Any) -> Any:     # pragma: no cover - needs a window
+        """The world a track carries, or the reason it is not one to race on."""
+        world = RaceWorld(track.tileset, max_sse=self.config.sse,
+                          traffic=self.config.traffic)
+        fault = opening_fault(world, track)
+        if fault is not None:
+            world.shutdown()
+            raise ValueError(fault)
+        return world
 
     def _light_the_car(self, world: Any) -> None:  # pragma: no cover - a window
         """Mount the lights that move: the beam, and the lamps of a bore.
@@ -264,20 +281,24 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
 
     # -- the screens -----------------------------------------------------------
 
-    def show_menu(self, event: Any = None) -> None:   # pragma: no cover - a window
+    def show_menu(self, event: Any = None,
+                  subtitle: str | None = None) -> None:  # pragma: no cover - a window
         """The menu, over whatever is behind it.
 
         A second one pushed over the first would leave two, so an open one is
-        found rather than replaced.
+        found rather than replaced. ``subtitle`` says why it is up, for the menu
+        that comes back when a track could not be opened.
         """
         if self.overlays.named('menu') is not None:
             return
         racing = self.session is not None
+        if subtitle is None:
+            subtitle = self.track.name if self.track is not None else ''
         panel = menu.main_menu(
             on_drive=self._on_drive, on_tracks=self.show_tracks,
             on_settings=self._on_settings, on_quit=self._on_quit,
             on_resume=self._on_resume if racing else None,
-            subtitle=self.track.name if self.track is not None else '')
+            subtitle=subtitle)
         panel.name = 'menu'
         self.pushOverlay(panel)
 
@@ -354,18 +375,20 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         return self.keyboard
 
     def _bind_keys(self) -> None:                # pragma: no cover - needs a window
-        for names in CONTROLS.values():
-            for name in names:
-                for state in (1, 0):
-                    self.addEventHandler('keyboard', name=name, state=state,
-                                         function=self._on_key)
-        if self.keyboard is not None and self.keyboard.pointer is not None:
-            self.addEventHandler('mousemove', function=self._on_pointer)
-        self.addEventHandler('keypress', name='c', function=self._on_camera)
-        self.addEventHandler('keypress', name='r', function=self._on_reset)
-        self.addEventHandler('keypress', name='n', function=self._on_restart)
-        self.addEventHandler('keyboard', name='<escape>', state=1,
-                             function=self.show_menu)
+        """Ask the runtime for every event the game acts on.
+
+        Made once, from :func:`bindings`, and unconditionally: the bindings are
+        put in before a world is open, so anything decided here about whoever is
+        driving would be decided before there is one. Each handler guards itself
+        instead.
+        """
+        for one in bindings():
+            named = {'function': getattr(self, one.handler)}
+            if one.name is not None:
+                named['name'] = one.name
+            if one.state is not None:
+                named['state'] = one.state
+            self.addEventHandler(one.kind, **named)
 
     # -- input -----------------------------------------------------------------
 
@@ -500,6 +523,60 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.close()
 
 
+@dataclass(frozen=True)
+class Binding:
+    """One event the window asks the runtime for.
+
+    ``kind`` is the event, ``name`` the key or None for one that has none,
+    ``state`` 1 for going down and 0 for coming up (None where it does not
+    matter), and ``handler`` the name of the method to call.
+    """
+
+    kind: str
+    handler: str
+    name: str | None = None
+    state: int | None = None
+
+
+def bindings() -> tuple[Binding, ...]:
+    """Every event the game acts on, as a table.
+
+    Worked out here rather than in the window because a binding that is never
+    made is a control that silently does nothing: nothing raises, and the key or
+    the pointer simply has no effect. A table is something a test can read.
+
+    Nothing here is conditional. The bindings go in as the window is built,
+    before a world is open and therefore before there is anybody driving, so a
+    binding that asked about the driver would always get the same answer --
+    which is how ``--mouse`` came to be a documented control that was never
+    connected to anything. The pointer handler guards itself
+    (:meth:`GlisteelContext._on_pointer`), and a pointer event with no wheel to
+    turn costs a comparison.
+    """
+    found = [Binding('keyboard', '_on_key', name=name, state=state)
+             for names in CONTROLS.values() for name in sorted(names)
+             for state in (1, 0)]
+    found.append(Binding('mousemove', '_on_pointer'))
+    found.extend([Binding('keypress', '_on_camera', name='c'),
+                  Binding('keypress', '_on_reset', name='r'),
+                  Binding('keypress', '_on_restart', name='n'),
+                  Binding('keyboard', 'show_menu', name='<escape>', state=1)])
+    return tuple(found)
+
+
+def opening_fault(world: Any, track: Any) -> str | None:
+    """Why this world is not one to race on, or None if it is.
+
+    Separate from the window because it is a question about a world and a track
+    and has no picture in it: what the window does with the answer is put it in
+    front of the player.
+    """
+    if world.course is None:
+        return ("%s carries no roads, so there is nothing to race on. Bake a "
+                "world with a circuit in it." % track.tileset)
+    return None
+
+
 def race_fog() -> Any:
     """The air the world is seen through.
 
@@ -591,21 +668,49 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:  # pragma: no cover - needs a window
+def main(argv: list[str] | None = None) -> int:
+    """Run the game; answer the status a shell should see.
+
+    The world named on the command line is opened here rather than in the
+    window, so that a path which is not a world is a sentence on stderr and a
+    non-zero status -- what a shell script wants -- while the same failure
+    reached from the track chooser is a message on the menu and a game that goes
+    on running (:meth:`GlisteelContext.open`).
+    """
     logging.basicConfig(level=logging.INFO)
     options = build_parser().parse_args(argv)
     width, _, height = options.size.partition('x')
     GlisteelContext.config = options
+    named = tracks.Track.opening(options.world)
+    if named is None and options.world != _default_world():
+        # Asked for a particular world by name and it is not there. Without a
+        # name the library is offered instead, which is not a failure.
+        sys.stderr.write(
+            'no world at %s -- bake one with %r\n'
+            % (options.world,
+               'oglc-bake --output %s' % (os.path.dirname(options.world)
+                                          or 'world',)))
+        return 1
+    return _run(options, int(width), int(height))     # pragma: no cover - a window
+
+
+def _default_world() -> str:
+    """The world the command line assumes when nobody names one."""
+    return build_parser().get_default('world')
+
+
+def _run(options: Any, width: int, height: int) -> int:  # pragma: no cover
+    """Whichever of the modes the options asked for."""
     if options.picture:
-        _picture(options, int(width), int(height))
+        _picture(options, width, height)
         return 0
     if options.capture:
-        _capture(options, int(width), int(height))
+        _capture(options, width, height)
         return 0
     if options.record:
-        _record(options, int(width), int(height))
+        _record(options, width, height)
         return 0
-    GlisteelContext.ContextMainLoop(size=(int(width), int(height)))
+    GlisteelContext.ContextMainLoop(size=(width, height))
     return 0
 
 

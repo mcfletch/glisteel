@@ -9,11 +9,15 @@ off its wheels or the traffic off its colliders.
 
 No window: a model is geometry, names and materials.
 """
+import math
+
 import numpy as np
 import pytest
 from OpenGLContext.loaders.assets import bounds, shapes
+from OpenGLContext.loaders.gltf.transforms import _local_matrix_rv
 
 from glisteel import models
+from glisteel.camera import COCKPIT_BACK, COCKPIT_UP
 from glisteel.car import BODY_HEIGHT, BODY_LENGTH, BODY_WIDTH, CABIN_HEIGHT, CarSpec
 
 #: How far a model may be from the dimension it is authored to, in metres.
@@ -22,7 +26,9 @@ TOLERANCE = 0.02
 #: How far a wheel's hub may be from its own origin, in metres.
 HUB_TOLERANCE = 0.002
 
-#: What each model may cost, in triangles.
+#: What each model may cost, in triangles. The hero's exterior loft is cut in
+#: two at the windscreen base -- :data:`models.BONNET` and :data:`models.BODY`
+#: -- so the pair shares ``body``'s budget rather than each drawing its own.
 BUDGET = {'body': 10000, 'interior': 6000, 'glass': 2000,
           'hero': 25000, 'wheel': 2500, 'traffic': 2000}
 
@@ -54,6 +60,72 @@ def _triangles(node):
     return sum(len(one.geometry.indices) // 3 for one in shapes(node))
 
 
+def _world_triangles(node):
+    """Every triangle under ``node``, as ``(N, 3, 3)`` world-space corners.
+
+    ``shapes()`` finds the geometry but carries no accumulated transform, so
+    this walks the same ``Transform`` chain :func:`bounds` does and places
+    each shape's own triangles before handing them back.
+    """
+    corners = []
+
+    def collect(here, matrix):
+        world = (_local_matrix_rv(here) @ matrix
+                if getattr(here, 'translation', None) is not None else matrix)
+        points = getattr(getattr(here, 'geometry', None), 'positions', None)
+        if points is not None and len(points):
+            local = np.asarray(points, dtype='d').reshape(-1, 3)
+            placed = (np.column_stack([local, np.ones(len(local))]) @ world)[:, :3]
+            index = np.asarray(here.geometry.indices, dtype=np.int64).reshape(-1, 3)
+            corners.append(placed[index])
+        for child in (getattr(here, 'children', None) or ()):
+            collect(child, world)
+
+    collect(node, np.eye(4))
+    return np.concatenate(corners) if corners else np.zeros((0, 3, 3))
+
+
+def _ray_hit(origin, direction, triangles):
+    """The nearest distance along ``direction`` that meets one of ``triangles``, or None.
+
+    Moller-Trumbore, vectorised over every triangle at once: a cockpit
+    sightline test casts dozens of rays against a thousand-odd triangles, and
+    a Python loop over each pair would cost far more than the geometry itself.
+    """
+    origin = np.asarray(origin, dtype='d')
+    direction = np.asarray(direction, dtype='d')
+    v0, v1, v2 = triangles[:, 0], triangles[:, 1], triangles[:, 2]
+    edge1, edge2 = v1 - v0, v2 - v0
+    perpendicular = np.cross(direction, edge2)
+    determinant = np.einsum('ij,ij->i', edge1, perpendicular)
+    live = np.abs(determinant) > 1e-9
+    inverse = np.zeros_like(determinant)
+    inverse[live] = 1.0 / determinant[live]
+    to_origin = origin - v0
+    u = inverse * np.einsum('ij,ij->i', to_origin, perpendicular)
+    live &= (u >= -1e-6) & (u <= 1.0 + 1e-6)
+    crossed = np.cross(to_origin, edge1)
+    v = inverse * np.einsum('j,ij->i', direction, crossed)
+    live &= (v >= -1e-6) & (u + v <= 1.0 + 1e-6)
+    distance = inverse * np.einsum('ij,ij->i', edge2, crossed)
+    live &= distance > 1e-6
+    return float(distance[live].min()) if np.any(live) else None
+
+
+def _box_exit(origin, direction, low, high):
+    """How far along ``direction`` the ray leaves the box ``(low, high)``."""
+    exit_distance = np.inf
+    for axis in range(3):
+        component = direction[axis]
+        if abs(component) < 1e-12:
+            continue
+        far = max((low[axis] - origin[axis]) / component,
+                  (high[axis] - origin[axis]) / component)
+        if far >= 0.0:
+            exit_distance = min(exit_distance, far)
+    return exit_distance
+
+
 @pytest.fixture
 def hero():
     # Loaded afresh for each test: posing the steering clip moves nodes, and a
@@ -64,9 +136,58 @@ def hero():
 class TestThePlayersCar:
     """The car the player drives: its shell, and what is inside it."""
 
-    def test_it_carries_the_three_shells_by_name(self, hero) -> None:
-        for name in (models.BODY, models.INTERIOR, models.GLASS):
+    def test_it_carries_its_shells_by_name(self, hero) -> None:
+        for name in (models.BODY, models.BONNET, models.INTERIOR, models.GLASS):
             assert hero.getDEF(name) is not None, 'no %s in the model' % (name,)
+
+    def test_it_carries_a_bonnet_ahead_of_the_screen(self, hero) -> None:
+        """The one piece of the outside a driver still sees from inside."""
+        bonnet = hero.getDEF(models.BONNET)
+        assert _triangles(bonnet) > 0
+        assert _centre(bonnet)[2] < _centre(hero.getDEF(models.BODY))[2], \
+            'the bonnet is not ahead of the body'
+
+    def test_it_carries_pillars_framing_the_screen(self, hero) -> None:
+        pillars = hero.getDEF(models.PILLARS)
+        assert pillars is not None, 'no pillars in the interior'
+        assert _triangles(pillars) > 0
+
+    def test_the_cockpit_view_has_no_gap_to_the_road(self, hero) -> None:
+        """The driver's eye meets the tub, not the ground under the dash.
+
+        A dashboard shallow enough to see over and no floor to match is a hole
+        a driver can see the road straight through. Every downward line of
+        sight from the cockpit eye -- ahead, ahead-and-down, and down beside
+        the pedals -- has to meet the interior or the bonnet before it would
+        leave the car; :func:`glisteel.camera.ChaseCamera` puts the eye at
+        :data:`~glisteel.camera.COCKPIT_UP` above the body's centre and
+        :data:`~glisteel.camera.COCKPIT_BACK` behind it, on the centreline,
+        and only the interior and the bonnet draw in that view.
+        """
+        triangles = np.concatenate([_world_triangles(hero.getDEF(models.INTERIOR)),
+                                   _world_triangles(hero.getDEF(models.BONNET))])
+        low, high = _bounds(hero.group)
+        eye = np.array([0.0, COCKPIT_UP, COCKPIT_BACK])
+        forward, up = np.array([0.0, 0.0, -1.0]), np.array([0.0, 1.0, 0.0])
+        right = np.cross(forward, up)
+
+        misses = []
+        for azimuth in (0.0, 15.0, 30.0, 45.0, 60.0, 75.0):
+            for side in (1.0, -1.0):
+                horizontal = (math.cos(math.radians(azimuth)) * forward
+                             + math.sin(math.radians(azimuth)) * side * right)
+                for dip in range(20, 81, 10):
+                    direction = (math.cos(math.radians(dip)) * horizontal
+                                - math.sin(math.radians(dip)) * up)
+                    direction = direction / np.linalg.norm(direction)
+                    exit_distance = _box_exit(eye, direction, low, high)
+                    hit_distance = _ray_hit(eye, direction, triangles)
+                    if hit_distance is None or hit_distance > exit_distance + 1e-3:
+                        misses.append((azimuth * side, dip))
+                if azimuth == 0.0:
+                    break                              # +0 and -0 are the same ray
+        assert not misses, ('sightlines with nothing in the way (azimuth, dip): %r'
+                            % (misses,))
 
     def test_it_is_the_size_the_physics_holds_up(self, hero) -> None:
         """The bodywork is the box the chassis collider is, and the cabin on it."""
@@ -124,7 +245,10 @@ class TestThePlayersCar:
 
     def test_it_costs_what_it_is_allowed_to(self, hero) -> None:
         assert _triangles(hero.group) <= BUDGET['hero']
-        for name in (models.BODY, models.INTERIOR, models.GLASS):
+        body_and_bonnet = (_triangles(hero.getDEF(models.BODY))
+                          + _triangles(hero.getDEF(models.BONNET)))
+        assert body_and_bonnet <= BUDGET['body'], 'body + bonnet'
+        for name in (models.INTERIOR, models.GLASS):
             assert _triangles(hero.getDEF(name)) <= BUDGET[name], name
 
 

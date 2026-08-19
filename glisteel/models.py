@@ -7,9 +7,11 @@ and returns nothing rather than raising when a file will not load. What is here
 is the table, and the names inside a file that the game reaches for.
 
 **The names are the interface between the art and the game.** A vehicle model
-carries its bodywork, its interior and its glass as three named subtrees, its
-seats and its steering column inside the interior, and its paint, trim and glass
-as three named materials. Re-exporting a model, restyling it or replacing it
+carries its bodywork, its interior and its glass as named subtrees -- and the
+player's car its bonnet as a fourth, because that is the one thing on the
+outside a driver still sees from inside -- with its seats, its pillars and its
+steering column inside the interior, and its paint, trim and glass as three
+named materials. Re-exporting a model, restyling it or replacing it
 outright changes nothing here as long as those names come with it; what each one
 has to be is asserted in ``tests/test_models.py``.
 
@@ -23,8 +25,8 @@ from dataclasses import dataclass
 
 from OpenGLContext.loaders.assets import AssetLibrary
 
-__all__ = ['ART', 'HERO', 'HERO_WHEEL_FRONT', 'HERO_WHEEL_REAR', 'STEER_CLIP',
-           'TRAFFIC', 'VEHICLE_MATERIALS', 'TrafficKind']
+__all__ = ['ART', 'BONNET', 'HERO', 'HERO_WHEEL_FRONT', 'HERO_WHEEL_REAR',
+           'PILLARS', 'STEER_CLIP', 'TRAFFIC', 'VEHICLE_MATERIALS', 'TrafficKind']
 
 #: The art that ships with the game.
 ART = AssetLibrary(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets'))
@@ -42,12 +44,26 @@ HERO_WHEEL_REAR = 'cars/hero-wheel-rear.glb'
 #: the fraction of lock the front wheels are actually turned to.
 STEER_CLIP = 'steer'
 
-#: The three shells of a vehicle. The exterior is left out of the frame for the
-#: view from the driver's seat, which is a point inside it; the interior and the
+#: The shells of a vehicle. The exterior is left out of the frame for the view
+#: from the driver's seat, which is a point inside it; the interior and the
 #: glass are what that view looks at and through.
 BODY = 'body'
 INTERIOR = 'interior'
 GLASS = 'glass'
+
+#: The bodywork forward of the windscreen, as its own shell. It is the outside
+#: of the car and painted like the rest of it, and it is also the thing a driver
+#: sees most of: a view from a seat with no bonnet under it is a camera flying
+#: down the road. So it is named apart from :data:`BODY` and survives the
+#: cockpit view, which drops everything else on the outside.
+#:
+#: A vehicle without one is drawn without one -- only the player's car needs a
+#: view from inside it.
+BONNET = 'bonnet'
+
+#: Inside the interior: the pillars framing the windscreen. Named so the game
+#: can say whether the model it loaded carries them.
+PILLARS = 'pillars'
 
 #: Inside the interior: what the driver sits in, the column, and the rim that
 #: turns on it. The column carries the rake and is left alone; the rim is what

@@ -106,7 +106,7 @@ NOSE, TAIL = HALF_L, -HALF_L
 HALF_W = BODY_WIDTH / 2.0         # 0.925, the widest point of the haunches
 FLOOR = -BODY_HEIGHT / 2.0        # -0.31, the underbody
 BELT = BODY_HEIGHT / 2.0          # +0.31, where the bodywork stops and glass starts
-ROOF = BELT + CABIN_HEIGHT        # +0.73, the top of the canopy
+ROOF = BELT + CABIN_HEIGHT        # +0.50, the top of the canopy
 
 #: Where the canopy starts and ends, and where it peaks. Cab-forward: the peak
 #: is ahead of the middle of the car and the tail runs a long way behind it.
@@ -272,6 +272,33 @@ def loft(name, sections, material, smooth=False):
     return _finish(name, verts, faces, material, smooth=smooth)
 
 
+def split_loft(sections, at):
+    """Cut a loft's cross-sections in two at ``at``, nose-first sections either side.
+
+    ``at`` is a Y value between two of ``sections``' own stations, or one of
+    them exactly. The boundary ring is the two neighbours' rings blended by
+    where ``at`` falls between them -- the same blend :func:`loft` already
+    draws its ruled surface through there, so the cut adds no surface of its
+    own and leaves no gap: it only names the seam.
+    """
+    for index in range(len(sections) - 1):
+        (y0, ring0), (y1, ring1) = sections[index], sections[index + 1]
+        if not y1 <= at <= y0:
+            continue
+        if at == y0:
+            boundary = ring0
+        elif at == y1:
+            boundary = ring1
+        else:
+            fraction = (y0 - at) / (y0 - y1)
+            boundary = [(x0 + (x1 - x0) * fraction, z0 + (z1 - z0) * fraction)
+                       for (x0, z0), (x1, z1) in zip(ring0, ring1, strict=True)]
+        forward = sections[:index + 1] + ([] if at == y0 else [(at, boundary)])
+        aft = ([] if at == y1 else [(at, boundary)]) + sections[index + 1:]
+        return forward, aft
+    raise ValueError('%.3f is not between any of the loft\'s own stations' % (at,))
+
+
 def car_section(half_w, low, arch, crest, top_w, camber=0.0, tuck=0.62,
                 shoulder=0.62, well=None):
     """One cross-section of a sports car: arches either side of a lower top.
@@ -355,6 +382,56 @@ def disc(name, across, radius, material, segments=WHEEL_SEGMENTS, inner=0.0):
         here, there = step * 2, ((step + 1) % segments) * 2
         faces.append((here, here + 1, there + 1, there))
     return _finish(name, verts, faces, material)
+
+
+def roundel(name, x, y, z, radius, material, segments=16, inner=0.0):
+    """A flat circular face across the car's length, for a dial or a vent.
+
+    ``disc`` and ``revolve`` build round the vehicle's own X axis, which is
+    where a wheel spins; a roundel builds round Y instead, at its own
+    ``(x, y, z)`` centre, for something set into the dash and looked at from
+    behind rather than from the side. Built this way it faces **-Y**, back
+    toward the driver's seat, which is the only direction anything on a dash
+    needs to face.
+    """
+    verts, faces = [], []
+    for step in range(segments):
+        angle = 2.0 * math.pi * step / segments
+        cos_a, sin_a = math.cos(angle), math.sin(angle)
+        verts.append((x + inner * cos_a, y, z + inner * sin_a))
+        verts.append((x + radius * cos_a, y, z + radius * sin_a))
+    for step in range(segments):
+        here, there = step * 2, ((step + 1) % segments) * 2
+        faces.append((here, here + 1, there + 1, there))
+    return _finish(name, verts, faces, material)
+
+
+def bezel(name, x, y, z, radius, tube, material, segments=24):
+    """A rounded ring facing along Y, for a dial's bezel: a torus, not a flat disc.
+
+    A flat ring shows one flat tone under a cabin's own low light; a rounded
+    one sweeps light and dark around its own curve the way a chromed bezel
+    does, which is what keeps a bright material reading as a ring rather than
+    disappearing into the moulding behind it. Built the way :func:`_rim`
+    builds the steering wheel's own hoop, with the ring's plane turned from
+    the vehicle's XY to its XZ.
+    """
+    verts, faces = [], []
+    for step in range(segments):
+        angle = 2.0 * math.pi * step / segments
+        cos_a, sin_a = math.cos(angle), math.sin(angle)
+        centre = Vector((x + cos_a * radius, y, z + sin_a * radius))
+        out = Vector((cos_a, 0.0, sin_a))
+        for face in range(4):
+            turn = 2.0 * math.pi * face / 4.0
+            verts.append(tuple(centre + out * (math.cos(turn) * tube)
+                               + Vector((0.0, math.sin(turn) * tube, 0.0))))
+    for step in range(segments):
+        here, there = step * 4, ((step + 1) % segments) * 4
+        for j in range(4):
+            k = (j + 1) % 4
+            faces.append((here + j, here + k, there + k, there + j))
+    return _finish(name, verts, faces, material, smooth=True)
 
 
 def parent_to(children, parent, keep_place=True):
@@ -685,69 +762,85 @@ def smooth_by_angle(obj, degrees=38.0):
 # --- The player's car ------------------------------------------------------
 
 def build_hero(materials):
-    """The car the player drives: bodywork, interior and canopy.
+    """The car the player drives: bonnet, bodywork, interior and canopy.
 
     One volume, cab-forward, falling from a low blade of a nose over a canopy
     that peaks ahead of the middle of the car and running back into a long
     tail. The flanks are cut away between the wheels into sill channels, and
     the haunches over the rear wheels are the widest part of it.
     """
+    bonnet, body = _hero_body(materials)
     root = empty('hero')
-    parent_to([_hero_body(materials), _hero_interior(materials),
+    parent_to([body, bonnet, _hero_interior(materials),
                _hero_glass(materials)], root)
     return root
 
 
+#: The hull's own cross-sections, nose first -- the proportions of a real
+#: sports car, measured off a CC-BY donor and scaled to our own length: see
+#: ``plans/CAR-MODELS.md``. None of the donor's geometry is here -- what
+#: crossed is a table of where a car of this kind is wide, where its flanks
+#: and its top surface sit, and where its floor is. The three things that make
+#: it read as a car and that guesswork got wrong: the width is nearly constant
+#: from the front arches to the tail, the whole body is low, and the front
+#: arches stand above the bonnet between them.
+_HULL_SECTIONS = [
+    (NOSE, car_section(0.42, -0.300, -0.060, 0.020, 0.30, 0.01, tuck=0.86)),
+    (2.00, car_section(0.558, -0.306, -0.011, 0.078, 0.41, 0.01, tuck=0.86)),
+    (1.81, car_section(0.751, -0.310, 0.088, 0.109, 0.56, 0.01, tuck=0.82)),
+    (1.62, car_section(0.831, -0.310, 0.167, 0.150, 0.62, 0.01, tuck=0.78)),
+    (1.43, car_section(0.906, -0.310, 0.290, 0.170, 0.62, tuck=0.72,
+                       well=WELL - 0.07)),
+    (FRONT_AXLE, car_section(HALF_W, -0.310, 0.340, 0.235, 0.62, tuck=0.62,
+                             shoulder=0.74, well=WELL)),
+    (1.05, car_section(0.906, -0.310, 0.330, 0.270, 0.62, tuck=0.62,
+                       shoulder=0.74, well=WELL - 0.07)),
+    (0.86, car_section(0.861, -0.306, 0.310, 0.310, 0.64, tuck=0.58)),
+    (0.67, car_section(0.920, -0.294, 0.310, 0.310, 0.68, tuck=0.54)),
+    (0.48, car_section(0.920, -0.293, 0.310, 0.310, 0.68, tuck=0.50)),
+    (0.29, car_section(0.857, -0.293, 0.270, 0.310, 0.63, tuck=0.48)),
+    (0.10, car_section(0.856, -0.293, 0.292, 0.310, 0.63, tuck=0.48)),
+    (-0.10, car_section(0.852, -0.293, 0.310, 0.310, 0.63, tuck=0.48)),
+    (-0.29, car_section(0.866, -0.306, 0.310, 0.310, 0.64, tuck=0.52)),
+    (-0.48, car_section(0.884, -0.296, 0.310, 0.310, 0.65, tuck=0.56)),
+    (-0.67, car_section(0.888, -0.297, 0.310, 0.310, 0.66, tuck=0.58)),
+    (-0.86, car_section(0.889, -0.306, 0.310, 0.310, 0.66, tuck=0.60)),
+    (-1.05, car_section(0.910, -0.308, 0.470, 0.480, 0.64, tuck=0.62,
+                        well=WELL - 0.07)),
+    (REAR_AXLE, car_section(HALF_W, -0.310, 0.480, 0.430, 0.64, tuck=0.62,
+                            shoulder=0.72, well=WELL)),
+    (-1.43, car_section(0.910, -0.310, 0.450, 0.400, 0.64, tuck=0.68,
+                        well=WELL - 0.07)),
+    (-1.62, car_section(0.886, -0.270, 0.358, 0.370, 0.66, tuck=0.74)),
+    (-1.81, car_section(0.840, -0.182, 0.333, 0.346, 0.62, tuck=0.80)),
+    (-2.00, car_section(0.669, -0.185, 0.316, 0.328, 0.49, tuck=0.84)),
+    (TAIL, car_section(0.55, -0.190, 0.300, 0.310, 0.40, tuck=0.86)),
+]
+
+
 def _hero_body(materials):
-    """The shell: what the world sees, and what the cockpit view leaves out.
+    """The bonnet and the shell behind it: what the world sees of the car.
 
     A mid-engined sports car's proportions: a low full-width nose, the bonnet
     dipping between raised front arches, a waist drawn in at the sills, the
     widest point a haunch over the rear axle, and a tail cut off short behind
     it. The stations are close enough together that the silhouette is a curve
     rather than a set of facets, which costs a few hundred triangles.
+
+    The hull is one loft, cut in two at ``SCREEN_BASE`` rather than modelled as
+    two: the bonnet is what a driver still sees over the wheel once the rest
+    of the outside drops out of the cockpit view, and the cut is where the two
+    halves already meet, so nothing needs to line up by hand and no surface is
+    drawn twice.
     """
-    shell = smooth_by_angle(loft('hero:body_shell', [
-        # These stations are the proportions of a real sports car, measured off
-        # a CC-BY donor and scaled to our own length: see
-        # ``plans/CAR-MODELS.md``. None of the donor's geometry is here -- what
-        # crossed is a table of where a car of this kind is wide, where its
-        # flanks and its top surface sit, and where its floor is. The three
-        # things that make it read as a car and that guesswork got wrong: the
-        # width is nearly constant from the front arches to the tail, the whole
-        # body is low, and the front arches stand above the bonnet between
-        # them.
-        (NOSE, car_section(0.42, -0.300, -0.060, 0.020, 0.30, 0.01, tuck=0.86)),
-        (2.00, car_section(0.558, -0.306, -0.011, 0.078, 0.41, 0.01, tuck=0.86)),
-        (1.81, car_section(0.751, -0.310, 0.088, 0.109, 0.56, 0.01, tuck=0.82)),
-        (1.62, car_section(0.831, -0.310, 0.167, 0.192, 0.62, 0.01, tuck=0.78)),
-        (1.43, car_section(0.906, -0.310, 0.290, 0.235, 0.62, tuck=0.72,
-                           well=WELL - 0.07)),
-        (FRONT_AXLE, car_section(HALF_W, -0.310, 0.340, 0.235, 0.62, tuck=0.62,
-                                 shoulder=0.74, well=WELL)),
-        (1.05, car_section(0.906, -0.310, 0.330, 0.270, 0.62, tuck=0.62,
-                           shoulder=0.74, well=WELL - 0.07)),
-        (0.86, car_section(0.861, -0.306, 0.310, 0.310, 0.64, tuck=0.58)),
-        (0.67, car_section(0.920, -0.294, 0.310, 0.310, 0.68, tuck=0.54)),
-        (0.48, car_section(0.920, -0.293, 0.310, 0.310, 0.68, tuck=0.50)),
-        (0.29, car_section(0.857, -0.293, 0.270, 0.310, 0.63, tuck=0.48)),
-        (0.10, car_section(0.856, -0.293, 0.292, 0.310, 0.63, tuck=0.48)),
-        (-0.10, car_section(0.852, -0.293, 0.310, 0.310, 0.63, tuck=0.48)),
-        (-0.29, car_section(0.866, -0.306, 0.310, 0.310, 0.64, tuck=0.52)),
-        (-0.48, car_section(0.884, -0.296, 0.310, 0.310, 0.65, tuck=0.56)),
-        (-0.67, car_section(0.888, -0.297, 0.310, 0.310, 0.66, tuck=0.58)),
-        (-0.86, car_section(0.889, -0.306, 0.310, 0.310, 0.66, tuck=0.60)),
-        (-1.05, car_section(0.910, -0.308, 0.470, 0.480, 0.64, tuck=0.62,
-                            well=WELL - 0.07)),
-        (REAR_AXLE, car_section(HALF_W, -0.310, 0.480, 0.430, 0.64, tuck=0.62,
-                                shoulder=0.72, well=WELL)),
-        (-1.43, car_section(0.910, -0.310, 0.450, 0.400, 0.64, tuck=0.68,
-                            well=WELL - 0.07)),
-        (-1.62, car_section(0.886, -0.270, 0.358, 0.370, 0.66, tuck=0.74)),
-        (-1.81, car_section(0.840, -0.182, 0.333, 0.346, 0.62, tuck=0.80)),
-        (-2.00, car_section(0.669, -0.185, 0.316, 0.328, 0.49, tuck=0.84)),
-        (TAIL, car_section(0.55, -0.190, 0.300, 0.310, 0.40, tuck=0.86)),
-    ], materials['hero:paint']), degrees=34.0)
+    bonnet_stations, body_stations = split_loft(_HULL_SECTIONS, SCREEN_BASE)
+    bonnet_shell = smooth_by_angle(
+        loft('hero:bonnet_shell', bonnet_stations, materials['hero:paint']),
+        degrees=34.0)
+    unwrap(bonnet_shell)
+    shell = smooth_by_angle(
+        loft('hero:body_shell', body_stations, materials['hero:paint']),
+        degrees=34.0)
     unwrap(shell)
 
     # The underbody, following the floor line: what gives the car its two tones
@@ -807,8 +900,10 @@ def _hero_body(materials):
         ], materials['hero:trim']),
     ], materials['hero:trim'])
 
-    return parent_to([shell, accent, lights, rear, vents, aero],
+    bonnet = parent_to([bonnet_shell], empty('hero:bonnet'))
+    body = parent_to([shell, accent, lights, rear, vents, aero],
                      empty('hero:body'))
+    return bonnet, body
 
 
 def _hero_glass(materials):
@@ -841,26 +936,28 @@ def _hero_glass(materials):
 
 
 def _hero_interior(materials):
-    """What the driver sits in: the tub, two seats, the dash and the wheel."""
+    """What the driver sits in: the tub, two seats, the dash, the pillars and the wheel."""
     inside = materials['hero:interior']
     tub = join('hero:interior_tub', [
-        box('hero:floor', (-0.52, 0.90, FLOOR + 0.03),
+        box('hero:floor', (-0.52, 1.16, FLOOR + 0.03),
             (0.52, -1.05, FLOOR + 0.09), inside),
         box('hero:bulkhead', (-0.52, -0.94, FLOOR + 0.03),
             (0.52, -1.04, BELT - 0.02), inside),
-        box('hero:sill_left', (-0.62, 0.80, FLOOR + 0.03),
-            (-0.50, -0.94, FLOOR + 0.20), inside),
-        box('hero:sill_right', (0.50, 0.80, FLOOR + 0.03),
-            (0.62, -0.94, FLOOR + 0.20), inside),
-    ], inside)
-
-    # A dashboard that says nothing: one unbroken sweep from door to door, with
-    # no vents, switches or screens in it.
-    dash = join('hero:interior_dash', [
-        box('hero:dash_face', (-0.58, 1.16, FLOOR + 0.16),
-            (0.58, 1.02, FLOOR + 0.40), inside),
-        box('hero:dash_top', (-0.58, 1.16, FLOOR + 0.38),
-            (0.58, 0.94, FLOOR + 0.43), inside),
+        # The toeboard: closes the gap a flat floor and a raised dash would
+        # otherwise leave between them, from the true floor up past the dash's
+        # own underside, so there is no line of sight past the pedals to the
+        # road. Without it a dash this shallow is a shelf floating in the air.
+        box('hero:toeboard', (-0.58, 0.88, FLOOR),
+            (0.58, 1.18, FLOOR + 0.40), inside),
+        # The sills run the cabin's full length now, up to the toeboard, and
+        # widen out towards the car's own sides -- level with the toeboard's
+        # own top rather than rising to the belt line, so what closes the road
+        # out from beside the pedals reads as a sill well under the driver's
+        # eye rather than as a door card standing over it.
+        box('hero:sill_left', (-0.90, 1.18, FLOOR + 0.03),
+            (-0.50, -0.94, FLOOR + 0.40), inside),
+        box('hero:sill_right', (0.50, 1.18, FLOOR + 0.03),
+            (0.90, -0.94, FLOOR + 0.40), inside),
     ], inside)
 
     seats = join('hero:seats', [
@@ -868,8 +965,126 @@ def _hero_interior(materials):
         for part in _seat(DRIVER_X, along, FLOOR + 0.09, inside,
                           'hero:seat%d' % index, width=0.46, back=0.44,
                           head=0.12)], inside)
-    return parent_to([tub, dash, seats, _hero_wheel_column(materials)],
+    return parent_to([tub, _hero_dash(materials), seats,
+                      _hero_wheel_column(materials), _hero_pillars(materials)],
                      empty('hero:interior'))
+
+
+def _hero_dash(materials):
+    """The dashboard: a hooded binnacle, a centre stack, and an eyeball vent each end.
+
+    A dashboard modelled as one unbroken sweep reads, driven, as a grey slab
+    across the bottom third of every frame -- the HUD is what the driver
+    *reads*, and the dashboard is what tells them they are sitting in a car at
+    all. So the sweep stays as the base and carries, all in mouldings and
+    discs since the car has no textures: a cowl over the column with two
+    recessed dials in it, a stack on the centreline with vents and switches,
+    and a round vent at each outboard end.
+    """
+    inside, trim = materials['hero:interior'], materials['hero:trim']
+    sweep = join('hero:dash_sweep', [
+        box('hero:dash_face', (-0.58, 1.16, FLOOR + 0.16),
+            (0.58, 1.02, FLOOR + 0.40), inside),
+        box('hero:dash_top', (-0.58, 1.16, FLOOR + 0.38),
+            (0.58, 0.94, FLOOR + 0.43), inside),
+    ], inside)
+
+    # The binnacle: a cowl hooding forward over the steering column, raised
+    # enough that the dials clear the rim's own top rather than sitting behind
+    # it -- a wheel this close to the eye hides anything mounted at its own
+    # height. Each bezel is a rounded ring rather than a flat one, since a
+    # flat ring faced square at the eye shows one flat tone under this cabin's
+    # own low light and a rounded one sweeps light around its curve the way
+    # the rim's own hoop does -- that sweep is what a bright material needs to
+    # read as a ring rather than sink into the moulding behind it.
+    dial_z = FLOOR + 0.53
+    binnacle = join('hero:dash_binnacle', [
+        box('hero:dash_hood', (-0.19, 0.86, FLOOR + 0.40), (0.19, 1.04, FLOOR + 0.65),
+            inside),
+        bezel('hero:dash_dial_big_bezel', -0.085, 0.82, dial_z, 0.0875, 0.0125, trim,
+             segments=24),
+        roundel('hero:dash_dial_big_face', -0.085, 0.85, dial_z, 0.075, inside,
+                segments=24),
+        bezel('hero:dash_dial_small_bezel', 0.115, 0.82, dial_z, 0.0565, 0.0085, trim,
+             segments=20),
+        roundel('hero:dash_dial_small_face', 0.115, 0.85, dial_z, 0.048, inside,
+                segments=20),
+    ], inside)
+
+    # The centre stack: a console standing proud of the dash on the
+    # centreline, carrying the vents and switches a wide dash would put either
+    # side of a passenger who, in this cab, is not sitting there.
+    vent_positions = [(x, z) for z in (FLOOR + 0.30, FLOOR + 0.24)
+                     for x in (-0.055, 0.055)]
+    stack = join('hero:dash_stack', [
+        box('hero:dash_stack_console', (-0.11, 0.96, FLOOR + 0.16),
+            (0.11, 1.02, FLOOR + 0.36), inside),
+    ] + [
+        part
+        for index, (vx, vz) in enumerate(vent_positions)
+        for part in (
+            box('hero:dash_vent%d_frame' % index, (vx - 0.022, 0.950, vz - 0.018),
+                (vx + 0.022, 0.955, vz + 0.018), trim),
+            box('hero:dash_vent%d_slat' % index, (vx - 0.022, 0.948, vz - 0.002),
+                (vx + 0.022, 0.951, vz + 0.002), trim),
+        )
+    ] + [
+        box('hero:dash_button%+d' % side, (side * 0.04 - 0.012, 0.950, FLOOR + 0.185),
+            (side * 0.04 + 0.012, 0.958, FLOOR + 0.205), trim)
+        for side in (-1, 1)
+    ], inside)
+
+    # The eyeball vents: one at each end of the dash, aimed at the driver the
+    # way a real dash's are, mounted the same rounded-bezel, recessed-face way
+    # as the binnacle's dials.
+    vents = join('hero:dash_eyeballs', [
+        part
+        for side in (-1.0, 1.0)
+        for part in (
+            bezel('hero:dash_eyeball%+d_bezel' % side, side * 0.48, 0.925,
+                 FLOOR + 0.40, 0.0405, 0.0045, trim),
+            roundel('hero:dash_eyeball%+d_face' % side, side * 0.48, 0.945,
+                    FLOOR + 0.40, 0.034, inside),
+        )
+    ], inside)
+
+    return parent_to([sweep, binnacle, stack, vents], empty('hero:dash'))
+
+
+def _hero_pillars(materials):
+    """The screen's frame: two slim A-pillars and the header rail over them.
+
+    Each pillar is lofted through the same Y stations the canopy's own loft
+    climbs through, following its outboard corner up from the belt line to
+    where the roof begins; the header bridges the gap between the pillars'
+    tops on up to the roof, the way a real windscreen's top rail does. Both
+    stay well inboard of the glass, so nothing here fights it for the same
+    surface.
+    """
+    inside = materials['hero:interior']
+    # (y, x, z) of the canopy's own outboard corner at each of its own
+    # stations between the screen base and the roof, drawn in by 0.025 m in x
+    # and 0.01 m in z so the pillar sits just inside the glass rather than on it.
+    edge = [(SCREEN_BASE, 0.62 - 0.025, 0.300 - 0.010),
+            (0.95, 0.68 - 0.025, 0.325 - 0.010),
+            (0.55, 0.72 - 0.025, 0.360 - 0.010),
+            (CANOPY_PEAK, 0.72 - 0.025, 0.385 - 0.010)]
+    half_x, half_z = 0.016, 0.022
+
+    def post(name, side):
+        sections = [(y, [(side * cx - half_x, cz - half_z),
+                         (side * cx + half_x, cz - half_z),
+                         (side * cx + half_x, cz + half_z),
+                         (side * cx - half_x, cz + half_z)])
+                    for y, cx, cz in edge]
+        return loft(name, sections, inside)
+
+    # Kept above COCKPIT_UP (0.40 m): a header this close to the eye and this
+    # wide would stand across the driver's own sightline rather than framing
+    # it, the one thing a screen's frame must not do.
+    header = box('hero:header_rail', (-0.70, 0.03, 0.44), (0.70, 0.18, 0.485), inside)
+    return parent_to([post('hero:pillar_left', -1.0), post('hero:pillar_right', 1.0),
+                      header], empty('hero:pillars'))
 
 
 def _seat(x, y, floor, material, name, width=0.42, back=0.56, head=0.17):
@@ -993,49 +1208,6 @@ def _curves(action):
 
 
 # --- The wheels ------------------------------------------------------------
-
-def _wheel_innards(name, half, face, materials):
-    """What a wheel has behind its spokes: a barrel, a brake and a caliper.
-
-    Spokes with nothing behind them show the sky through the wheel, and a wheel
-    you can see through reads as a bicycle's. What fills it on a car is the
-    barrel the rim is pressed from and the brake turning inside that, so both
-    are here -- and the caliper, because it is the one part of a wheel that is
-    a different colour and the eye goes straight to it.
-    """
-    barrel = revolve(name + '_barrel', [
-        (-half * 0.90, face * 0.99), (half * 0.90, face * 0.99),
-    ], materials['hero:barrel'], segments=WHEEL_SEGMENTS)
-    back = disc(name + '_back', -half * 0.90, face * 0.99,
-                materials['hero:barrel'], segments=WHEEL_SEGMENTS, inner=0.05)
-    brake = join(name + '_brake', [
-        revolve(name + '_disc_face', [
-            (-half * 0.34, 0.06), (-half * 0.34, face * 0.72),
-            (-half * 0.20, face * 0.72), (-half * 0.20, 0.06),
-        ], materials['hero:brake'], segments=WHEEL_SEGMENTS),
-    ], materials['hero:brake'])
-    caliper = box(name + '_caliper', (-half * 0.42, -0.045, face * 0.40),
-                  (-half * 0.14, 0.045, face * 0.86), materials['hero:caliper'])
-    return [barrel, back, brake, caliper]
-
-
-def _spoke(name, across, angle, radius, material, half_width=0.035):
-    """One spoke of a wheel face: a tapered bar from the hub out to the rim."""
-    hub, rim = 0.06, radius * 0.96
-    out = np.array([math.cos(angle), math.sin(angle)])
-    side = np.array([-out[1], out[0]])
-    verts = []
-    # Into the wheel from whichever face it is on, so that both sides of the
-    # car carry the same wheel and its hub stays on its own axis.
-    for depth in (0.0, -math.copysign(0.035, across)):
-        for along, wide in ((hub, half_width), (rim, half_width * 0.62)):
-            point = out * along
-            verts += [(across + depth, *(point + side * wide)),
-                      (across + depth, *(point - side * wide))]
-    faces = [(0, 1, 3, 2), (4, 5, 7, 6), (0, 1, 5, 4),
-             (2, 3, 7, 6), (0, 2, 6, 4), (1, 3, 7, 5)]
-    return _finish(name, verts, faces, material)
-
 
 def build_wheel(materials, name, width):
     """One wheel: a tyre on a rim, with a brake turning inside it.

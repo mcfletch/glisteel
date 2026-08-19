@@ -45,12 +45,18 @@ CENTRED = 0.02
 QUANTILE = 0.95
 
 
-@dataclass
+@dataclass(eq=False)
 class Trace:
     """A recorded drive: a column per thing worth measuring, a row per step.
 
     Every column is a numpy array of the same length, and :attr:`t` is the
     clock they are all against.
+
+    Compared by identity (``eq=False``): every field is an array, and a
+    generated ``__eq__`` would compare them element by element and then raise on
+    being asked whether the resulting array is true. A drive is one run of the
+    car rather than a value, and :meth:`measures` is what two of them are
+    actually compared through.
     """
 
     t: np.ndarray

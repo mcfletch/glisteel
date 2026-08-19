@@ -95,9 +95,13 @@ class Controller(Protocol):
         ...                                      # pragma: no cover - a protocol
 
 
-@dataclass
+@dataclass(eq=False)
 class Readings:
     """What a run looks like from outside it, once a frame.
+
+    Compared by identity (``eq=False``): :attr:`at` and the positions in
+    :attr:`others` are arrays, and a generated ``__eq__`` would raise on being
+    asked whether an array of answers is true.
 
     Everything the HUD is told and everything a recorded run is measured
     against, in one place: the speed, the clocks, whether the car is off the

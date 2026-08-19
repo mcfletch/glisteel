@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from omi_physics.world import PhysicsWorld
 from OpenGLContext.loaders.assets import bounds
+from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 
 from glisteel import models
 from glisteel.camera import ChaseCamera
@@ -19,6 +20,7 @@ from glisteel.car import (
     CABIN_HEIGHT,
     Car,
     CarSpec,
+    cabin_mesh,
     car_body_mesh,
     wheel_mesh,
 )
@@ -458,6 +460,31 @@ class TestTheCarIsTheModel:
         assert models.BODY not in drawn
         assert models.INTERIOR in drawn and models.GLASS in drawn
 
+    def test_it_draws_the_bonnet_as_its_own_shell(self, floor) -> None:
+        car = Car(floor)
+        assert models.BONNET in [one.DEF for one in _named(car.node)]
+
+    def test_and_the_cockpit_view_keeps_it(self, floor) -> None:
+        """A seat with no bonnet under it is a camera flying down the road."""
+        car = Car(floor)
+        car.hidden = True
+        assert models.BONNET in [one.DEF for one in _named(car.node)]
+
+    def test_a_model_with_no_bonnet_still_makes_a_car(self, floor, monkeypatch) -> None:
+        """Only the player's car is looked out of; the traffic needs none."""
+        real = models.ART.load
+
+        def without(relative):
+            scene = real(relative)
+            found = scene.getDEF(models.BONNET) if scene is not None else None
+            if found is not None:
+                found.DEF = 'not-a-bonnet'
+            return scene
+        monkeypatch.setattr(models.ART, 'load', without)
+        car = Car(floor)
+        drawn = [one.DEF for one in _named(car.node)]
+        assert models.INTERIOR in drawn and models.BONNET not in drawn
+
     def test_the_cockpit_view_takes_the_wheels_with_the_bodywork(self, floor) -> None:
         """Wheels without the arches around them are four discs in mid-air."""
         car = Car(floor)
@@ -562,3 +589,62 @@ class TestTheDriverSitsWhereTheModelPutsThem:
         wheel = bounds(models.ART.load(models.HERO).getDEF(models.COLUMN))
         side = (wheel[0][0] + wheel[1][0]) / 2.0
         assert abs(eye[0] - side) < 0.20, 'the eye is not over the wheel'
+
+
+def _faces_of(mesh):
+    """Every triangle of a mesh, as ``(a, b, c)`` corner positions."""
+    points = np.asarray(mesh.positions, dtype='d')
+    index = np.asarray(mesh.indices).ravel()
+    corners = points[index]
+    return corners[0::3], corners[1::3], corners[2::3]
+
+
+def _outward(mesh):
+    """How far each triangle's normal agrees with facing away from the middle.
+
+    A closed convex-ish shell drawn with the engine's own front-face winding has
+    every triangle pointing away from the body it encloses. Negative means the
+    triangle faces into it, which the renderer culls and the shading lights from
+    the wrong side.
+    """
+    a, b, c = _faces_of(mesh)
+    normals = np.cross(b - a, c - a)
+    middle = np.asarray(mesh.positions, dtype='d').mean(axis=0)
+    return np.einsum('ij,ij->i', normals, (a + b + c) / 3.0 - middle)
+
+
+class TestThePrimitiveCarIsWoundTheRightWayRound:
+    """The car drawn when a model will not load.
+
+    Art is not rules and the game starts without its ``.glb`` files, which is
+    only true if what it falls back to can actually be seen: the render pass
+    draws front faces wound counter-clockwise and culls the rest
+    (``OpenGLContext.passes._flat``), and ``PBRMesh`` is solid and single-sided
+    by default, so a shell wound inward is a shell that is not drawn. The
+    normals come off the same winding, so it is also what lights it.
+    """
+
+    def test_the_body_faces_outward(self) -> None:
+        found = _outward(car_body_mesh(PBRMaterial()))
+        assert (found > 0).all(), '%d of %d body triangles face inward' % (
+            int((found <= 0).sum()), len(found))
+
+    def test_the_cabin_faces_outward(self) -> None:
+        found = _outward(cabin_mesh(PBRMaterial()))
+        assert (found > 0).all(), '%d of %d cabin triangles face inward' % (
+            int((found <= 0).sum()), len(found))
+
+    def test_the_wheel_faces_outward(self) -> None:
+        found = _outward(wheel_mesh())
+        assert (found > 0).all(), '%d of %d wheel triangles face inward' % (
+            int((found <= 0).sum()), len(found))
+
+    def test_the_normals_it_carries_agree_with_its_winding(self) -> None:
+        # The shading normals are built from the faces, so if the two ever
+        # disagree the shape is lit as something other than what is drawn.
+        for mesh in (car_body_mesh(PBRMaterial()), cabin_mesh(PBRMaterial()),
+                     wheel_mesh()):
+            a, b, c = _faces_of(mesh)
+            from_winding = np.cross(b - a, c - a)
+            carried = np.asarray(mesh.normals, dtype='d')[0::3]
+            assert (np.einsum('ij,ij->i', from_winding, carried) > 0).all()

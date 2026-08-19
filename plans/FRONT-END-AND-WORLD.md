@@ -1,6 +1,8 @@
 # The shell round the race, and the world it is driven through
 
-**Status: for review. §1, §2 and §7 have landed; everything else is open.**
+**Status: §1–§5, §7, §8 (lakes), §9 and §10 have landed, along with the traffic,
+steering and autopilot defects found on the way. §11 (the frame rate), §12.2
+(the cockpit), rivers and the autopilot's overtaking are open.**
 
 Two bodies of work that arrived together and stay together because they answer
 the same question — *what is it like to sit down and play this?*
@@ -73,74 +75,53 @@ The finish takes the middle of the screen with the time. That is as much of §3
 as a HUD can say on its own; the panel, the records and the choice of what to do
 next are still §3 and §5.
 
-### §3 The finish
+### §3 The finish — **landed**
 
-A splash on the last lap, and it has to say the only two things a driver wants:
-**the time**, and **whether it beat anything**. A panel over a still-running
-world (the car coasts; §1 has already taken the controls away), built from
-`OpenGLContext.ui` the way twig-bb's screens are, offering *Again*, *Choose a
-track* and *Quit*.
+`menu.finish_screen`. Two things a driver wants and no more: **the time**, and
+**whether it beat anything**. Where the lap landed in this track's table is the
+whole content of it, so the table is shown with it, and a lap that did not make
+the table says neither — that is not a failure and is not dressed as one. Over
+the world it was driven in, with nothing behind it, so Escape does not close it:
+the race is over and the choice of what happens next has to be made.
 
-Where a lap lands among the records (§5) is the whole content of the splash, so
-§5 comes with it.
+### §4 The menu — **landed**
 
-### §4 The menu
+`glisteel/menu.py`, built from `OpenGLContext.ui` the way twig-bb's screens are:
+plain functions returning a `Panel`, all of it tested with no window because
+building a panel touches no GL. Drive, Tracks, Settings, Quit — and Resume first
+when a race is running, with Escape meaning what Resume means, because a player
+who pressed it meaning "close this" must never find they have thrown the race
+away instead. Settings is the engine's own generated render-options screen.
 
-twig-bb's `menu.py` is the pattern and most of it transfers unchanged: three
-screens built from `Panel`, `Column`, `Row`, `Button`, `Label` and `Select`,
-each a plain function returning a panel, all of it tested with no window because
-building a panel touches no GL. `TwigContext` shows the wiring — `pushOverlay`,
-Escape putting the menu up over a running match without ending it, every screen
-*replacing* the menu rather than stacking on it.
+### §5 A library of tracks, and what has been driven on them — **landed**
 
-glisteel's version:
+Three pieces, and the first is the one everything else reads:
 
-    main_menu      Drive, Tracks, Settings, Quit — and Resume when a run is up
-    track_screen   the library (§5), as a Carousel of track pictures
-    records_screen the best times on the chosen track
+1. **The manifest.** `oglc-bake` writes `world.json` beside the tileset — name,
+   seed, extent, how long the road is, how many metres of it are on bridges,
+   bores and causeways, and which picture shows it. The *format* is the
+   engine's (`OpenGLContext.loaders.tiles3d.manifest`), so anything that loads a
+   baked world can read one without depending on the authoring package.
+2. **The picture.** `glisteel <tileset> --picture` drives the world,
+   photographs the car on it from behind, and records the picture's name in the
+   manifest. `Carousel` shows the band.
+3. **The library.** Every world directory under `tracks_directory()`, which is
+   `OpenGLContext.userpaths` plus `glisteel/tracks` — the same rule the engine's
+   settings and asset cache follow. Starting with no arguments offers what is
+   there; with exactly one world in it, drives that, since choosing between one
+   thing is not a choice.
 
-`OpenGLContext.ui.settings.open_settings` is already a complete settings screen
-generated from the render options; the menu offers it and writes none of it.
+**Records**: five times a track, quickest first, with the day each was driven, in
+JSON a person can read. A lap is offered when a race finishes and the table
+answers where it came, which is what the finish says. A corrupt file loses the
+times, not the game.
 
-**Escape must not throw the run away.** twig-bb's rule, and the reason for it,
-applies here exactly.
+### §6 What the shell cost
 
-### §5 A library of tracks, and what has been driven on them
-
-Today a track is a positional argument naming a `tileset.json`. A library needs
-three things a directory of tiles does not carry:
-
-1. **A manifest.** `oglc-bake` writes `world.json` beside the tileset: the
-   name, the seed, the extent, the length of the circuit, how much of it is
-   viaduct/bore/causeway, and the name of its picture. This is **editor work** —
-   the baker knows all of it already and prints most of it as its summary — and
-   it makes a baked world self-describing for anything that reads one, not only
-   for this game.
-2. **A picture.** `glisteel --capture` already renders a settled frame and
-   exits. A `--track-picture` mode drives to a chosen station, points the camera
-   across the circuit rather than along it, and writes the picture the manifest
-   names. `Carousel` takes it from there.
-3. **Somewhere to look.** A tracks directory, defaulting under
-   `appdatadirectory()`, scanned for manifests. `OpenGLContext.userpaths` is the
-   engine's one answer to where a per-user file goes and this uses it rather
-   than inventing a second.
-
-**Best times**: `Records`, a plain object over a JSON file in the same place,
-keyed by track name, holding the best *n* (five) laps with the date and the car.
-A lap is offered to it and it answers with the position it took, or none — which
-is exactly what the splash in §3 needs to say. No GL, no window, and the file
-format is one a person can read.
-
-### §6 What the shell costs
-
-The state machine and the HUD are small. The menu is a day's work with twig-bb
-open beside it. The manifest and the picture mode are the two that reach into
-other repositories, and they are the two worth doing first among the library
-items because everything else in §5 reads what they write.
-
----
-
-## Part two — the world
+All of it, and the order held: the manifest and the picture mode first, because
+everything else in the library reads what they write; records next, because the
+finish is made of them; the menu last, because it needs the tracks and the
+records to have something to offer.
 
 ### §7 The viaduct — **landed**
 
@@ -172,85 +153,73 @@ carriageway and the barrier stands 3.6 m to the side, so 0.95 m of solid wall
 left a driver 5.7° of downward view — and 1.5 km of the 8.3 km lap looking at
 grey.
 
-### §8 Rivers and lakes
+### §8 Rivers and lakes — **lakes landed, rivers open**
 
-**Lakes and sea: yes, as a waterline. Rivers: no. Neither is placeable.**
+A lake is its own surface now (`OpenGLContext.scenegraph.water`), not the ground
+clamped flat and painted blue. The terrain is meshed as it is, dipping under,
+and the water laid over it — which is what gives the world a **shoreline**, since
+the shore is the line where the land passes through the surface and a levelled
+ground has no such line to draw. The sheet is flat and its normals carry a
+swell, which breaks the specular highlight into the glitter a still picture
+reads as water while leaving the shoreline exactly at the waterline; the swell
+is a function of world position, so two sheets that meet agree along their seam.
 
-What exists is one module constant, `WATER_LEVEL = 0.0` in
-`OpenGLContext.loaders.tiles3d.procedural`, used three ways:
+`ProceduralWorld.water_level` is a field rather than a constant, so a world can
+flood its valleys or drain them. The shore is a band — dirt from the bed up to
+1.5 m above the waterline, grass no lower, feathered between — and that band is
+also what keeps the ground cover out of the lake: the cover grows on the two
+soft layers, so a waterline the *layers* respect is one the grass respects
+without ever being told where the water is.
 
-* `HeightfieldLayer.water_level` clamps the ground mesh flat wherever it falls
-  below that height, so a basin becomes a level plate.
-* `terrain_colors` paints anything at or under it `(0.10, 0.27, 0.42)`.
-* `choose_structures(waterline=…)` marks fill over drowned ground as a causeway
-  rather than an embankment, which is why the shipped circuit has 516 m of one.
+**What is left.** Seen from above and from a bank it reads; from road level it
+is still flat, because at a grazing angle a lake is the reflection of a bright
+sky and the engine's analytic environment gives that as a wash. What would sell
+it is a visible waterline against the shore — foam, or a darkening with depth.
 
-So a lake is **opaque vertex-coloured ground at roughness 1.0**. It has no
-transparency, no reflection, no specular highlight, no motion and no shoreline —
-the sand band in `terrain_colors` is a height ramp on the land, not a beach
-against a water edge. A river is a channel, and nothing carves one: the height
-function has no drainage and the waterline is a single global plane, so the only
-water in a world is wherever the land happens to dip below zero.
+**Rivers are open.** A channel is a *route* — a polyline with a width and a bed
+profile, carved into the height function the way a road cutting already is.
+`RoadPath` and the earthworks machinery are most of the shape of it.
 
-**The editor places neither.** `glisteel_editor.project.Landscape` offers
-`extent`, `seed`, `resolution` and `tree_density`; `RouteEditor` edits a plan of
-`(x, z)` points. There is no water in the project format and no tool for it.
+### §9 The bore takes the sun — **fixed**
 
-What the three questions asked for, in the order they build on each other:
+`SplatTerrain` returned immediately from the shadow pass, so **the ground cast
+nothing**: no hill shading the valley behind it, no rock keeping the sun out of
+a bore, and no tree shadows on the tarmac. The baked sun and canopy terms the
+node carries shade *itself* and say nothing to anything standing on it or
+running through it. It writes depth now, through a second vertex array over the
+same buffers — the depth program reads the position from a different attribute
+than the splat program does, and the ground is the largest mesh in the world, so
+no second copy of it.
 
-1. **A water surface worth crossing.** Its own layer rather than clamped
-   ground: a transparent, low-roughness, reflective plane at the waterline, with
-   the terrain left to dip under it so a shoreline emerges from the geometry
-   instead of from a colour test. This is the one that changes the picture most,
-   and everything else here is scenery beside it.
-2. **A waterline the world can choose.** `WATER_LEVEL` becomes a field on
-   `ProceduralWorld` and a field on `Landscape`, so a project can flood a basin
-   or drain it. Small, and it is what makes the editor able to place water at
-   all.
-3. **Rivers.** A channel is a *route* — a polyline with a width and a bed
-   profile, carved into the height function the way a road cutting already is.
-   `RoadPath` and the earthworks machinery are most of the shape of it, which
-   makes this a large piece of work rather than an unbounded one. A bridge over
-   a carved river is then what `choose_structures` already builds.
+Measured inside a 390 m bore, the lit wall went from **121 to 45** of 255.
 
-Seeing the bank and the trees on it while crossing is (1) plus §7: with an open
-railing and a real water surface, a crossing looks like a crossing.
+**Still open:** the remaining asymmetry is the ambient. A shadow map occludes
+direct light only, and nothing occludes the sky term, so one wall of a bore
+still reads brighter than the other.
 
-### §9 The bore takes the sun
+### §10 The lights — **landed**
 
-Inside the tunnel the lining is lit from one side — cream-white on the right,
-near-black on the left. The bore runs *inside a hill* and the sun is reaching
-its walls, because the terrain it passes through is carved away for the
-carriageway and nothing is left to occlude the light. The gloom that makes a
-tunnel dark is baked into the lining's vertex colours
-(`TunnelProfile.daylight`, `.gloom`), and the sun is applied on top of it.
+`glisteel/lighting.py`, and `TunnelProfile`'s lamp fields in the engine. A bore
+is lit **twice**, because a renderer binds eight lights in a frame and a tunnel
+has one every twenty-five metres:
 
-This is a rendering defect and it is the engine's: a surface inside a closed
-lining cannot see a directional light, and the lining is closed. Two candidate
-fixes, and the choice wants measuring rather than arguing:
+* **The lining lights itself.** The pool each luminaire throws is baked onto its
+  vertices when the world is built (`bore_shade`), so the whole length of a bore
+  is lit at any distance and costs nothing to draw.
+* **The few fittings the driver is among become real lights.** `tunnel_lamps()`
+  says where they are, the bake writes them into the tileset's `extras`, and the
+  game lights the nearest four. A car under a lamp has no idea it is under one,
+  which is exactly what a baked pool cannot fix.
 
-* **Occlude it properly** — the bore is inside geometry that ought to be in the
-  shadow map and is not, which is worth understanding whatever else is done,
-  because it may be true of other interiors.
-* **Carry the darkness in the material** rather than in vertex colour, so the
-  lining is not lit by anything the world's rig does.
+The budget divides two for the sun and its sky fill, four for the luminaires and
+one for the headlights — seven of eight, one spare. One headlight rather than
+two: a pair costs twice the budget and, dipped and converged the way a car's
+are, throws very nearly the same pool; what sells them is that the pool sweeps
+as the car turns, and one does that.
 
-### §10 The bore has no lights, and the car has none
-
-No luminaires, no headlights, nowhere. The engine has `PointLight` and
-`SpotLight` and binds up to eight in a frame, so the parts exist:
-
-* **Tunnel lighting** is world content: a run of luminaires along the crown at a
-  spacing, written by the bake beside the bore. Sodium-warm, and few enough at
-  once to sit inside the eight-light budget — which means placing them by
-  proximity to the car rather than lighting the whole bore at once.
-* **Headlights** are two spotlights carried on the car body, which the game
-  already owns and moves every frame. They want to come on in the dark and
-  sweep the lining as the car turns, which is exactly what a spotlight parented
-  to the chassis does.
-
-Eight lights is the ceiling and both features want to live inside it together,
-so what the budget is spent on is a decision to take once rather than twice.
+The first attempt lit the bore evenly end to end, because the point lights had
+no distance falloff. With an inverse-square term the wall reads 55 of 255 and
+the road 78, against 100 and 154 without it.
 
 ### §11 What a lap costs to draw
 
@@ -286,10 +255,14 @@ genuinely glows at the far end.
    the middle of the frame in the chase view for the whole race. It is the least
    finished thing on screen by a wide margin. [CAR-MODELS.md](CAR-MODELS.md) is
    the plan for this.
-2. **The cockpit is a grey box and a wheel.** From the driver's seat — the
-   default view — the bottom third of every frame is untextured grey. §12's
-   effect is out of proportion to the work: a dashboard with instruments, a
-   windscreen frame and hands would change the game's whole impression.
+2. **The cockpit is a grey box and a wheel, and it does not close.** From the
+   driver's seat — the default view — the bottom third of every frame is
+   untextured grey, and below the dashboard there is *nothing*: at speed the
+   road fills the whole bottom of the frame, seen straight down through where
+   the driver's feet would be. The second is the view-breaking one and it is
+   geometry, not decoration: the tub floor, the toeboard and the sills have to
+   meet so that no line of sight from the eye point reaches outside the car
+   below the dash. See [CAR-MODELS.md](CAR-MODELS.md).
 3. **Nothing casts a readable shadow onto the carriageway.** Shadows are on and
    cost a quarter of the frame rate, and the light they produce is a general
    darkening of foliage rather than trunk-shadows striped across the tarmac —
@@ -302,37 +275,54 @@ genuinely glows at the far end.
 5. ~~**§7's wall**~~ — fixed: the deck's barrier is a low kerb carrying an open
    railing, so the 1.5 km of viaduct is a crossing rather than a corridor.
 
-### §13 The autopilot does not get round
+### §13 The autopilot — **fixed on the road, open on the traffic**
 
-Left to itself on the shipped circuit the autopilot mired at 1:32, in trees,
-having left the road. It laps the synthetic test circuits, so this is the real
-world's corners rather than the steering. It matters beyond itself: the
-autopilot is what drives every capture, every recording and every track picture
-(§5), so a track it cannot finish is a track that cannot photograph itself.
+It mired at 1:32 on the shipped circuit, having left the road three times in two
+minutes. The cause was its own: it commanded a *stick position* while aiming at
+a geometric path, so when the steering lock was cut at speed its loop gain went
+with it. It works out a **front-wheel angle** now — pure pursuit from the car's
+own wheelbase, which the car reports (`RaycastVehicle.wheelbase()`), so there is
+nothing left to tune per car — and converts that to an input through the lock
+the car actually has. Zero departures in 200 s.
+
+**Still open: it does not overtake.** It slows for whatever is in front and
+holds station behind it, so with traffic on it follows the first car it catches
+for the rest of the lap. A player overtakes; the autopilot has no notion of
+pulling out.
 
 ---
 
 ## Order of work
 
-1. ~~**§1 run states**~~ — landed.
-2. ~~**§2 countdown**~~ — landed.
-3. ~~**§7 the viaduct railing**~~ — landed.
-4. **§5.1 the bake manifest** and **§5.2 the picture mode** — everything else in
-   the library reads what these write.
-5. **§5 records**, then **§3 the splash**, which needs them.
-6. **§4 the menu**, which needs the tracks and the records to have something to
-   offer.
-7. **§9 the sun in the bore** — a defect, and cheap if the shadow answer is the
-   right one.
-8. **§8.1–8.2 water** — the surface and a settable waterline.
-9. **§10 lights**, **§11 the frame rate**, **§12.2 the cockpit**, **§13 the
-   autopilot**, **§8.3 rivers** — each large enough to be planned on its own.
+1. ~~**§1 run states**~~, ~~**§2 countdown**~~, ~~**§7 the viaduct railing**~~.
+2. ~~**§5.1 the bake manifest**~~ and ~~**§5.2 the picture mode**~~, then
+   ~~**§5 records**~~, ~~**§3 the splash**~~, ~~**§4 the menu**~~.
+3. ~~**§9 the sun in the bore**~~ and ~~**§10 the lights**~~.
+4. ~~**§8.1–8.2 water**~~ — the surface and a settable waterline.
+5. **§12.2 the cockpit** — instruments, pillars, a bonnet, and a footwell that
+   closes, which is the view-breaking one.
+6. **§11 the frame rate** — 22.8 fps in the forest at 1280x720, and the trees
+   are three quarters of it. Wants profiling before anything is decided.
+7. **§13 overtaking** and **§8.3 rivers** — each large enough to be planned on
+   its own.
 
-## Documentation owed
+Found and fixed on the way, none of them in this plan when it was written:
+traffic off by default and reloading its art every spawn; the autopilot
+commanding a stick position rather than a wheel angle; and the steering, which
+took a wheel that winds and a straightening assist.
 
-* `glisteel/README.md` — the menu, the track library, where records are kept,
-  the new command-line modes.
-* `openglcontext/docs/` — `LampRow` in the HUD widget documentation; the
-  parapet profile in whatever documents `roadworks`.
-* `openglcontext-editor` — the `world.json` manifest, as a written format.
-* This file, kept as the record of what landed.
+## Documentation
+
+Written as each piece landed, not owed:
+
+* `glisteel/README.md` — the run's parts, the steering and `--assist`, the
+  lights and the budget, the track library, the records, and the new modes.
+* `openglcontext/docs/hud.html` — `LampRow`.
+* `openglcontext/docs/roads.html` — `BarrierProfile` and the sightline, and a
+  bore lit twice.
+* `openglcontext/docs/gltf.html` — `AssetLibrary.variant`.
+* `openglcontext/docs/baking.html` — the world manifest, with its format.
+* `openglcontext-editor/README.md` — what a bake writes beside the tiles.
+* `glisteel/plans/CAR-MODELS.md` — the cockpit's second pass, and why the blank
+  dashboard it originally specified is superseded.
+* This file, and `GAMEPLAY-TEST-HARNESS.md` §4.4, §4.5 and §4.10.

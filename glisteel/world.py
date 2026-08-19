@@ -67,9 +67,20 @@ class Structure:
                 & (distance <= self.end + along))
 
 
-@dataclass
+# ``eq=False`` throughout the array-carrying dataclasses here and in
+# :mod:`glisteel.trace`, :mod:`glisteel.session` and :mod:`glisteel.scenarios`:
+# a generated ``__eq__`` compares field by field, and comparing two numpy arrays
+# gives an array of answers rather than one, so asking whether it is true
+# raises. A course is a *thing* rather than a value -- the road this race is on
+# -- so it is itself and no other, which is what identity comparison says and
+# what lets one go in a set or be looked for in a list.
+@dataclass(eq=False)
 class Course:
-    """A road out of a baked world: where it goes and how wide it is."""
+    """A road out of a baked world: where it goes and how wide it is.
+
+    Compared by identity: two courses are the same course when they are the same
+    road, not when they happen to have been read from the same file twice.
+    """
 
     name: str
     centreline: np.ndarray
@@ -334,7 +345,12 @@ class RaceWorld:
                  max_sse: float = DEFAULT_SSE, gravity: float = 9.81,
                  traffic: int = 0) -> None:
         if not os.path.exists(tileset_path) and not fetch.is_url(tileset_path):
-            raise SystemExit(
+            # An ordinary exception rather than SystemExit: this is a library
+            # class, and a menu that offered a world which has since been moved
+            # has to be able to say so and stay running. Turning it into an exit
+            # is the command line's decision, and it makes it in
+            # :func:`glisteel.game.main`.
+            raise FileNotFoundError(
                 "no world at %s -- bake one with 'oglc-bake --output %s'"
                 % (tileset_path, os.path.dirname(tileset_path) or 'world'))
         self.path = tileset_path

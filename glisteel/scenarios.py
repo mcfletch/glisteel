@@ -31,6 +31,7 @@ where the road ends rather than fighting over the same triangles.
 """
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -75,7 +76,7 @@ def level(x: Any, z: Any) -> Any:
 FLAT: Callable[[Any, Any], Any] = level
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Scenario:
     """A piece of road, the ground under it, and what stands beside it.
 
@@ -98,6 +99,30 @@ class Scenario:
     #: Boulders on the verges, as (station along the road, which side).
     boulders: tuple[tuple[float, float], ...] = ()
     _cache: dict = field(default_factory=dict, compare=False, repr=False)
+
+    # -- one piece of road, or two ---------------------------------------------
+    def _described_by(self) -> tuple:
+        """Everything that decides which piece of road this is.
+
+        The plan is compared by its bytes: a scenario is a *description*, so two
+        of the same piece are the same piece, and a generated ``__eq__`` cannot
+        say that -- comparing two arrays gives an array of answers rather than
+        one, and asking whether that is true raises. The relief is compared by
+        identity, which the catalogue makes meaningful by handing out the same
+        function for the same land (see :func:`_wave`).
+        """
+        plan = np.ascontiguousarray(np.asarray(self.plan, dtype='d'))
+        return (self.name, plan.shape, plan.tobytes(), bool(self.closed),
+                self.relief, float(self.carriageway_width),
+                float(self.total_width), tuple(self.boulders))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Scenario):
+            return NotImplemented
+        return self._described_by() == other._described_by()
+
+    def __hash__(self) -> int:
+        return hash(self._described_by())
 
     # -- the road --------------------------------------------------------------
 
@@ -277,12 +302,17 @@ def _shift(z: Any, at: float, over: float) -> Any:
     return 0.5 - 0.5 * np.cos(math.pi * fraction)
 
 
+@functools.cache
 def _wave(height: float, wavelength: float, phase: float) -> Callable:
     """Land that rises and falls along Z and is level across it.
 
     Level across, so the road's own surface and the ground agree all the way
     over the top: a crest that also tilted the road sideways would be asking
     two questions at once.
+
+    Kept, so that the same land asked for twice is the same function rather than
+    two that behave alike: a :class:`Scenario` compares its relief by identity,
+    and two calls to :func:`crest` describe the same piece of road.
     """
     def relief(x: Any, z: Any) -> Any:
         return height / 2.0 * np.cos(

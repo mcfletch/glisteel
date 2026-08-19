@@ -337,3 +337,45 @@ class TestTheWayAcrossAClosedRoad:
         for index in (0, 30, len(course.centreline) - 1):
             assert float(np.linalg.norm(course.across(index))) \
                 == pytest.approx(1.0, abs=1e-9)
+
+
+class TestAskingForAWorldThatIsNotThere:
+    """A missing world is an error a caller can catch.
+
+    ``RaceWorld`` is a library class: a test builds one, a menu builds one for
+    whichever track was picked, and a tool builds one to measure. Raising
+    ``SystemExit`` from a constructor takes the interpreter down through every
+    ``except Exception`` on the way, so the one caller who *is* a command line
+    cannot be the only one who gets to decide.
+    """
+
+    def test_it_raises_something_ordinary_code_can_catch(self, tmp_path) -> None:
+        from glisteel.world import RaceWorld
+        missing = str(tmp_path / 'nowhere' / 'tileset.json')
+        with pytest.raises(Exception) as caught:  # noqa: B017 -- the assertion
+            RaceWorld(missing)
+        # Which is the whole point: SystemExit is a BaseException and would
+        # pass straight through the caller below.
+        assert isinstance(caught.value, Exception)
+
+    def test_it_is_a_missing_file(self, tmp_path) -> None:
+        from glisteel.world import RaceWorld
+        missing = str(tmp_path / 'nowhere' / 'tileset.json')
+        with pytest.raises(FileNotFoundError):
+            RaceWorld(missing)
+
+    def test_it_says_where_it_looked_and_what_to_do(self, tmp_path) -> None:
+        from glisteel.world import RaceWorld
+        missing = str(tmp_path / 'nowhere' / 'tileset.json')
+        with pytest.raises(FileNotFoundError, match='oglc-bake'):
+            RaceWorld(missing)
+
+    def test_a_caller_can_go_on_afterwards(self, tmp_path) -> None:
+        # What a menu does: try the track, say so, and stay running.
+        from glisteel.world import RaceWorld
+        said = []
+        try:
+            RaceWorld(str(tmp_path / 'nowhere' / 'tileset.json'))
+        except Exception as error:  # noqa: BLE001 -- what a caller writes
+            said.append(str(error))
+        assert said and 'nowhere' in said[0]
