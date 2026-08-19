@@ -12,6 +12,7 @@ Keys::
     mouse               steer, with --mouse
     c                   cockpit / chase / bonnet camera
     r                   put the car back on the track
+    n                   a fresh race, from the grid
     F2                  save a screenshot
 
 The world streams itself in around the car and hands each tile it loads to the
@@ -19,6 +20,12 @@ physics as a static collider, so the car drives on exactly the triangles that
 are drawn. The car is a rigid body on four spring-loaded rays
 (:class:`~omi_physics.vehicle.RaycastVehicle`); everything about how it feels
 is in :class:`~glisteel.car.CarSpec`.
+
+**The run is not in here.** The loop -- fixed-step physics, the camera, the lap
+timing and the rules about leaving the road -- is
+:class:`~glisteel.session.Session`, which needs no window and can be driven a
+step at a time by a test. What is here is the window: the scene it draws, the
+keys it delivers, and where it points the view.
 """
 from __future__ import annotations
 
@@ -40,43 +47,16 @@ from OpenGLContext.video.recorder import RecordingMixin  # noqa: E402
 from OpenGLContext.viewer import environment  # noqa: E402
 from OpenGLContext.viewer.sceneviewer import ViewerContext  # noqa: E402
 
-from glisteel.camera import VIEWS, ChaseCamera  # noqa: E402
-from glisteel.car import Car, CarSpec  # noqa: E402
+from glisteel.camera import VIEWS  # noqa: E402
+from glisteel.car import CarSpec  # noqa: E402
 from glisteel.driver import Autopilot  # noqa: E402
 from glisteel.hud import RaceHUD  # noqa: E402
-from glisteel.race import (  # noqa: E402
-    Collisions,
-    OffRoad,
-    RaceTiming,
-    closing_speed,
-    off_course,
-)
-from glisteel.reflections import Reflections  # noqa: E402
-from glisteel.steering import KeyboardWheel, MouseWheel  # noqa: E402
+from glisteel.session import RACE_LAPS, Session  # noqa: E402
+from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel  # noqa: E402
 from glisteel.world import RaceWorld  # noqa: E402
 
 log = logging.getLogger(__name__)
 BaseContext: Any = testingcontext.getInteractive()
-
-#: The physics step. Fixed, and finer than a frame: a vehicle held up by
-#: springs is stiff, and integrating it at whatever the display manages makes
-#: the car bounce on a fast machine and sink through the road on a slow one.
-PHYSICS_STEP = 1.0 / 120.0
-
-#: How far up the road a driver looks for something to run into, in metres.
-AHEAD_REACH = 140.0
-
-#: The most simulation one frame may catch up on. Past this the game runs slow
-#: rather than spiralling: a frame that tries to make up a lost second takes
-#: longer than a second and loses more.
-MAXIMUM_CATCHUP = 0.1
-
-#: A car that has stopped somewhere it should not be -- wedged against a bank,
-#: on its roof, off the map -- is put back on the road after this long. Long
-#: enough that a driver who has stopped on purpose is left alone, short enough
-#: that nobody sits looking at a hillside.
-STUCK_SECONDS = 3.0
-STUCK_SPEED = 1.0
 
 #: The scale the default light rig is sized to. A world is kilometres across
 #: and the rig's fill light is placed as a multiple of this, so it is the size
@@ -88,35 +68,17 @@ WORLD_LIGHT_SCALE = 120.0
 #: side of a baked world is haze rather than a line where the ground stops.
 VISIBILITY = 1800.0
 
-#: Which keys do what. Each is a set of names, so the arrows and WASD are the
-#: same control rather than two.
-CONTROLS = {
-    'throttle': {'w', '<up>'},
-    'brake': {'s', '<down>'},
-    'left': {'a', '<left>'},
-    'right': {'d', '<right>'},
-    'handbrake': {' '},
-}
-
 
 class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
-    """The game window: a streamed world, a car in it, and a camera behind."""
+    """The game window: a run to advance, a scene to draw, and keys to deliver."""
 
     config: Any = None
-    world: RaceWorld | None = None
+    #: The run this window is showing.
+    session: Session | None = None
     _capture: Any = None
-    car: Car | None = None
-    autopilot: Autopilot | None = None
-    timing: RaceTiming | None = None
-    watch: OffRoad | None = None
-    crashes: Collisions | None = None
-    #: The wheel, when the player is steering with the pointer.
-    wheel: MouseWheel | None = None
-    #: The steering wheel the arrow and WASD keys wind on and off; see
-    #: :class:`~glisteel.steering.KeyboardWheel`.
-    keys: KeyboardWheel | None = None
+    #: Whoever is at the keyboard, or None while the autopilot is driving.
+    keyboard: KeyboardDriver | None = None
     hud: Any = None
-    reflections: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
     addEventHandler: Any
@@ -124,17 +86,20 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     sg: Any
 
     def OnInit(self) -> None:                    # pragma: no cover - needs a window
-        self.held: set[str] = set()
-        self.keys = KeyboardWheel()
         # The engine's clock rather than the wall clock directly: a recording
         # replaces it with one that advances a frame at a time, and the car has
         # to move on that same clock or the video is not what was driven.
         self._clock = systemTime()
-        self._accumulated = 0.0
-        self._stuck_for = 0.0
-        self.camera = ChaseCamera(getattr(self.config, 'view', None) or VIEWS[0])
-        self.world = RaceWorld(self.config.world, max_sse=self.config.sse,
-                               traffic=getattr(self.config, 'traffic', 0))
+        world = RaceWorld(self.config.world, max_sse=self.config.sse,
+                          traffic=getattr(self.config, 'traffic', 0))
+        if world.course is None:
+            raise SystemExit(
+                "%s carries no roads, so there is nothing to race on. Bake a "
+                "world with a circuit in it." % self.config.world)
+        self.session = Session(world, CarSpec(),
+                               view=getattr(self.config, 'view', None) or VIEWS[0],
+                               laps=getattr(self.config, 'laps', RACE_LAPS))
+        self.session.driver = self._driver()
         # The engine's own sky and light rig, rather than one written here: a
         # world baked for the viewer is lit the way the viewer lights it, and a
         # game that invents its own rig renders the same tiles differently.
@@ -144,56 +109,26 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             environment.horizon_background(),
             race_fog(),
             *ViewerContext.defaultLights(WORLD_LIGHT_SCALE),
-            self.world.terrain,
+            world.terrain,
+            self.session.car.node,
         ])
-        self._start_the_car()
+        if world.traffic is not None:
+            # Mounted once; the cars under it come and go as the player passes.
+            self.sg.children.append(world.traffic.node)
         self.hud = RaceHUD()
         self.hud.visible = self.config.hud
-        # After the car, because the map is the course the car was put on.
-        self.hud.route(self.world.course)
+        self.hud.route(world.course)
         self.addHUDLayer(self.hud)
         self._bind_keys()
 
-    # -- setting up ------------------------------------------------------------
-
-    def _start_the_car(self) -> None:            # pragma: no cover - needs a window
-        """Put the car on the grid, once the ground under it has arrived."""
-        assert self.world is not None
-        course = self.world.course
-        if course is None:
-            raise SystemExit(
-                "%s carries no roads, so there is nothing to race on. Bake a "
-                "world with a circuit in it." % self.config.world)
-        lane = self._lane(course)
-        position, heading = course.grid_position(height=6.0, lane=lane)
-        self.platform.setPosition(tuple(float(v) for v in position))
-        if not self.world.settled(tuple(float(v) for v in position)):
-            log.warning("the ground under the grid has not loaded; "
-                        "the car may fall")
-        self.car = Car(self.world.physics, CarSpec(), position=position,
-                       heading=heading)
-        self.sg.children.append(self.car.node)
-        if self.world.traffic is not None:
-            # Mounted once; the cars under it come and go as the player passes.
-            self.sg.children.append(self.world.traffic.node)
-        # What the car is lit and reflected by, which follows the road: a
-        # canopy overhead in the forest, a bore's walls in a tunnel.
-        self.reflections = Reflections(course)
-        self.timing = RaceTiming(course)
-        self.watch = OffRoad(course)
-        self.crashes = Collisions()
-        self.autopilot = (Autopilot(course, lane=lane)
-                          if self.config.autopilot else None)
-        self._settle_onto_the_road()
-
-    def _settle_onto_the_road(self) -> None:     # pragma: no cover - needs a window
-        """Drop the car the last few metres before the player gets it."""
-        assert self.car is not None and self.world is not None
-        for _ in range(int(1.5 / PHYSICS_STEP)):
-            self.car.update(PHYSICS_STEP)
-            self.world.physics.step(PHYSICS_STEP)
-        self.car.follow(PHYSICS_STEP)
-        self.camera.reset()
+    def _driver(self) -> Any:                    # pragma: no cover - needs a window
+        """Whoever is driving: the autopilot, or whoever is at the keyboard."""
+        if self.config.autopilot:
+            assert self.session is not None
+            return Autopilot(self.session.course, lane=self.session.lane)
+        self.keyboard = KeyboardDriver(
+            MouseWheel() if getattr(self.config, 'mouse', False) else None)
+        return self.keyboard
 
     def _bind_keys(self) -> None:                # pragma: no cover - needs a window
         for names in CONTROLS.values():
@@ -201,237 +136,63 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
                 for state in (1, 0):
                     self.addEventHandler('keyboard', name=name, state=state,
                                          function=self._on_key)
-        if getattr(self.config, 'mouse', False):
-            self.wheel = MouseWheel()
+        if self.keyboard is not None and self.keyboard.pointer is not None:
             self.addEventHandler('mousemove', function=self._on_pointer)
         self.addEventHandler('keypress', name='c', function=self._on_camera)
         self.addEventHandler('keypress', name='r', function=self._on_reset)
+        self.addEventHandler('keypress', name='n', function=self._on_restart)
 
     # -- input -----------------------------------------------------------------
 
     def _on_key(self, event: Any) -> None:       # pragma: no cover - needs a window
         name = getattr(event, 'name', None)
-        if name is None:
+        if name is None or self.keyboard is None:
             return
         if getattr(event, 'state', 0):
-            self.held.add(name)
+            self.keyboard.press(name)
         else:
-            self.held.discard(name)
+            self.keyboard.release(name)
         self.triggerRedraw(1)
 
     def _on_pointer(self, event: Any) -> None:   # pragma: no cover - needs a window
         """The pointer moved: the wheel is where it is across the window."""
-        if self.wheel is None:
+        if self.keyboard is None or self.keyboard.pointer is None:
             return
+        wheel = self.keyboard.pointer
         width, _height = self.getViewPort()
-        self.wheel.resize(int(width or self.wheel.width))
-        self.wheel.moved(int(event.getPickPoint()[0]))
+        wheel.resize(int(width or wheel.width))
+        wheel.moved(int(event.getPickPoint()[0]))
 
     def _on_camera(self, event: Any) -> None:    # pragma: no cover - needs a window
-        self.camera.cycle()
+        assert self.session is not None
+        self.session.camera.cycle()
         self.triggerRedraw(1)
 
     def _on_reset(self, event: Any) -> None:     # pragma: no cover - needs a window
-        self.return_to_track()
+        assert self.session is not None
+        self.session.return_to_track()
 
-    def _held(self, control: str) -> bool:
-        return bool(self.held & CONTROLS[control])
-
-    def driver_input(self, dt: float) -> tuple[float, float, float]:
-        """The pedals and the wheel, from whatever is held down.
-
-        ``dt`` is the step the steering is wound over: the keys give full lock
-        or none, and :class:`~glisteel.steering.KeyboardWheel` turns that into a
-        wheel that eases on and off rather than a switch.
-        """
-        throttle = 1.0 if self._held('throttle') else 0.0
-        brake = 0.0
-        if self._held('brake'):
-            # One pedal, two meanings: it stops a car that is moving forward
-            # and reverses one that has stopped, which is what an arrow key on
-            # a keyboard has to do.
-            assert self.car is not None
-            if self.car.vehicle.forward_speed() > 0.4:
-                brake = 1.0
-            else:
-                throttle = -1.0
-        if self._held('handbrake'):
-            brake = 1.0
-        target = (1.0 if self._held('left') else 0.0) - \
-            (1.0 if self._held('right') else 0.0)
-        if self.wheel is not None and not target:
-            # The pointer has the wheel while no steering key is down; reaching
-            # for a key takes it back, because a driver doing so has decided the
-            # pointer is not where they want the wheel.
-            return throttle, brake, self.wheel.position
-        assert self.keys is not None
-        return throttle, brake, self.keys.toward(target, dt)
-
-    def controls(self, dt: float) -> tuple[float, float, float]:
-        """Whoever is driving: the autopilot, or whoever is at the keyboard."""
-        if self.autopilot is not None and self.car is not None:
-            return self.autopilot.update(self.car)
-        return self.driver_input(dt)
-
-    def _watch_the_road_ahead(self) -> None:     # pragma: no cover - needs a window
-        """Tell the autopilot what is in front of it.
-
-        A driver who knows the corners and not the traffic drives into the back
-        of the first car it catches.
-        """
-        if self.autopilot is None or self.world.traffic is None:
-            return
-        ahead = self.world.traffic.ahead_of(
-            self.car.position, self.car.forward(), reach=AHEAD_REACH)
-        if not ahead:
-            self.autopilot.following(None)
-            return
-        first = ahead[0]
-        offset = first.position() - self.car.position
-        gap = float(sum(float(v) * float(v) for v in offset) ** 0.5)
-        self.autopilot.following(gap, first.speed)
-
-    def return_to_track(self) -> None:           # pragma: no cover - needs a window
-        """Put the car back on the road, facing the right way, stopped."""
-        if self.car is None or self.world is None:
-            return
-        course = self.world.course
-        if course is None:
-            return
-        index, _ = course.nearest(self.car.position)
-        position, heading = course.grid_position(
-            index, height=1.5, lane=self._lane(course))
-        self.car.place(position, heading)
-        self.camera.reset()
-        if self.timing is not None:
-            self.timing.restart()
-        if self.watch is not None:
-            self.watch.restart()
-        if self.crashes is not None:
-            self.crashes.restart()
+    def _on_restart(self, event: Any) -> None:   # pragma: no cover - needs a window
+        assert self.session is not None
+        self.session.restart()
 
     # -- the frame -------------------------------------------------------------
 
     def OnIdle(self, *args: Any) -> int:         # pragma: no cover - needs a window
         now = systemTime()
-        elapsed = min(now - self._clock, MAXIMUM_CATCHUP)
+        elapsed = now - self._clock
         self._clock = now
         self.advance(elapsed)
         self.triggerRedraw(1)
         return 1
 
     def advance(self, elapsed: float) -> None:   # pragma: no cover - needs a window
-        """One frame: fixed-step physics, then camera, HUD and streaming."""
-        assert self.car is not None and self.world is not None
-        # The controls are sampled inside the fixed step, not once a frame. A
-        # steering loop that only runs when a frame is drawn is a controller at
-        # the frame rate, and on a slow frame it holds full lock for a quarter
-        # of a second and puts the car on its roof.
-        self._accumulated += elapsed
-        while self._accumulated >= PHYSICS_STEP:
-            self._read_the_ground(PHYSICS_STEP)
-            self.car.control(*self.controls(PHYSICS_STEP))
-            self.car.update(PHYSICS_STEP)
-            self.world.physics.step(PHYSICS_STEP)
-            self._accumulated -= PHYSICS_STEP
-        self.car.follow(elapsed)
-        if self.world.traffic is not None and not self._over():
-            self.world.traffic.update(self.car.position, elapsed,
-                                      speed=self.car.speed())
-            self._watch_the_road_ahead()
-            self._watch_for_a_crash(elapsed)
-        self._recover_if_stuck(elapsed)
-        pose = self.camera.update(self.car, elapsed)
-        self.car.hidden = self.camera.inside
+        """One frame of the run, and the window pointed at what it says."""
+        assert self.session is not None
+        self.session.viewport = self.getViewPort()
+        pose = self.session.advance(elapsed)
         self._aim(pose)
-        if self.reflections is not None:
-            changed = self.reflections.update(self.car.position)
-            if changed is not None:
-                log.info('the road is %s now: rebuilding what the car reflects',
-                         changed)
-        if self.timing is not None and not self._over():
-            self.timing.update(self.car.position, elapsed)
         self._update_hud()
-        width, height = self.getViewPort()
-        self.world.stream(
-            tuple(float(v) for v in pose.position), float(height or 1),
-            view_projection=self.world.view_projection(
-                pose.position, pose.target, (width or 1) / (height or 1)))
-        if self.car.position[1] < self.world.terrain.tileset.root \
-                .bounding_volume.center[1] - 500.0:
-            # Through the floor of the world: put it back rather than let the
-            # player watch it fall for ever.
-            self.return_to_track()
-
-    def _read_the_ground(self, dt: float) -> None:
-        """What the wheels are on, and whether the run is over.
-
-        Inside the fixed step rather than once a frame: the surface decides the
-        forces, and a surface sampled at the frame rate would change under the
-        car in jumps on a slow frame.
-        """
-        assert self.car is not None
-        if self.watch is None:
-            return
-        reason = self.watch.update(self.car.position, dt)
-        self.car.vehicle.surface = self.watch.surface()
-        if reason is not None:
-            log.info("run over: %s", reason)
-
-    def _lane(self, course: Any) -> float:       # pragma: no cover - needs a window
-        """Which side of the road to drive on.
-
-        The middle of the road on an empty circuit, because that is the racing
-        line and there is nothing to meet. With traffic coming the other way it
-        is the middle of this car's own half, because that is what a road with
-        two directions on it means.
-        """
-        return (course.driving_lane
-                if getattr(self.config, 'traffic', 0) else 0.0)
-
-    def _watch_for_a_crash(self, dt: float) -> None:  # pragma: no cover - needs a window
-        """End the run if the car met another one hard enough.
-
-        The closing speed against the nearest car in front, which is what the
-        severity of a crash is: a car alongside at the same speed is an
-        overtake, and the back of one at forty metres a second is not.
-        """
-        if self.crashes is None or self.world.traffic is None:
-            return
-        ahead = self.world.traffic.ahead_of(self.car.position,
-                                            self.car.forward(), reach=6.0)
-        if not ahead:
-            return
-        other = ahead[0]
-        closing = closing_speed(self.car.velocity(), other.velocity(),
-                                other.position() - self.car.position)
-        self.crashes.update(max(closing, 0.0), dt)
-
-    def _ended(self) -> str | None:              # pragma: no cover - needs a window
-        """Why the run is over, or None while it is not."""
-        for watcher in (self.watch, self.crashes):
-            if watcher is not None and watcher.ended:
-                return str(watcher.ended)
-        return None
-
-    def _over(self) -> bool:                     # pragma: no cover - needs a window
-        return self._ended() is not None
-
-    def _recover_if_stuck(self, elapsed: float) -> None:
-        """Put the car back on the road if it has got itself stuck.
-
-        Wedged against a bank, upside down, or through the floor of the world:
-        all of them end with a car that is not going anywhere, and a game that
-        leaves the player looking at it is broken however correct the physics
-        was on the way there.
-        """
-        assert self.car is not None
-        stuck = (self.car.speed() < STUCK_SPEED
-                 and (self._off_course() or self.car.upside_down()))
-        self._stuck_for = self._stuck_for + elapsed if stuck else 0.0
-        if self._stuck_for > STUCK_SECONDS:
-            self._stuck_for = 0.0
-            self.return_to_track()
 
     def _aim(self, pose: Any) -> None:           # pragma: no cover - needs a window
         from OpenGLContext import quaternion
@@ -441,19 +202,13 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.platform.setOrientation(aim)
 
     def _update_hud(self) -> None:               # pragma: no cover - needs a window
-        if self.hud is None or self.car is None:
+        if self.hud is None or self.session is None:
             return
-        self.hud.show(speed_kph=self.car.speed_kph(), timing=self.timing,
-                      off=self.watch.off if self.watch else False,
-                      ended=self._ended(), at=self.car.position,
-                      others=[car.position() for car in
-                              (self.world.traffic.cars
-                               if self.world.traffic is not None else ())])
-
-    def _off_course(self) -> bool:               # pragma: no cover - needs a window
-        assert self.world is not None and self.car is not None
-        course = self.world.course
-        return bool(course is not None and off_course(course, self.car.position))
+        reading = self.session.readout()
+        self.hud.show(speed_kph=reading.speed_kph, timing=reading.timing,
+                      off=reading.off, ended=reading.ended, at=reading.at,
+                      others=reading.others, phase=reading.phase,
+                      lit=reading.lit, lights=reading.lights)
 
     def SwapBuffers(self, *args: Any) -> Any:    # pragma: no cover - needs a window
         """Present the frame, and take the picture when one is asked for.
@@ -477,8 +232,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             if counter is not None:
                 sys.stdout.write('DRIVE_STATS fps=%s\n' % (counter.recentFps(),))
             sys.stdout.flush()
-            if self.world is not None:
-                self.world.shutdown()
+            self._shutdown()
             os._exit(0)
             return result
         return super().SwapBuffers(*args)
@@ -489,9 +243,12 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         if self.recorder is not None:
             self.recorder.close()
             self.recorder = None
-        if self.world is not None:
-            self.world.shutdown()
+        self._shutdown()
         super().OnQuit(*args)
+
+    def _shutdown(self) -> None:                 # pragma: no cover - needs a window
+        if self.session is not None:
+            self.session.world.shutdown()
 
 
 def race_fog() -> Any:
@@ -512,7 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='glisteel', description=__doc__.split('\n\n')[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__[__doc__.index('Keys::'):])
+        epilog=__doc__[__doc__.index('Keys::'):__doc__.index('The world streams')])
     parser.add_argument('world', nargs='?', default='baked-world/tileset.json',
                         help='the tileset.json of a baked world '
                              '(default: %(default)s)')
@@ -524,6 +281,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--mouse', action='store_true',
                         help='steer with the pointer: where it is across the '
                              'window is where the wheel is')
+    parser.add_argument('--laps', type=int, default=RACE_LAPS, metavar='N',
+                        help='how many laps the race is; 0 drives on with no '
+                             'finish (default: %(default)s)')
     parser.add_argument('--traffic', type=int, default=0, metavar='CARS',
                         help='how many other cars are on the road at once; '
                              'the default is an empty circuit, which is what a '
@@ -624,8 +384,16 @@ def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
         def OnInit(self) -> None:
             self._capture = None
             super().OnInit()
-            if options.drive_seconds and self.autopilot is None:
-                self.held.update(CONTROLS['throttle'])
+            assert self.session is not None
+            if options.drive_seconds:
+                # A picture of a car going somewhere is not a picture of a
+                # standing start, so the lights are dropped and the throttle
+                # goes down. Without it the picture is of the grid, which is
+                # what a track wants for its own portrait.
+                self.session.run.go()
+                if self.keyboard is not None:
+                    for name in CONTROLS['throttle']:
+                        self.keyboard.press(name)
             self._capture = SettleCapture(
                 options.capture,
                 delay=options.capture_delay + options.drive_seconds,

@@ -13,7 +13,8 @@ letting go of it in the middle is straight ahead.
 """
 from __future__ import annotations
 
-__all__ = ['KeyboardWheel', 'MouseWheel', 'TRAVEL', 'CURVE', 'WIND_ON', 'CENTRE']
+__all__ = ['CONTROLS', 'KeyboardDriver', 'KeyboardWheel', 'MouseWheel',
+           'TRAVEL', 'CURVE', 'WIND_ON', 'CENTRE']
 
 #: How much of the window's half-width is full lock. Under 1 so a driver does
 #: not have to reach the very edge of the screen to get all of it.
@@ -112,3 +113,79 @@ class KeyboardWheel:
         else:
             self.position = max(target, self.position - step)
         return self.position
+
+
+#: Which keys do what. Each is a set of names, so the arrows and WASD are the
+#: same control rather than two.
+CONTROLS = {
+    'throttle': {'w', '<up>'},
+    'brake': {'s', '<down>'},
+    'left': {'a', '<left>'},
+    'right': {'d', '<right>'},
+    'handbrake': {' '},
+}
+
+
+class KeyboardDriver:
+    """Whoever is at the keyboard, as a driver a run can be handed.
+
+    Holds the keys that are down and the wheel they wind, and answers the
+    pedals and the steering once per physics step -- a
+    :class:`~glisteel.session.Controller`, so a session neither knows nor cares
+    whether a person or the autopilot is driving.
+
+    ``pointer`` is a :class:`MouseWheel` for steering with the mouse, or None
+    for the keys alone. The keys take the wheel back from the pointer while one
+    is down, because a driver reaching for a key has decided the pointer is not
+    where they want it.
+    """
+
+    def __init__(self, pointer: MouseWheel | None = None) -> None:
+        #: The names of the keys that are down.
+        self.held: set[str] = set()
+        self.keys = KeyboardWheel()
+        self.pointer = pointer
+
+    def press(self, name: str) -> None:
+        self.held.add(name)
+
+    def release(self, name: str) -> None:
+        self.held.discard(name)
+
+    def release_all(self) -> None:
+        """Let go of everything.
+
+        For losing the window: a key whose release nobody saw is a key held
+        down for ever, and a wheel wound to full lock that never comes back.
+        """
+        self.held.clear()
+
+    def holding(self, control: str) -> bool:
+        """Whether any of the keys for a control is down."""
+        return bool(self.held & CONTROLS[control])
+
+    def controls(self, session: object, dt: float) -> tuple[float, float, float]:
+        """The pedals and the wheel, from whatever is held down.
+
+        ``dt`` is the step the steering is wound over: the keys give full lock
+        or none, and :class:`KeyboardWheel` turns that into a wheel that eases
+        on and off rather than a switch.
+        """
+        throttle = 1.0 if self.holding('throttle') else 0.0
+        brake = 0.0
+        if self.holding('brake'):
+            # One pedal, two meanings: it stops a car that is moving forward
+            # and reverses one that has stopped, which is what an arrow key on
+            # a keyboard has to do.
+            car = getattr(session, 'car', None)
+            if car is not None and car.vehicle.forward_speed() > 0.4:
+                brake = 1.0
+            else:
+                throttle = -1.0
+        if self.holding('handbrake'):
+            brake = 1.0
+        target = (1.0 if self.holding('left') else 0.0) - \
+            (1.0 if self.holding('right') else 0.0)
+        if self.pointer is not None and not target:
+            return throttle, brake, self.pointer.position
+        return throttle, brake, self.keys.toward(target, dt)

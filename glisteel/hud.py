@@ -1,12 +1,18 @@
 """What the driver is told, and where on the screen it goes.
 
-Four readouts and a map, and nothing else. A racing HUD earns its space: the
-speed, because it is the one number a driver acts on; the lap clock, because
-that is what the lap is for; the last and best laps, because a lap is only
-meaningful against another one; a warning when the car is off the road, because
-at speed that is not always obvious from the picture; and the map, because a
-driver on an eight-kilometre circuit cannot see round the next bend and has no
-idea how much of the lap is left.
+A racing HUD earns its space: the speed, because it is the one number a driver
+acts on; the lap clock, because that is what the lap is for; the last and best
+laps, because a lap is only meaningful against another one; a warning when the
+car is off the road, because at speed that is not always obvious from the
+picture; and the map, because a driver on an eight-kilometre circuit cannot see
+round the next bend and has no idea how much of the lap is left.
+
+Either end of the race there is one more thing, and only for a moment: the start
+rig across the top while the car is held on the grid, and the result across the
+middle once it is over. The rig is lamps
+(:class:`~OpenGLContext.ui.hudwidgets.LampRow`) rather than a counting numeral,
+because a driver reads it with their eyes on the road and a number would take
+them off it.
 """
 from __future__ import annotations
 
@@ -15,15 +21,23 @@ from typing import Any
 from OpenGLContext.ui.hudwidgets import (
     HUDGroup,
     HUDLayer,
+    LampRow,
     MiniMap,
     Readout,
 )
 
-__all__ = ['RaceHUD']
+from glisteel.run import COUNTDOWN, FINISHED
+
+__all__ = ['RaceHUD', 'FAST_KPH', 'HOME']
 
 #: Speed above which the readout goes critical: the skin's warning colour, so
 #: the driver's eye is caught by the number rather than having to read it.
 FAST_KPH = 160.0
+
+#: What the middle of the screen says when the race has been driven home. The
+#: time goes with it, because the word is what a driver sees and the time is
+#: what they then read.
+HOME = 'FINISHED'
 
 
 class RaceHUD(HUDLayer):
@@ -37,11 +51,16 @@ class RaceHUD(HUDLayer):
         self.last = Readout(label='LAST', value='--:--.---')
         self.warning = Readout(anchor='center', align='center', value='')
         self.map = MiniMap(anchor='bottom-left')
+        # Up where a driver looking at the road still catches it, and out of the
+        # way of the result, which takes the middle a moment later.
+        self.lights = LampRow(anchor='top-center', offset=(0.0, -40.0))
+        self.lights.visible = False
         # The three clocks are one block in the corner: anchored separately they
         # would each take the same corner and be drawn on top of one another.
         self.times = HUDGroup(anchor='top-left',
                               children=[self.lap, self.last, self.best])
-        self.children = [self.times, self.speed, self.warning, self.map]
+        self.children = [self.times, self.speed, self.warning, self.map,
+                         self.lights]
 
     def route(self, course: Any) -> None:
         """The circuit the map draws. Set once; a world's shape does not change."""
@@ -50,13 +69,16 @@ class RaceHUD(HUDLayer):
 
     def show(self, speed_kph: float, timing: Any = None,
              off: bool = False, ended: str | None = None,
-             at: Any = None, others: Any = ()) -> None:
+             at: Any = None, others: Any = (),
+             phase: str = '', lit: int = 0, lights: int = 0) -> None:
         """Put this frame's numbers on the readouts.
 
         ``ended`` is the reason the run is over, and displaces the off-track
         warning: once a car is mired there is nothing left to warn about.
         ``at`` is where the car is and ``others`` where anything else worth
-        marking is, both for the map.
+        marking is, both for the map. ``phase``, ``lit`` and ``lights`` are
+        which part of the race this is and how much of the start rig is burning
+        (:class:`~glisteel.run.Run`).
         """
         self.speed.value = '%3.0f' % max(0.0, speed_kph)
         self.speed.critical = bool(speed_kph >= FAST_KPH)
@@ -65,15 +87,33 @@ class RaceHUD(HUDLayer):
                                           _clock(timing.current))
             self.last.value = timing.last.clock() if timing.last else '--:--.---'
             self.best.value = timing.best.clock() if timing.best else '--:--.---'
-        if ended:
-            self.warning.value = ended.upper()
-        else:
-            self.warning.value = 'OFF TRACK' if off else ''
-        self.warning.critical = bool(ended or off)
+        self._start_rig(phase, lit, lights)
+        self.warning.value = self._middle(phase, timing, ended, off)
+        self.warning.critical = bool(self.warning.value and phase != FINISHED)
         marks = [(float(one[0]), float(one[2]), 'hudText') for one in others]
         if at is not None:
             marks.append((float(at[0]), float(at[2]), 'crosshair'))
         self.map.marks = marks
+
+    def _start_rig(self, phase: str, lit: int, lights: int) -> None:
+        """The lamps, and only while there is a start to watch."""
+        self.lights.visible = bool(phase == COUNTDOWN and lights)
+        self.lights.count = int(lights)
+        self.lights.lit = int(lit)
+
+    def _middle(self, phase: str, timing: Any, ended: str | None,
+                off: bool) -> str:
+        """What takes the middle of the screen: the result, or a warning.
+
+        The result outranks everything, because a race that is over is not one
+        to be told about the road surface.
+        """
+        if phase == FINISHED:
+            best = timing.best if timing is not None else None
+            return '%s   %s' % (HOME, best.clock()) if best else HOME
+        if ended:
+            return ended.upper()
+        return 'OFF TRACK' if off else ''
 
 
 def _clock(seconds: float) -> str:

@@ -225,6 +225,20 @@ class Course:
         """A point of the centreline, moved ``offset`` metres to its right."""
         return self.point(index) + self.across(index) * float(offset)
 
+    @property
+    def start_index(self) -> int:
+        """Which point of the line a car is put on to begin with.
+
+        The first point on a circuit, because that is where the lap starts and
+        ends. An open road has no line, and its first point is a place where
+        half the car hangs over the end with nothing under the back wheels, so
+        the grid is set back far enough along it for a car to stand on the road.
+        """
+        if self.closed:
+            return 0
+        found = int(np.searchsorted(self.stations, GRID_SETBACK))
+        return min(found, max(len(self.centreline) - 2, 0))
+
     def grid_position(self, index: int = 0, height: float = 1.0,
                       offset: float = 0.0, lane: float = 0.0
                       ) -> tuple[np.ndarray, float]:
@@ -269,6 +283,16 @@ def load_courses(tileset_path: str) -> list[Course]:
 #: is on; anything much further down is a different surface.
 SETTLE_DROP = 4.0
 
+#: How far in from the end of an open road a car is put, in metres. Longer than
+#: a car, so all four wheels are on the surface rather than the back two hanging
+#: over the end of it.
+GRID_SETBACK = 12.0
+
+#: How far under the world's own datum a car has to be to have left it, in
+#: metres. Far enough that a viaduct's valley is not "gone" -- a car on the deck
+#: has ninety metres of air under it and has fallen nowhere.
+LOST_BELOW = 500.0
+
 #: How far past a road's own width a bore's opening in the ground reaches, in
 #: metres. Wide enough to clear the lining, and no wider: the opening is a hole
 #: in the ground with the bore's own tube inside it, and one wider than the tube
@@ -301,6 +325,11 @@ class RaceWorld:
     meets a road's worth of traffic without a world's worth existing.
     """
 
+    #: Where this world was read from, or None for one built from a course.
+    path: str | None
+    #: The tile tree that streams, or None for a world with no tiles.
+    terrain: Any
+
     def __init__(self, tileset_path: str, memory: int = DEFAULT_MEMORY,
                  max_sse: float = DEFAULT_SSE, gravity: float = 9.81,
                  traffic: int = 0) -> None:
@@ -309,21 +338,53 @@ class RaceWorld:
                 "no world at %s -- bake one with 'oglc-bake --output %s'"
                 % (tileset_path, os.path.dirname(tileset_path) or 'world'))
         self.path = tileset_path
-        self.physics = PhysicsWorld(gravity=model.Gravity(gravity=abs(gravity)))
         # No colliders from the tiles: tile geometry is level-of-detail
         # geometry, and a surface that changes resolution under the wheels is a
         # step to hit at speed. The two surfaces a car meets are built here
         # instead, each from the thing itself rather than from a drawing of it.
         self.terrain = TilesTerrain(tileset_path, memory_budget=memory,
                                     max_sse=max_sse)
-        self.courses = load_courses(tileset_path)
+        self._assemble(load_courses(tileset_path), field=self.terrain.field,
+                       props=self._baked_props(), traffic=traffic,
+                       gravity=gravity)
+
+    @classmethod
+    def from_course(cls, courses: Any, field: Any = None, props: Any = (),
+                    traffic: int = 0, gravity: float = 9.81) -> RaceWorld:
+        """A world made of a road and its ground, with no tiles to stream.
+
+        Everything a car meets is here -- the carriageway swept from the
+        centreline, the ground as a height field, the props standing on it and
+        the traffic using the road -- and nothing is drawn. That is what a
+        scenario is (:mod:`glisteel.scenarios`): a few hundred metres of road
+        with one question in it, built in the time a test can afford.
+
+        ``courses`` is one :class:`Course` or several, ``field`` the ground as
+        a :class:`~OpenGLContext.scenegraph.terrain.heightfield.HeightField`,
+        and ``props`` whatever stands beside the road.
+        """
+        world = cls.__new__(cls)
+        #: Nothing was read off disk and nothing streams: what a scenario is.
+        world.path = None
+        world.terrain = None
+        world._assemble(
+            [courses] if isinstance(courses, Course) else list(courses),
+            field=field, props=list(props), traffic=traffic, gravity=gravity)
+        return world
+
+    def _assemble(self, courses: list[Course], field: Any, props: list,
+                  traffic: int, gravity: float) -> None:
+        """Stand up the physics, the surfaces, the obstacles and the traffic."""
+        self.physics = PhysicsWorld(gravity=model.Gravity(gravity=abs(gravity)))
+        self.courses = courses
+        #: The landscape this world carries, or None where it has none.
+        self.field = field
         #: The ground, when the world carries its landscape as a field. The
         #: chunks near the car are in the physics world; the rest are not.
         self.ground: Any = None
-        if self.terrain.field is not None:
+        if field is not None:
             from OpenGLContext.physics.heightfield import HeightFieldColliders
-            self.ground = HeightFieldColliders(self.physics,
-                                               self.terrain.field,
+            self.ground = HeightFieldColliders(self.physics, field,
                                                holes=self._bores())
         #: The carriageway, built from the course rather than from the tiles.
         self.roads: list[Any] = []
@@ -335,7 +396,7 @@ class RaceWorld:
         #: The obstacles: boulders and whatever else a world puts in the way.
         #: The ones near the car are in the physics world; the rest are not.
         from OpenGLContext.physics.props import PropColliders
-        self.props = PropColliders(self.physics, self._props())
+        self.props = PropColliders(self.physics, props)
         #: The other cars using the road, or None for a world with no course.
         self.traffic: Any = None
         if traffic and self.course is not None:
@@ -344,7 +405,7 @@ class RaceWorld:
                                    physics=self.physics,
                                    ground=self.ground_under)
 
-    def _props(self) -> list:
+    def _baked_props(self) -> list:
         """The obstacles this world carries, read off the tileset.
 
         Not off the tiles: tile geometry is level-of-detail geometry that
@@ -398,8 +459,29 @@ class RaceWorld:
         for road in self.roads:
             road.update(camera)
         self.props.update(camera)
+        if self.terrain is None:
+            return None
         return self.terrain.update_for_camera(
             camera, viewport_height, view_projection=view_projection)
+
+    @property
+    def floor(self) -> float:
+        """The height below which the world has been left behind, in metres.
+
+        A car that has gone through the ground has nothing left to land on and
+        nothing left to look at, so a game puts it back rather than let the
+        player watch it fall. The datum is whatever this world stands on -- the
+        tileset's own middle, the field's base, or the road itself -- and the
+        floor is well under it, because a viaduct's valley is a long way down
+        and a car on the deck has not fallen anywhere.
+        """
+        if self.terrain is not None:
+            return float(self.terrain.tileset.root.bounding_volume.center[1]) \
+                - LOST_BELOW
+        if self.field is not None:
+            return float(self.field.base) - LOST_BELOW
+        lowest = min(float(road.centreline[:, 1].min()) for road in self.courses)
+        return lowest - LOST_BELOW
 
     def view_projection(self, eye: Any, target: Any, aspect: float,
                         fov: float = FOV, near: float = 0.5,
@@ -432,6 +514,10 @@ class RaceWorld:
             self.stream(camera, viewport_height)
             if self._standing_on(camera, drop):
                 return True
+            if self.terrain is None:
+                # Nothing is on its way: a world with no tiles has all of its
+                # ground the moment it is built.
+                return False
             self.terrain.runtime.wait_for_loads(timeout=timeout / rounds)
             self.stream(camera, viewport_height)
             if self._standing_on(camera, drop):

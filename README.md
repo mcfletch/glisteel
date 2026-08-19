@@ -26,6 +26,7 @@ and through a bore where it does not. The second drives it.
 | mouse | steer, with `--mouse` |
 | `c` | cockpit / chase / bonnet camera |
 | `r` | put the car back on the track |
+| `n` | a fresh race, from the grid |
 | `F2` | screenshot |
 
 `glisteel --autopilot` drives itself, which is the quickest way to see a lap and
@@ -79,8 +80,13 @@ what makes it a *game*.
 | `camera.py` | where the player watches from |
 | `driver.py` | the autopilot: pure pursuit, and a speed the corner allows |
 | `race.py` | lap timing that a shortcut does not fool, and leaving the road |
-| `hud.py` | the four numbers a driver acts on |
-| `game.py` | the window, the loop, and the keys |
+| `run.py` | which part of the race this is, and what it lets through to the car |
+| `hud.py` | what the driver is told, and where on the screen it goes |
+| `session.py` | the run: the loop, the clock, and the rules about both |
+| `scenarios.py` | small pieces of road to drive, for testing and for tuning |
+| `scripted.py` | a drive written down: which controls are held, and when |
+| `trace.py` | what a drive did, as numbers, and the measures over them |
+| `game.py` | the window, the keys, and what is drawn |
 
 **The car is a model, and so is everything else on the road.** The vehicles in
 `glisteel/assets/cars/` are ours, built by `tools/cars.py` — a Blender script
@@ -158,8 +164,18 @@ can be eight of them for nothing measurable.
 **The steering keys wind a wheel on and off.** Left and right are a key each, so
 the raw input is full lock or none; held straight to the car that is a spin at
 speed. The keys drive a wheel that eases toward the held lock and back to centre
-instead, so a tap is a nudge and a hold builds to lock, and the lock the front
-wheels reach eases off as the car speeds up. `--mouse` steers with the pointer:
+instead, so a tap is a nudge and a hold builds to lock.
+
+**And the lock the front wheels reach falls with the square of the speed.** Full
+lock is a car park — five metres of turning circle — and the same input at a
+hundred and fifty is a request for a corner no tyre will hold. Falling this way
+(`steer_falloff_speed`, in the engine's `VehicleTuning`), what full lock asks for
+settles at about two g rather than growing with the speedometer: the turning
+circle is 5 m standing, 10 m at thirty-six km/h, 49 m at a hundred and ten, and
+87 m flat out. A touch of a key at speed is a lane change, and the same touch of
+the other key puts the car back.
+
+`--mouse` steers with the pointer:
 where it is across the window is where the wheel is, the way mouse-look turns a
 head, and it gives a position rather than a rate. The keys override the pointer
 while one is down.
@@ -227,6 +243,126 @@ pytest
 The suite runs headless and without a window: a car is numbers, a lap is
 numbers, and a camera is numbers. `tests/test_driver.py` puts a real car on a
 real circuit and asserts that the autopilot gets round it.
+
+**The run is separate from the window.** `Session` holds the game -- fixed-step
+physics with the controls sampled inside it, the camera, the lap timing, and the
+rules about leaving the road and getting stuck -- and imports no OpenGL. Build
+one, advance it a frame at a time, and read it back:
+
+```python
+from glisteel import scenarios
+from glisteel.session import Session
+
+session = Session(scenarios.chicane().world())
+for _ in range(600):
+    session.advance(1.0 / 60.0)
+print(session.readout().speed_kph, session.timing.current)
+```
+
+`game.py` is the window around that: it builds a session, hands it the keyboard,
+points the view where the session says and draws the result.
+
+### The race has parts
+
+A race is not one long moment of driving, and `Run` is which part of it is
+happening. Each part decides two things -- what reaches the car, and whether the
+lap clock runs:
+
+| | the car | the clock |
+|---|---|---|
+| `countdown` | held on the grid, brake down | stopped |
+| `racing` | everything the driver asks for | running |
+| `finished` | brought to a stop | stopped |
+| `ended` | brought to a stop | stopped |
+
+The start rig is five lamps a second apart, holding for 1.4 s with all five lit
+and then going out -- 6.4 s from the grid to the green. `--laps` is how many
+laps the race is, one by default, which is what a timed lap is; `--laps 0`
+drives on with no finish. A run that is over stays over: the car is not picked
+up and put back on the road, because a race that has ended and a car still being
+driven round the circuit are not both true. `r` puts the car back and carries
+on, `n` starts a fresh race from the grid.
+
+```python
+from glisteel.run import Run
+
+run = Run(laps=3)
+run.update(1.0 / 120.0, laps=len(session.timing.laps), ended=session.ended)
+throttle, brake, steer = run.allow(*whatever_the_driver_asked_for)
+```
+
+A scripted drive (`glisteel.trace.drive`) begins at the green light: what it
+measures is the car, and a start sequence in front of it would put every hold in
+the script six seconds later than it reads.
+
+**Whoever is driving is a `Controller`** -- one method, handed the session and
+the length of the step, answering with the throttle, the brake and the wheel.
+The autopilot is one, `KeyboardDriver` is one, and so is anything a test
+scripts. Setting `session.driver` mid-run hands the car over.
+
+### Scenarios
+
+A scenario is a few hundred metres of road with one question in it -- does the
+wheel come back to centre, does the car stay on the deck through a chicane, does
+it get over a crest with its wheels down -- built in the time a test can afford.
+Everything in one is the real thing: the same `Course` a baked world hands over,
+the engine's own swept carriageway collider, and a height field cut into chunks
+the way a field world's ground is. What is left out is the drawing, which is
+what makes one cost milliseconds rather than seconds.
+
+| Scenario | Road | What it is for |
+|---|---|---|
+| `straight` | 400 m, level | steering feel, centring, top speed, drag |
+| `verge` | a straight with boulders either side | surfaces, being mired, hitting something |
+| `sweeper` | 120 m radius | steady-state cornering, holding a line |
+| `chicane` | a left and a right | transient response, catching a slide |
+| `hairpin` | a straight into 28 m radius | braking, and what the car does at the apex |
+| `crest` | a rise the road goes over | whether the wheels stay down at the top |
+| `dip` | a hollow it runs through | the compression at the bottom |
+| `circuit` | 800 m closed | laps, sectors, the map, and traffic |
+
+```python
+scenarios.named('crest').world(traffic=4)   # a world to drive it in
+```
+
+### Driving to a script, and measuring what happened
+
+A player's input is a square wave — a key is down or it is not — and what makes
+that feel like a car is everything between the key and the road. `Script` writes
+a drive down and replays it through the same `KeyboardDriver` the window fills,
+so the wheel winds on and centres exactly as it does for a person:
+
+```python
+from glisteel.scripted import Script
+from glisteel.trace import drive
+
+trace = drive(session, Script.parse('throttle 0..12; left 6..6.15'), seconds=12.0)
+print(trace.report())
+```
+
+`drive` records a row for every physics step — where the car was, what the driver
+asked for, where the wheel and the front wheels were, where the camera looked,
+how far off the line it ran — and returns it as numpy columns. Recording at the
+step rather than at a frame rate is what makes the same script give the same
+numbers twice; passing `step=1/60` is how a measure is shown not to depend on the
+frame rate.
+
+| Measure | Is | In |
+|---|---|---|
+| `steering_rate` | the quickest the wheel moved | wheel units a second |
+| `time_to_centre` | how long the wheel took to come back to straight | seconds |
+| `camera_yaw_rate` | how fast the view swings | radians a second |
+| `camera_yaw_jerk` | how sharply that swing changes | radians a second squared |
+| `camera_bounce` | the eye's vertical acceleration | metres a second squared |
+| `lateral_g` | the hardest the car cornered | g |
+| `heading_change` | what a steering input actually bought | degrees |
+| `worst_off_line` | the furthest it ran from the middle of the road | metres |
+
+The noisy ones are read at the 95th percentile rather than at their peak, because
+what a driver feels is what happens nearly all the time and not one step of one
+bump. `tests/test_feel.py` writes budgets against them: each test is a drive
+somebody complained about, and the ones marked `xfail` are the defects still
+open — see `plans/GAMEPLAY-TEST-HARNESS.md`.
 
 ## Licence
 

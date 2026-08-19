@@ -107,6 +107,17 @@ class Autopilot:
                              else self.course.lane_point(index, self.lane))
         return found
 
+    def controls(self, session: Any, dt: float) -> tuple[float, float, float]:
+        """Drive the session's car: a :class:`~glisteel.session.Controller`.
+
+        What it looks at first is whatever is in front of it, because a driver
+        who knows the corners and not the traffic drives into the back of the
+        first car it catches.
+        """
+        found = session.traffic_ahead()
+        self.following(*(found if found is not None else (None, 0.0)))
+        return self.update(session.car)
+
     def update(self, car: Any) -> tuple[float, float, float]:
         """The throttle, brake and steer this driver would use right now."""
         position = np.asarray(car.position, dtype='d')

@@ -62,7 +62,13 @@ class CarSpec:
     tuning: VehicleTuning = field(default_factory=lambda: VehicleTuning(
         engine_force=9000.0, brake_force=16000.0, maximum_steer=0.52,
         steer_speed=3.2, rolling_resistance=0.02, downforce=6.0,
-        steer_falloff_speed=26.0,
+        # Full lock is half a radian, which is a car park; at speed the same
+        # input has to be a gentler turn or every touch of a key is a spin. The
+        # lock falls with the square of the speed against this
+        # (:meth:`~omi_physics.vehicle.VehicleTuning.steer_lock`), and this
+        # number is chosen so that full lock at the top end asks for about two
+        # g -- hard cornering, and inside what the tyres and the wings have.
+        steer_falloff_speed=10.0,
         # An electric drivetrain: all of it from a standstill, and constant
         # power from fifteen metres a second on, so the pull falls away as the
         # speed rises instead of shoving just as hard at a hundred and sixty.

@@ -1,7 +1,8 @@
 """The four numbers a driver acts on, and where they go."""
 
 
-from glisteel.hud import FAST_KPH, RaceHUD
+from glisteel.hud import FAST_KPH, HOME, RaceHUD
+from glisteel.run import COUNTDOWN, ENDED, FINISHED, RACING
 
 
 class _Lap:
@@ -112,3 +113,74 @@ def _laid_out(viewport=(1280, 720)):
     hud.show(speed_kph=120.0, timing=_Timing(current=12.0))
     hud.layout(viewport, FontMetrics(char_width=9, char_height=16))
     return hud
+
+
+class TestTheStartRig:
+    """Five lamps across the top, and only while there is a start to watch."""
+
+    def test_the_lamps_are_up_on_the_grid(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=COUNTDOWN, lit=2, lights=5)
+        assert bool(hud.lights.visible)
+
+    def test_and_show_how_much_of_the_rig_is_burning(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=COUNTDOWN, lit=3, lights=5)
+        assert (hud.lights.lit, hud.lights.count) == (3, 5)
+
+    def test_they_go_away_once_the_race_is_on(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=COUNTDOWN, lit=5, lights=5)
+        hud.show(speed_kph=40.0, phase=RACING, lit=0, lights=5)
+        assert not bool(hud.lights.visible)
+
+    def test_a_race_with_no_rig_shows_none(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=COUNTDOWN, lit=0, lights=0)
+        assert not bool(hud.lights.visible)
+
+
+class TestTheMiddleOfTheScreen:
+    def test_nothing_is_said_while_the_road_is_under_the_car(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=40.0, phase=RACING)
+        assert str(hud.warning.value) == ''
+
+    def test_leaving_the_road_is_said(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=40.0, phase=RACING, off=True)
+        assert str(hud.warning.value) == 'OFF TRACK'
+
+    def test_a_run_that_is_over_displaces_the_warning(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=ENDED, off=True, ended='mired off the road')
+        assert str(hud.warning.value) == 'MIRED OFF THE ROAD'
+
+    def test_finishing_says_so_with_the_time(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=FINISHED,
+                 timing=_Timing(best=_Lap(23.5)))
+        assert str(hud.warning.value) == '%s   1:23.500' % HOME
+
+    def test_finishing_without_a_time_still_says_so(self) -> None:
+        """A race whose laps were all abandoned still ends."""
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=FINISHED, timing=_Timing())
+        assert str(hud.warning.value) == HOME
+
+    def test_and_it_outranks_being_off_the_road(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=FINISHED, off=True,
+                 timing=_Timing(best=_Lap(23.5)))
+        assert str(hud.warning.value).startswith(HOME)
+
+    def test_a_finish_is_not_a_warning(self) -> None:
+        """Red is for something gone wrong; winning is not that."""
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=FINISHED, timing=_Timing(best=_Lap(23.5)))
+        assert not bool(hud.warning.critical)
+
+    def test_but_a_run_that_ended_badly_is(self) -> None:
+        hud = RaceHUD()
+        hud.show(speed_kph=0.0, phase=ENDED, ended='wrecked')
+        assert bool(hud.warning.critical)
