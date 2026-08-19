@@ -990,7 +990,7 @@ new files.
 |----|--------------|
 | T1 | **`mypy` is green on both packages** — 42 and 29 errors to none. Most were unresolved `OpenGLContext.*` imports; a narrow per-module override silences those and no others, which made eleven real errors visible, and they are fixed. `python_version` stays at 3.12 with the reason recorded: numpy's own stubs use 3.12 syntax, so checking against the 3.10 floor fails before reaching any code here |
 | T2 | Green, with C-pass |
-| T5 | The seven tests that drive a whole lap are marked `slow`; `-m "not slow"` is the working loop and a full run is still the default |
+| T5 | The seven tests that drive a whole lap are marked `slow`; `-m "not slow"` is the working loop and a full run is still the default. **Partly done**: 3 m 15 s becomes 2 m 25 s, which is a saving and is not yet a quick loop. The cost is spread more widely than the review's `--durations` list showed — the settle, the scenario worlds and the traffic drives each cost a little across many tests — so getting under a minute means marking more of them, or making a scenario world cheaper to stand up |
 | T6 | `race.__all__` names what the module has |
 | T7 | Landed with C2 |
 
@@ -1008,6 +1008,8 @@ new files.
   back deliberately: `scene.py` is being rewritten concurrently by the work
   `EDITOR-REMEDIATION.md` tracks, and these three changes belong in that pass
   rather than across it.
+- **T5's remainder** — the suite is 2 m 25 s without the slow marks and wants to
+  be under a minute. Standing up a scenario world is the next thing to measure.
 - **A\*, D\* — the P3 tables**, as ordinary tidying alongside other work.
 
 ## Suggested order of work
