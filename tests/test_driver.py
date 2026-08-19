@@ -145,6 +145,7 @@ class TestThePedals:
 
 
 class TestItActuallyGetsRound:
+    @pytest.mark.slow
     def test_it_drives_a_lap_of_a_flat_circuit(self) -> None:
         """The whole thing together: a real car, real physics, a real lap."""
         from glisteel.race import RaceTiming
@@ -166,6 +167,7 @@ class TestItActuallyGetsRound:
         assert timing.laps, "the autopilot did not complete a lap in 90 seconds"
         assert timing.laps[0].seconds < 90.0
 
+    @pytest.mark.slow
     def test_it_stays_on_the_road_while_it_does(self) -> None:
         world = PhysicsWorld()
         static_ground(world, size=2000.0)
@@ -257,10 +259,12 @@ class TestItGetsOverTheHills:
                 break
         return timing, worst
 
+    @pytest.mark.slow
     def test_it_completes_a_lap_over_the_crests(self) -> None:
         timing, _worst = self._drive()
         assert timing.laps, "the autopilot did not get round the hilly circuit"
 
+    @pytest.mark.slow
     def test_it_stays_on_the_road_over_them(self) -> None:
         _timing, worst = self._drive()
         assert worst < 18.0, "wandered %.1f m from the centreline" % worst
@@ -287,10 +291,12 @@ class TestHoldingTheLine:
                 worst = max(worst, course.nearest(car.position)[1])
         return worst
 
+    @pytest.mark.slow
     def test_it_holds_a_narrow_lane_round_a_bend(self) -> None:
         course = _oval(radius_x=200.0, radius_z=150.0)
         assert self._lap(course) < 3.0
 
+    @pytest.mark.slow
     def test_correcting_the_error_is_what_does_it(self) -> None:
         course = _oval(radius_x=200.0, radius_z=150.0)
         loose = DriverStyle(tracking=0.0)

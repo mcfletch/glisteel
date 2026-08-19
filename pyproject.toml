@@ -82,11 +82,23 @@ ignore = [
 "glisteel/game.py" = ["E402"]
 
 [tool.mypy]
+# 3.12 rather than the 3.10 floor in ``requires-python``: numpy's own stubs use
+# 3.12 type syntax, so checking against 3.10 fails before it reaches any code
+# here. What the floor promises is checked by the test suite, which runs on it.
 python_version = "3.12"
 warn_return_any = true
 warn_unused_ignores = true
 ignore_missing_imports = true
 disallow_untyped_defs = true
+
+# The engine and the physics ship no ``py.typed``, so mypy has nothing to check
+# their surface against. Saying so per package keeps the silence deliberate and
+# narrow: anything *else* that cannot be resolved is still an error worth
+# seeing, which a bare global ignore would hide.
+[[tool.mypy.overrides]]
+module = ["OpenGLContext.*", "OpenGLContext_editor.*", "omi_physics.*", "OpenGL.*"]
+ignore_missing_imports = true
+follow_untyped_imports = false
 
 [tool.pytest.ini_options]
 # The package as well as the tests: the modules teach with worked examples, and
@@ -95,3 +107,10 @@ disallow_untyped_defs = true
 testpaths = ["tests", "glisteel"]
 addopts = "-ra --doctest-modules"
 timeout = 300
+# A lap of a circuit is seconds of simulation whatever the machine, and the
+# handful of tests that drive one are most of what the suite costs. They are
+# marked rather than removed -- what they measure is the point of the harness --
+# so a working loop can be `-m "not slow"` and a full run is the default.
+markers = [
+    "slow: drives a whole lap or several; seconds rather than milliseconds",
+]

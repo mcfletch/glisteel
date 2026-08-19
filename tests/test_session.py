@@ -321,6 +321,7 @@ class TestWhatTheHudIsTold:
 
 
 class TestWhoIsDriving:
+    @pytest.mark.slow
     def test_the_autopilot_drives_it_round(self) -> None:
         """The same loop, with the driver swapped: a lap of a small circuit."""
         from glisteel.driver import Autopilot

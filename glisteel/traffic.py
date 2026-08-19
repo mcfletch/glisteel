@@ -198,7 +198,8 @@ class TrafficCar:
         """Where the car is: on its own side of the road, on the surface."""
         centre, right = self._frame()
         out = self.lane * self.heading + self._sideways * self.heading
-        return centre + right * out
+        at: np.ndarray = centre + right * out
+        return at
 
     def velocity(self) -> np.ndarray:
         """How fast it is going and which way, in metres per second."""
@@ -210,7 +211,8 @@ class TrafficCar:
         along = np.cross((0.0, 1.0, 0.0), right)
         length = float(np.linalg.norm(along))
         along = along / length if length > 1e-9 else np.array([0.0, 0.0, -1.0])
-        return along * self.heading
+        pointing: np.ndarray = along * self.heading
+        return pointing
 
     def heading_angle(self) -> float:
         """The yaw that turns the car's own mesh to face the way it is going.
@@ -310,7 +312,8 @@ class Traffic:
         self._look_ahead(at, speed)
         for car in self.cars:
             car.advance(dt)
-        keeping, leaving = [], []
+        keeping: list[TrafficCar] = []
+        leaving: list[TrafficCar] = []
         for car in self.cars:
             (keeping if float(np.linalg.norm(car.position() - at))
              <= self.reach * 1.25 else leaving).append(car)
@@ -318,11 +321,11 @@ class Traffic:
         for car in leaving:
             self._retire(car)
         while len(self.cars) < self.count:
-            car = self._spawn(at)
-            if car is None:
+            fresh = self._spawn(at)
+            if fresh is None:
                 break
-            self.cars.append(car)
-            self._show(car)
+            self.cars.append(fresh)
+            self._show(fresh)
         self._follow()
 
     def _look_ahead(self, at: Any, speed: float) -> None:

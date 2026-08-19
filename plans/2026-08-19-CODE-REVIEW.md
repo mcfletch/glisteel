@@ -30,8 +30,10 @@ performance profile in which **75 % of an editor redraw and 25 % of a game frame
 are spent recomputing constants**. All of it is local; none of it needs a
 redesign.
 
-**Status, 2026-08-19: the ten P1 correctness defects are fixed**, Red/Green,
-with 85 new tests pinning them — see §12. P2 and P3 are open.
+**Status, 2026-08-19: the P1 correctness defects and the measured P2/P3 items
+are fixed**, Red/Green throughout — see §12 for P1 and §13 for the rest. A frame
+of the game costs 29 % less than it did, a structure query over a terrain chunk
+172× less, and both type gates are green. What is left is §13's "still open".
 
 ---
 
@@ -61,7 +63,7 @@ column; §12 records what landed.
 | **C9** | Library and UI code raises `SystemExit`; picking a road-less track from the menu kills the game | `world.py:337`, `game.py:162`, `:650` | `test_world.py::TestAskingForAWorldThatIsNotThere` + `test_opening.py` (9) |
 | **C10** | The `records` doctest documents behaviour the code does not have — and **no doctest is ever run** | `records.py:12`; both `pyproject.toml` | `--doctest-modules` in both projects; 8 module doctests now run |
 
-### P2 — Performance (all measured; see §11)
+### P2 — Performance (all measured; see §11) — **landed, 2026-08-19**
 
 | ID | Finding | Where | Cost | Fix |
 |----|---------|-------|------|-----|
@@ -78,7 +80,7 @@ column; §12 records what landed.
 | **E11** | `Scenario._cache` is declared and never used; `world()` builds `course()` three times | `scenarios.py:100` | 2.1 ms per 200 `course()` calls | Use the field, or delete it and memoise `course()` |
 | **E12** | `Car._wheel_spin` accumulates without bound | `car.py:183` | Float precision decays over a long race | Wrap modulo 2π |
 
-### P2 — Security and untrusted input
+### P2 — Security and untrusted input — **landed, 2026-08-19**
 
 | ID | Finding | Where | Fix |
 |----|---------|-------|-----|
@@ -944,6 +946,69 @@ the same tree while this ran, and briefly showed two failures in
 DEF). That work landed during the session and those tests pass; nothing here
 touched it. C2 changed triangle winding, not DEF names, and the two are
 independent.
+
+## 13. What landed in the second pass — 2026-08-19
+
+The E, S and T items, Red/Green as before: every test written and seen to fail
+for the stated reason before the code changed. **130 further tests**, in eight
+new files.
+
+### Performance, measured before and after
+
+| | Before | After |
+|---|---|---|
+| `session.advance()`, 7.9 km circuit, six traffic cars, nothing drawn | 10.88 ms/frame | **7.71 ms** |
+| `Course.nearest()` within that | 0.76 ms/frame | **0.10 ms** |
+| Avoidable share of a frame | 25 % | **1 %** |
+| `Course.inside()` over 160 000 ground samples × 900 road points | 3 260 ms, 3 451 MB peak | **19 ms, 36 MB** |
+| `Session.restart()` | 61 ms, 167 physics steps | **25 ms, 41 steps** |
+
+| ID | What changed | Tests |
+|----|--------------|-------|
+| E3 | `stations`, `segments`, `ground_line` and `radii` are `cached_property` on `Course`, with `moved()` to clear them; `nearest()` keeps its last answer, because within one physics step the lap timing, the off-road watch, the driver and the steering aid all ask about a car that has not moved between them | 15 |
+| E5 | The tileset is read and parsed once. `courses_in`, `_baked_props` and `_baked_luminaires` take a document rather than a path | 4 |
+| E6 | `Course.inside()` rules out samples outside the run's own bounding box, then measures what is left in bounded chunks, so the intermediate is a slice rather than samples × road points | 11 |
+| E7 | The car is put where the road is rather than six metres over it, and the settle stops once it is standing. A restart no longer simulates a second of free fall while the player waits | 9 |
+| E8 | `Course.radii` is the road's own curvature, worked out once; `target_speed` takes one pass over it; `update` hands `steering` the index it already has | 10 |
+| E9 | Traffic asks the course where the player is once rather than twice, and answers a direction's worth of cars in one array operation rather than every car against every other | 8 |
+| E10 | The per-frame function-local imports are hoisted; `tests/test_imports.py` names the functions that run at the frame rate and fails on an import inside one | 23 |
+| E11 | `Scenario._cache` — declared and unused — now holds the course, which `world()` wanted three times | 4 |
+| E12 | The wheels' roll is kept inside one turn | 2 |
+
+### Security and untrusted input
+
+| ID | What changed | Tests |
+|----|--------------|-------|
+| S1 | A manifest names files *inside* the track it came with. `../../..` and absolute paths resolve outside it and are refused with a warning, which reads as a track with no picture — the same as a missing one | 5 |
+| S3 | Lamp positions out of a tileset are checked: a whole number of triples, numbers rather than strings, and fewer than :data:`MOST_LUMINAIRES`. Each refusal says what was wrong | 5 |
+| S4 | `Records.save` writes beside the file and moves it on, in UTF-8 and as its own characters — the same as `Project.save` (C7), which had left the two inconsistent | 5 |
+| S5 | Landed with C7 | — |
+
+### Gates
+
+| ID | What changed |
+|----|--------------|
+| T1 | **`mypy` is green on both packages** — 42 and 29 errors to none. Most were unresolved `OpenGLContext.*` imports; a narrow per-module override silences those and no others, which made eleven real errors visible, and they are fixed. `python_version` stays at 3.12 with the reason recorded: numpy's own stubs use 3.12 syntax, so checking against the 3.10 floor fails before reaching any code here |
+| T2 | Green, with C-pass |
+| T5 | The seven tests that drive a whole lap are marked `slow`; `-m "not slow"` is the working loop and a full run is still the default |
+| T6 | `race.__all__` names what the module has |
+| T7 | Landed with C2 |
+
+### Still open
+
+- **T3 — `Any` on almost every parameter.** The four `Protocol`s (a course, a
+  car, a physics world, a driveable session) are the largest remaining quality
+  item. `mypy` being green makes this worth doing rather than academic: the
+  gate can now hold what the Protocols would assert.
+- **T4 — the window layer.** 289 of `game.py`'s 368 statements are still behind
+  `# pragma: no cover`, and it still reports 100 %. Three decisions were hoisted
+  in the first pass (`bindings`, `opening_fault`, `would_lose_work`); the rest
+  of `OnInit`, `_settle` and `SwapBuffers` remain.
+- **E1, E2, E4 — the editor's redraw**, worth 261 ms → sub-millisecond. Held
+  back deliberately: `scene.py` is being rewritten concurrently by the work
+  `EDITOR-REMEDIATION.md` tracks, and these three changes belong in that pass
+  rather than across it.
+- **A\*, D\* — the P3 tables**, as ordinary tidying alongside other work.
 
 ## Suggested order of work
 

@@ -78,8 +78,8 @@ class Luminaires:
         """
         if not len(self.lamps) or not self.count:
             return []
-        away = np.linalg.norm(self.lamps - np.asarray(position, dtype='d')[:3],
-                              axis=1)
+        away: np.ndarray = np.linalg.norm(
+            self.lamps - np.asarray(position, dtype='d')[:3], axis=1)
         within = np.flatnonzero(away <= self.reach)
         if not len(within):
             return []
@@ -88,7 +88,8 @@ class Luminaires:
 
     def at(self, index: int) -> np.ndarray:
         """Where one lamp hangs."""
-        return self.lamps[int(index)]
+        lamp: np.ndarray = self.lamps[int(index)]
+        return lamp
 
 
 class Headlights:
@@ -139,4 +140,5 @@ class Headlights:
         length = float(np.linalg.norm(ahead))
         ahead = ahead / length if length > 1e-9 else np.array([0.0, 0.0, -1.0])
         beam = ahead + np.array([0.0, -self.dip, 0.0])
-        return beam / float(np.linalg.norm(beam))
+        aimed: np.ndarray = beam / float(np.linalg.norm(beam))
+        return aimed

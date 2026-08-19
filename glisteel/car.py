@@ -224,7 +224,7 @@ class Car:
         physics, so nothing has to be added or removed as the player changes
         view.
         """
-        return self._shell.whichChoice < 0
+        return bool(self._shell.whichChoice < 0)
 
     @hidden.setter
     def hidden(self, value: bool) -> None:

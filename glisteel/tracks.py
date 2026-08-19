@@ -183,7 +183,8 @@ def remember_picture(track: Track, filename: str = PICTURE) -> str | None:
     if manifest is None:
         return None
     manifest.picture = filename
-    return write_manifest(track.directory, manifest)
+    written: str | None = write_manifest(track.directory, manifest)
+    return written
 
 
 def _named_after(directory: str) -> str:
@@ -211,4 +212,4 @@ def _beside(directory: str, relative: Any) -> str | None:
         log.warning('%s names %r, which is outside the track it came with',
                     directory, str(relative))
         return None
-    return where if os.path.exists(where) else None
+    return str(where) if os.path.exists(where) else None

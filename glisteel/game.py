@@ -117,6 +117,9 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     headlights: Any = None
     _beam: Any = None
     _lamps: Any = None
+    #: The video being written, or None. Declared because the mixin that owns it
+    #: is untyped, and mypy cannot otherwise tell what it holds.
+    recorder: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
     addEventHandler: Any
@@ -695,7 +698,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _default_world() -> str:
     """The world the command line assumes when nobody names one."""
-    return build_parser().get_default('world')
+    return str(build_parser().get_default('world'))
 
 
 def _run(options: Any, width: int, height: int) -> int:  # pragma: no cover

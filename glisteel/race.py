@@ -17,7 +17,9 @@ from typing import Any
 import numpy as np
 from omi_physics.vehicle import Surface
 
-__all__ = ['Lap', 'RaceTiming', 'OffRoad', 'TARMAC', 'VERGE', 'ROUGH']
+__all__ = ['Collisions', 'Lap', 'OffRoad', 'RaceTiming',
+           'LOST', 'PATIENCE', 'ROUGH', 'SECTORS', 'SURVIVABLE',
+           'TARMAC', 'VERGE', 'closing_speed', 'off_course']
 
 #: How many sectors a circuit is divided into for the purpose of saying a lap
 #: was completed rather than cut. Enough that a shortcut across the middle
