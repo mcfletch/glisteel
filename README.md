@@ -27,6 +27,7 @@ and through a bore where it does not. The second drives it.
 | `c` | cockpit / chase / bonnet camera |
 | `r` | put the car back on the track |
 | `n` | a fresh race, from the grid |
+| `escape` | the menu |
 | `F2` | screenshot |
 
 `glisteel --autopilot` drives itself, which is the quickest way to see a lap and
@@ -81,6 +82,9 @@ what makes it a *game*.
 | `driver.py` | the autopilot: pure pursuit, and a speed the corner allows |
 | `race.py` | lap timing that a shortcut does not fool, and leaving the road |
 | `run.py` | which part of the race this is, and what it lets through to the car |
+| `tracks.py` | the worlds a player can choose between, and where their files live |
+| `records.py` | the best times driven on each track |
+| `menu.py` | the screens around the outside of the race |
 | `hud.py` | what the driver is told, and where on the screen it goes |
 | `session.py` | the run: the loop, the clock, and the rules about both |
 | `scenarios.py` | small pieces of road to drive, for testing and for tuning |
@@ -294,6 +298,46 @@ throttle, brake, steer = run.allow(*whatever_the_driver_asked_for)
 A scripted drive (`glisteel.trace.drive`) begins at the green light: what it
 measures is the car, and a start sequence in front of it would put every hold in
 the script six seconds later than it reads.
+
+### Tracks, and the times driven on them
+
+Starting the game with no arguments is a reasonable thing to do: with no world
+named on the command line it offers whatever is in the library, and with exactly
+one world in it, drives that.
+
+A world is a directory of tiles plus a `world.json` manifest beside them, which
+`oglc-bake` writes: what the world is called, how long its road is, how much of
+that is viaduct, bore and causeway, and which picture shows it. The library is
+every such directory under
+
+```
+$XDG_CONFIG_HOME/glisteel/tracks/      # or %APPDATA%\glisteel\tracks on Windows
+```
+
+which is `OpenGLContext.userpaths` — the same rule the engine's settings and
+asset cache follow. Bake into it and the game offers it:
+
+```bash
+oglc-bake --output ~/.config/glisteel/tracks/ashdown-forest --seed 11
+oglc-bake --output ~/.config/glisteel/tracks/beacon-hill --seed 23 --extent 3072
+glisteel                       # both are offered, by their own pictures
+```
+
+**A track takes its own picture.** `glisteel <tileset> --picture` drives the
+world, photographs the car on it from behind, and writes the picture's name into
+the manifest, which is what the chooser then shows.
+
+**Best times** are kept per track in `times.json` beside the library — five per
+track, quickest first, with the day each was driven. A lap is offered to the
+table when a race finishes and the table answers where it came, which is what
+the finish screen says.
+
+```python
+from glisteel.records import Records
+table = Records()
+table.offer('ashdown forest', 239.407)     # 1, if it is the quickest so far
+table.save()
+```
 
 **Whoever is driving is a `Controller`** -- one method, handed the session and
 the length of the step, answering with the throttle, the brake and the wheel.

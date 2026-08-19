@@ -13,6 +13,7 @@ Keys::
     c                   cockpit / chase / bonnet camera
     r                   put the car back on the track
     n                   a fresh race, from the grid
+    escape              the menu
     F2                  save a screenshot
 
 The world streams itself in around the car and hands each tile it loads to the
@@ -47,12 +48,15 @@ from OpenGLContext.video.recorder import RecordingMixin  # noqa: E402
 from OpenGLContext.viewer import environment  # noqa: E402
 from OpenGLContext.viewer.sceneviewer import ViewerContext  # noqa: E402
 
+from glisteel import menu, tracks  # noqa: E402
 from glisteel.camera import VIEWS  # noqa: E402
 from glisteel.car import CarSpec  # noqa: E402
 from glisteel.driver import Autopilot  # noqa: E402
 from glisteel.hud import RaceHUD  # noqa: E402
+from glisteel.records import Records  # noqa: E402
 from glisteel.session import RACE_LAPS, Session  # noqa: E402
 from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel  # noqa: E402
+from glisteel.traffic import DEFAULT_TRAFFIC  # noqa: E402
 from glisteel.world import RaceWorld  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -68,6 +72,11 @@ WORLD_LIGHT_SCALE = 120.0
 #: side of a baked world is haze rather than a line where the ground stops.
 VISIBILITY = 1800.0
 
+#: How long a track is driven for before its own picture is taken, in seconds.
+#: Far enough off the grid that the picture is of the world rather than of a
+#: start line, which every world has and none is recognised by.
+PICTURE_SECONDS = 25.0
+
 
 class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     """The game window: a run to advance, a scene to draw, and keys to deliver."""
@@ -79,6 +88,12 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     #: Whoever is at the keyboard, or None while the autopilot is driving.
     keyboard: KeyboardDriver | None = None
     hud: Any = None
+    #: Which world is loaded, or None while the menu is up.
+    track: Any = None
+    #: The player's best times, kept between sessions.
+    records: Any = None
+    #: Whether the finish screen has been shown for the run now over.
+    _told: bool = False
     # Supplied by the interactive runtime base.
     platform: Any
     addEventHandler: Any
@@ -90,36 +105,159 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         # replaces it with one that advances a frame at a time, and the car has
         # to move on that same clock or the video is not what was driven.
         self._clock = systemTime()
-        world = RaceWorld(self.config.world, max_sse=self.config.sse,
+        self.records = Records()
+        self.hud = RaceHUD()
+        self.addHUDLayer(self.hud)
+        self._show_hud()
+        self._bind_keys()
+        self.sg = SceneGraph(children=[environment.horizon_background()])
+        track = self._opening_track()
+        if track is None:
+            self.show_menu()
+        else:
+            self.open(track)
+
+    def _opening_track(self) -> Any:             # pragma: no cover - needs a window
+        """Which world to open, or None to offer a choice.
+
+        The one named on the command line if it is there; otherwise the
+        player's library, which is offered rather than guessed at -- except
+        where it holds exactly one, since choosing between one thing is not a
+        choice.
+        """
+        found = tracks.Track.opening(self.config.world)
+        if found is not None:
+            return found
+        library = tracks.library()
+        return library[0] if len(library) == 1 else None
+
+    def open(self, track: Any) -> None:          # pragma: no cover - needs a window
+        """Load a world and stand a car on its grid."""
+        self.close()
+        world = RaceWorld(track.tileset, max_sse=self.config.sse,
                           traffic=getattr(self.config, 'traffic', 0))
         if world.course is None:
             raise SystemExit(
                 "%s carries no roads, so there is nothing to race on. Bake a "
-                "world with a circuit in it." % self.config.world)
+                "world with a circuit in it." % track.tileset)
+        self.track = track
         self.session = Session(world, CarSpec(),
                                view=getattr(self.config, 'view', None) or VIEWS[0],
                                laps=getattr(self.config, 'laps', RACE_LAPS))
         self.session.driver = self._driver()
+        self._told = False
         # The engine's own sky and light rig, rather than one written here: a
         # world baked for the viewer is lit the way the viewer lights it, and a
         # game that invents its own rig renders the same tiles differently.
         # What a race adds to it is its own air, because a baked world is a few
         # kilometres across and then it stops.
-        self.sg = SceneGraph(children=[
+        self.sg.children = [
             environment.horizon_background(),
             race_fog(),
             *ViewerContext.defaultLights(WORLD_LIGHT_SCALE),
             world.terrain,
             self.session.car.node,
-        ])
+        ]
         if world.traffic is not None:
             # Mounted once; the cars under it come and go as the player passes.
             self.sg.children.append(world.traffic.node)
-        self.hud = RaceHUD()
-        self.hud.visible = self.config.hud
         self.hud.route(world.course)
-        self.addHUDLayer(self.hud)
-        self._bind_keys()
+        self._show_hud()
+
+    def close(self) -> None:                     # pragma: no cover - needs a window
+        """Put away whatever world is loaded."""
+        if self.session is not None:
+            self.session.world.shutdown()
+        self.session = None
+        self.sg.children = [environment.horizon_background()]
+        self._show_hud()
+
+    def _show_hud(self) -> None:                 # pragma: no cover - needs a window
+        """The read-outs belong to a car. With no world there is nothing to read."""
+        if self.hud is not None:
+            self.hud.visible = bool(self.config.hud and self.session is not None)
+
+    # -- the screens -----------------------------------------------------------
+
+    def show_menu(self, event: Any = None) -> None:   # pragma: no cover - a window
+        """The menu, over whatever is behind it.
+
+        A second one pushed over the first would leave two, so an open one is
+        found rather than replaced.
+        """
+        if self.overlays.named('menu') is not None:
+            return
+        racing = self.session is not None
+        panel = menu.main_menu(
+            on_drive=self._on_drive, on_tracks=self.show_tracks,
+            on_settings=self._on_settings, on_quit=self._on_quit,
+            on_resume=self._on_resume if racing else None,
+            subtitle=self.track.name if self.track is not None else '')
+        panel.name = 'menu'
+        self.pushOverlay(panel)
+
+    def show_tracks(self) -> None:               # pragma: no cover - needs a window
+        """The library, as a band of pictures. Replaces the menu, not over it."""
+        self._drop_menu()
+        found = tracks.library()
+        best = {track.key: self.records.record(track.key) for track in found}
+        self.pushOverlay(menu.track_screen(
+            found, chosen=self.track,
+            records={key: one for key, one in best.items() if one is not None},
+            on_choose=self._on_track, on_cancel=self.show_menu))
+
+    def show_finish(self, result: Any, place: Any) -> None:  # pragma: no cover
+        """What the race came to, and what to do next.
+
+        Over the world it was driven in and nothing else: a menu left standing
+        behind this would be two screens asking at once.
+        """
+        self._drop_menu()
+        key = self.track.key if self.track is not None else ''
+        self.pushOverlay(menu.finish_screen(
+            result, place=place, records=self.records.best(key),
+            track=self.track, on_again=self._on_again,
+            on_tracks=self.show_tracks, on_quit=self._on_quit))
+
+    def _drop_menu(self) -> None:                # pragma: no cover - needs a window
+        panel = self.overlays.named('menu')
+        if panel is not None:
+            self.overlays.remove(panel)
+
+    def _on_resume(self) -> None:                # pragma: no cover - needs a window
+        self._drop_menu()
+
+    def _on_drive(self) -> None:                 # pragma: no cover - needs a window
+        self._drop_menu()
+        if self.session is None:
+            self.show_tracks()
+        else:
+            self.session.restart()
+
+    def _on_again(self) -> None:                 # pragma: no cover - needs a window
+        if self.session is not None:
+            self.session.restart()
+        self._told = False
+
+    def _on_track(self, track: Any) -> None:     # pragma: no cover - needs a window
+        self.open(track)
+
+    def _on_settings(self) -> None:              # pragma: no cover - needs a window
+        from OpenGLContext.ui import settings
+        self._drop_menu()
+        settings.open_settings(self)
+
+    def _on_quit(self) -> None:                  # pragma: no cover - needs a window
+        self.OnQuit()
+
+    def _record(self, result: Any) -> Any:       # pragma: no cover - needs a window
+        """Offer this race's best lap to the table; answer where it came."""
+        if result.seconds is None or self.track is None:
+            return None
+        place = self.records.offer(self.track.key, result.seconds)
+        if place is not None:
+            self.records.save()
+        return place
 
     def _driver(self) -> Any:                    # pragma: no cover - needs a window
         """Whoever is driving: the autopilot, or whoever is at the keyboard."""
@@ -141,6 +279,8 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.addEventHandler('keypress', name='c', function=self._on_camera)
         self.addEventHandler('keypress', name='r', function=self._on_reset)
         self.addEventHandler('keypress', name='n', function=self._on_restart)
+        self.addEventHandler('keyboard', name='<escape>', state=1,
+                             function=self.show_menu)
 
     # -- input -----------------------------------------------------------------
 
@@ -164,17 +304,21 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         wheel.moved(int(event.getPickPoint()[0]))
 
     def _on_camera(self, event: Any) -> None:    # pragma: no cover - needs a window
-        assert self.session is not None
+        if self.session is None:
+            return
         self.session.camera.cycle()
         self.triggerRedraw(1)
 
     def _on_reset(self, event: Any) -> None:     # pragma: no cover - needs a window
-        assert self.session is not None
+        if self.session is None:
+            return
         self.session.return_to_track()
 
     def _on_restart(self, event: Any) -> None:   # pragma: no cover - needs a window
-        assert self.session is not None
+        if self.session is None:
+            return
         self.session.restart()
+        self._told = False
 
     # -- the frame -------------------------------------------------------------
 
@@ -182,7 +326,8 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         now = systemTime()
         elapsed = now - self._clock
         self._clock = now
-        self.advance(elapsed)
+        if self.session is not None:
+            self.advance(elapsed)
         self.triggerRedraw(1)
         return 1
 
@@ -193,6 +338,19 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         pose = self.session.advance(elapsed)
         self._aim(pose)
         self._update_hud()
+        self._tell_them_how_it_went()
+
+    def _tell_them_how_it_went(self) -> None:    # pragma: no cover - needs a window
+        """Put the finish up, once, when the race stops being one."""
+        assert self.session is not None
+        result = self.session.result()
+        if result is None:
+            self._told = False
+            return
+        if self._told:
+            return
+        self._told = True
+        self.show_finish(result, self._record(result))
 
     def _aim(self, pose: Any) -> None:           # pragma: no cover - needs a window
         from OpenGLContext import quaternion
@@ -225,6 +383,12 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             result = super().SwapBuffers(*args)
             self.setCurrent()
             sys.stdout.write('captured %s\n' % (self.config.capture,))
+            wanted = getattr(self.config, 'picture_track', None)
+            if wanted is not None:
+                from glisteel import tracks
+                where = tracks.remember_picture(wanted)
+                if where is not None:
+                    sys.stdout.write('recorded it in %s\n' % (where,))
             # What the drive cost, machine-readably: a picture that is unchanged
             # while the frame rate has halved is still a regression, and the
             # numbers in the README are measured this way.
@@ -247,8 +411,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         super().OnQuit(*args)
 
     def _shutdown(self) -> None:                 # pragma: no cover - needs a window
-        if self.session is not None:
-            self.session.world.shutdown()
+        self.close()
 
 
 def race_fog() -> Any:
@@ -271,7 +434,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__[__doc__.index('Keys::'):__doc__.index('The world streams')])
     parser.add_argument('world', nargs='?', default='baked-world/tileset.json',
-                        help='the tileset.json of a baked world '
+                        help='the tileset.json of a baked world. Without one, '
+                             'the game offers whatever is in the track library '
                              '(default: %(default)s)')
     parser.add_argument('--sse', type=float, default=12.0,
                         help='screen-space error the world refines to; lower is '
@@ -284,10 +448,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--laps', type=int, default=RACE_LAPS, metavar='N',
                         help='how many laps the race is; 0 drives on with no '
                              'finish (default: %(default)s)')
-    parser.add_argument('--traffic', type=int, default=0, metavar='CARS',
-                        help='how many other cars are on the road at once; '
-                             'the default is an empty circuit, which is what a '
-                             'timed lap is')
+    parser.add_argument('--traffic', type=int, default=DEFAULT_TRAFFIC,
+                        metavar='CARS',
+                        help='how many other cars are on the road at once. '
+                             'Traffic is what makes one lap different from the '
+                             'last; 0 is an empty circuit, which is what a '
+                             'timed lap is (default: %(default)s)')
     parser.add_argument('--autopilot', action='store_true',
                         help='let the car drive itself round the circuit')
     parser.add_argument('--size', default='1280x720', metavar='WxH',
@@ -295,6 +461,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--view', choices=VIEWS, default=VIEWS[0],
                         help='which view to start in, which `c` then cycles '
                              '(default: %(default)s)')
+    parser.add_argument('--picture', action='store_true',
+                        help="take this track's own picture: drive it, "
+                             'photograph the car on it, and record the picture '
+                             'in the world manifest so a chooser can show it')
     parser.add_argument('--capture', metavar='PATH',
                         help='render to PATH (PNG) once the world has settled, '
                              'then exit')
@@ -332,6 +502,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - needs a wi
     options = build_parser().parse_args(argv)
     width, _, height = options.size.partition('x')
     GlisteelContext.config = options
+    if options.picture:
+        _picture(options, int(width), int(height))
+        return 0
     if options.capture:
         _capture(options, int(width), int(height))
         return 0
@@ -369,6 +542,27 @@ def _record(options: Any, width: int, height: int) -> None:  # pragma: no cover
     RecordingContext.ContextMainLoop(size=(width, height))
 
 
+def _picture(options: Any, width: int, height: int) -> None:  # pragma: no cover
+    """Take a track's own picture and record it in the world's manifest.
+
+    A chooser shows each world by what it looks like, and only the world can
+    say what that is. So the game drives it -- a car going somewhere, from
+    behind, which is the view a player recognises the place from -- photographs
+    that, and writes the picture's name into the manifest beside the tileset.
+    """
+    from glisteel import tracks
+    track = tracks.Track.opening(options.world)
+    if track is None:
+        raise SystemExit('%s is not a world to photograph' % options.world)
+    options.capture = os.path.join(track.directory, tracks.PICTURE)
+    options.view = 'chase'
+    options.autopilot = True
+    if not options.drive_seconds:
+        options.drive_seconds = PICTURE_SECONDS
+    options.picture_track = track
+    _capture(options, width, height)
+
+
 def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
     """Render one frame of the game to a file and exit.
 
@@ -384,8 +578,7 @@ def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
         def OnInit(self) -> None:
             self._capture = None
             super().OnInit()
-            assert self.session is not None
-            if options.drive_seconds:
+            if options.drive_seconds and self.session is not None:
                 # A picture of a car going somewhere is not a picture of a
                 # standing start, so the lights are dropped and the throttle
                 # goes down. Without it the picture is of the grid, which is

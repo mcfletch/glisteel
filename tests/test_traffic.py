@@ -17,6 +17,7 @@ from omi_physics.world import PhysicsWorld
 from glisteel import models
 from glisteel.traffic import (
     CRUISING,
+    DEFAULT_TRAFFIC,
     PULLING_OFF,
     SLOWING,
     Traffic,
@@ -615,3 +616,67 @@ def _names(node, out=None):
 def _material(traffic, car, name):
     scene = traffic.art_of(car)
     return scene.materials[name].baseColor
+
+
+class TestOneModelPaintedManyWays:
+    """A road's worth of traffic is a handful of versions of five models.
+
+    Reading and parsing a ``.glb`` costs about a frame, and cars are put out and
+    retired the whole way round a lap -- so a car that loaded its own art would
+    arrive with a stutter every time one did. The paint comes from a fixed
+    palette, so there is a small number of (model, colour) pairs however many
+    cars are on the road.
+    """
+
+    def _road(self, count=8):
+        traffic = Traffic(_ring(), count=count, seed=3)
+        traffic.update(traffic.course.point(0), 0.1)
+        return traffic
+
+    def test_two_cars_of_a_kind_and_a_colour_share_one_scene(self):
+        traffic = self._road()
+        by_look = {}
+        for car in traffic.cars:
+            by_look.setdefault((car.kind.name, car.paint), []).append(
+                traffic.art_of(car))
+        shared = [scenes for scenes in by_look.values() if len(scenes) > 1]
+        assert all(scene is scenes[0] for scenes in shared for scene in scenes)
+
+    def test_there_are_never_more_scenes_than_kinds_times_colours(self):
+        traffic = self._road(count=20)
+        scenes = {id(traffic.art_of(car)) for car in traffic.cars}
+        assert len(scenes) <= len(models.TRAFFIC) * 6
+
+    def test_a_car_is_painted_the_colour_it_asked_for(self):
+        traffic = self._road()
+        for car in traffic.cars:
+            scene = traffic.art_of(car)
+            if scene is None:
+                continue
+            paint = scene.materials.get(models.PAINT)
+            if paint is not None:
+                assert tuple(paint.baseColor)[:3] == pytest.approx(car.paint)
+
+    def test_every_car_still_gets_its_own_place_to_stand(self):
+        """Shared art, separate transforms: they are in different places."""
+        traffic = self._road()
+        nodes = [id(traffic.node_of(car)) for car in traffic.cars]
+        assert len(set(nodes)) == len(nodes)
+
+    def test_all_of_them_are_mounted(self):
+        traffic = self._road()
+        assert len(traffic.node.children) == len(traffic.cars)
+
+
+class TestTheRoadIsNotEmpty:
+    def test_a_road_carries_traffic_unless_it_is_told_not_to(self):
+        """Traffic is what makes one lap different from the last one."""
+        assert DEFAULT_TRAFFIC > 0
+
+    def test_and_the_game_starts_with_that_much(self):
+        from glisteel.game import build_parser
+        assert build_parser().parse_args(['w.json']).traffic == DEFAULT_TRAFFIC
+
+    def test_an_empty_circuit_is_still_askable_for(self):
+        from glisteel.game import build_parser
+        assert build_parser().parse_args(['w.json', '--traffic', '0']).traffic == 0

@@ -346,3 +346,54 @@ class TestWhoIsDriving:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestHowARunCameOut:
+    """What a finish screen is made of, and what a record is offered from."""
+
+    def test_a_race_still_being_driven_has_no_result(self) -> None:
+        assert _session(scenarios.circuit()).result() is None
+
+    def test_a_race_driven_home_has_one(self) -> None:
+        session = _session(scenarios.circuit())
+        session.run.update(0.0, laps=session.run.laps)
+        assert session.result() is not None
+
+    def test_and_it_is_a_finish_rather_than_a_reason(self) -> None:
+        session = _session(scenarios.circuit())
+        session.run.update(0.0, laps=session.run.laps)
+        assert session.result().finished
+
+    def test_a_run_that_ended_carries_why(self) -> None:
+        session = _session(scenarios.circuit())
+        session.run.update(0.0, ended='mired off the road')
+        result = session.result()
+        assert (result.finished, result.outcome) == (False, 'mired off the road')
+
+    def test_a_race_with_no_lap_completed_has_no_time(self) -> None:
+        session = _session(scenarios.circuit())
+        session.run.update(0.0, ended='wrecked')
+        assert session.result().seconds is None
+
+    def test_a_completed_lap_is_the_time_it_carries(self) -> None:
+        from glisteel.race import Lap
+        session = _session(scenarios.circuit())
+        session.timing.laps.append(Lap(number=1, seconds=84.115))
+        session.run.update(0.0, laps=1)
+        assert session.result().seconds == pytest.approx(84.115)
+
+    def test_and_the_quickest_of_several(self) -> None:
+        from glisteel.race import Lap
+        session = _session(scenarios.circuit(), laps=3)
+        for number, seconds in enumerate((90.0, 84.1, 88.0), start=1):
+            session.timing.laps.append(Lap(number=number, seconds=seconds))
+        session.run.update(0.0, laps=3)
+        assert session.result().seconds == pytest.approx(84.1)
+
+    def test_it_says_how_many_laps_were_driven(self) -> None:
+        from glisteel.race import Lap
+        session = _session(scenarios.circuit(), laps=2)
+        for number in (1, 2):
+            session.timing.laps.append(Lap(number=number, seconds=90.0))
+        session.run.update(0.0, laps=2)
+        assert session.result().laps == 2

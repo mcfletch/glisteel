@@ -35,7 +35,8 @@ from glisteel.run import COUNTDOWN, Run
 
 log = logging.getLogger(__name__)
 
-__all__ = ['Controller', 'Readings', 'Session', 'AHEAD_REACH', 'MAXIMUM_CATCHUP',
+__all__ = ['Controller', 'Readings', 'Result', 'Session', 'AHEAD_REACH',
+           'MAXIMUM_CATCHUP',
            'PHYSICS_STEP', 'RACE_LAPS', 'STUCK_SECONDS', 'STUCK_SPEED']
 
 #: The physics step. Fixed, and finer than a frame: a vehicle held up by
@@ -115,6 +116,25 @@ class Readings:
     lights: int = 0
 
 
+@dataclass
+class Result:
+    """How a run came out, once there is an answer.
+
+    ``outcome`` is why it stopped being a race, or None for one driven home;
+    ``seconds`` is the quickest lap of it, or None where none was completed --
+    a run can end without a time, and that is a result too.
+    """
+
+    outcome: str | None = None
+    seconds: float | None = None
+    laps: int = 0
+
+    @property
+    def finished(self) -> bool:
+        """Whether the race was driven home rather than stopped."""
+        return self.outcome is None
+
+
 class Session:
     """One run of the game: build it, then :meth:`advance` it a frame at a time.
 
@@ -185,6 +205,20 @@ class Session:
             off=self.watch.off, ended=self.ended, at=self.car.position,
             others=[car.position() for car in others],
             phase=self.run.phase, lit=self.run.lit, lights=self.run.lights)
+
+    def result(self) -> Result | None:
+        """How the run came out, or None while it is still a race.
+
+        What a finish screen is made of and what a record is offered from, so
+        neither has to reach into the clocks and the watchers to work out what
+        happened.
+        """
+        if not self.run.over:
+            return None
+        best = self.timing.best
+        return Result(outcome=self.run.outcome,
+                      seconds=best.seconds if best is not None else None,
+                      laps=len(self.timing.laps))
 
     def traffic_ahead(self, reach: float = AHEAD_REACH
                       ) -> tuple[float, float] | None:

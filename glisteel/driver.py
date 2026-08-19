@@ -43,6 +43,12 @@ LOOK_AHEAD_SECONDS = 0.6
 BRAKING_SECONDS = 2.4
 BRAKING_METRES = 30.0
 
+#: What to assume about a car that will not say: an ordinary saloon's wheelbase
+#: in metres, and a front-wheel angle at full lock in radians. Only reached for
+#: something that is not a raycast vehicle, which is a test double.
+WHEELBASE = 2.6
+STEER_LOCK = 0.55
+
 
 @dataclass
 class DriverStyle:
@@ -59,8 +65,11 @@ class DriverStyle:
     grip: float = 0.95
     margin: float = 1.0
     maximum_speed: float = 46.0
-    #: How hard it steers per radian of error, and the most it will ask for.
-    steering_gain: float = 1.8
+    #: How eagerly it turns towards where it is going, as a multiple of the
+    #: heading error. One is the geometry's own answer -- pure pursuit, which
+    #: arrives on the line without overshooting it; above one is a driver who
+    #: turns in harder than the shortest arc.
+    steering_gain: float = 1.0
     #: How hard it pulls back to the centreline, in metres per second of
     #: sideways speed per metre off it. Zero is pure pursuit, corner-cutting
     #: and all.
@@ -119,17 +128,59 @@ class Autopilot:
         return self.update(session.car)
 
     def update(self, car: Any) -> tuple[float, float, float]:
-        """The throttle, brake and steer this driver would use right now."""
+        """The throttle, brake and steer this driver would use right now.
+
+        The steering is worked out as an **angle for the front wheels** and only
+        then turned into a control input, because the two are not the same
+        thing: how much of the wheels' travel one unit of input buys falls away
+        as the car speeds up (:meth:`omi_physics.vehicle.VehicleTuning.steer_lock`).
+        A driver that asked for a fraction of the travel instead would take a
+        given bend differently at every speed, and would have to be re-tuned for
+        every car it was put in.
+        """
         position = np.asarray(car.position, dtype='d')
         speed = float(car.speed())
         index, _ = self.course.nearest(position)
         aim = self._aim_point(index, speed)
-        steer = self._steer_towards(car, position, aim) \
-            + self._back_to_the_line(car, position, index, speed)
-        steer = float(np.clip(steer, -1.0, 1.0))
-        target = self.target_speed(index, speed)
-        throttle, brake = self._pedals(speed, target)
-        return throttle, brake, steer
+        heading = (self._error_towards(car, position, aim)
+                   * self.style.steering_gain
+                   + self._back_to_the_line(car, position, index, speed))
+        return (*self._pedals(speed, self.target_speed(index, speed)),
+                self._input_for(car, self._front_wheels(car, heading, speed),
+                                speed))
+
+    def _front_wheels(self, car: Any, heading: float, speed: float) -> float:
+        """The front-wheel angle that closes a heading error, in radians.
+
+        Pure pursuit: a car of wheelbase *L* held on one steering angle follows
+        a circle, and the circle through the car and a point ``reach`` ahead of
+        it at a heading error of ``heading`` needs
+        ``atan(2 L sin(heading) / reach)``. The geometry supplies the number, so
+        there is nothing here to tune per car.
+        """
+        reach = LOOK_AHEAD_METRES + speed * LOOK_AHEAD_SECONDS
+        base = self._wheelbase(car)
+        return math.atan2(2.0 * base * math.sin(heading), max(reach, 1e-6))
+
+    def _input_for(self, car: Any, wanted: float, speed: float) -> float:
+        """The control input that asks the front wheels for that angle."""
+        lock = self._lock(car, speed)
+        if lock <= 0.0:                                  # pragma: no cover
+            return 0.0
+        return float(np.clip(wanted / lock, -1.0, 1.0))
+
+    @staticmethod
+    def _wheelbase(car: Any) -> float:
+        vehicle = getattr(car, 'vehicle', None)
+        base = vehicle.wheelbase() if vehicle is not None else 0.0
+        return base if base > 0.0 else WHEELBASE
+
+    @staticmethod
+    def _lock(car: Any, speed: float) -> float:
+        vehicle = getattr(car, 'vehicle', None)
+        if vehicle is None:                              # pragma: no cover
+            return STEER_LOCK
+        return float(vehicle.tuning.steer_lock(speed))
 
     # -- steering --------------------------------------------------------------
 
@@ -138,13 +189,11 @@ class Autopilot:
         reach = LOOK_AHEAD_METRES + speed * LOOK_AHEAD_SECONDS
         return self.line_at(index + self._points_for(reach))
 
-    def _steer_towards(self, car: Any, position: np.ndarray,
+    def _error_towards(self, car: Any, position: np.ndarray,
                        aim: np.ndarray) -> float:
-        """Steering input that turns the car's nose toward a point.
+        """How far round the car has to come to point at somewhere, in radians.
 
-        The error is the angle between where the car points and where it should
-        be going, measured in the ground plane -- a crest ahead is not a reason
-        to steer.
+        Measured in the ground plane -- a crest ahead is not a reason to steer.
         """
         forward = np.asarray(car.forward(), dtype='d')
         to_aim = aim - position
@@ -154,18 +203,18 @@ class Autopilot:
         forward /= np.linalg.norm(forward)
         to_aim /= np.linalg.norm(to_aim)
         # Signed angle about up: positive is a left turn, as the controls are.
-        angle = math.atan2(float(np.cross(forward, to_aim)[1]),
-                           float(np.dot(forward, to_aim)))
-        return float(np.clip(angle * self.style.steering_gain, -1.0, 1.0))
+        return math.atan2(float(np.cross(forward, to_aim)[1]),
+                          float(np.dot(forward, to_aim)))
 
     def _back_to_the_line(self, car: Any, position: np.ndarray, index: int,
                           speed: float) -> float:
-        """The correction for being off the line where the car is now.
+        """The extra heading wanted for being off the line, in radians.
 
-        ``atan2(k * error, speed)``: a heading that closes the error at
-        ``k`` metres per second sideways, which is a smaller angle the faster
-        the car is going. The classic cross-track term, and what stops pure
-        pursuit settling inside every bend.
+        ``atan2(k * error, speed)``: a heading that closes the error at ``k``
+        metres per second sideways, which is a smaller angle the faster the car
+        is going. The classic cross-track term, and what stops pure pursuit
+        settling inside every bend. It is added to the heading error rather than
+        to the steering, so the one geometric conversion covers both.
         """
         if not self.style.tracking:
             return 0.0

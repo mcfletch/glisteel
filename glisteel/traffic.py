@@ -27,7 +27,8 @@ from OpenGLContext.scenegraph.transform import Transform
 
 from glisteel import models
 
-__all__ = ['TrafficCar', 'Traffic', 'CRUISING', 'SLOWING', 'PULLING_OFF']
+__all__ = ['TrafficCar', 'Traffic', 'CRUISING', 'SLOWING', 'PULLING_OFF',
+           'DEFAULT_TRAFFIC']
 
 #: What a traffic car is doing. Cruising is the speed limit and its own lane;
 #: slowing is something its driver saw and the player did not; pulling off is a
@@ -60,6 +61,14 @@ PULL_OFF_SHARE = 0.25
 #: are inside that. Past it there is nothing to see and nothing to hit.
 REACH = 320.0
 CARS = 10
+
+#: How many cars a road carries unless somebody says otherwise. Traffic is what
+#: makes a lap different from the last one -- a car in the wrong place turns a
+#: corner a driver knows into one they have to think about -- so a road has some
+#: by default. Six over the reach puts something in front of the player about
+#: nine times out of ten without turning the lap into a queue; twelve is a busy
+#: road and nothing is a time trial.
+DEFAULT_TRAFFIC = 6
 
 #: How far apart two cars going the same way are placed, at least, in metres.
 HEADWAY = 45.0
@@ -389,13 +398,18 @@ class Traffic:
 
         Only the paint moves: the glass, the bright trim and what is inside are
         the model's own, and repainting those would cost the car its windows.
+
+        **One scene per kind and colour, not per car.** The paint comes from a
+        fixed palette, so a road's worth of traffic is a handful of versions of
+        five models however many cars are on it: each is read and painted once
+        and then mounted wherever it is needed, which keeps a car appearing off
+        the frame it appears on and lets the renderer draw every saloon of one
+        colour in a single batch.
         """
-        scene = models.ART.load(car.kind.model)
+        scene = models.ART.variant(car.kind.model, car.paint,
+                                   prepare=lambda one: _repaint(one, car.paint))
         if scene is not None:
             self._scenes[id(car)] = scene
-            paint = scene.materials.get(models.PAINT)
-            if paint is not None:
-                paint.baseColor = car.paint
             return Transform(children=[scene.group])
         from glisteel.car import BODY_HEIGHT, car_nodes
         # Without a model, the primitive car -- which is drawn about its own
@@ -528,6 +542,13 @@ def _yaw(angle: float) -> tuple:
     """A rotation about the vertical, as the quaternion a body wants."""
     half = float(angle) / 2.0
     return (0.0, float(np.sin(half)), 0.0, float(np.cos(half)))
+
+
+def _repaint(scene: Any, colour: tuple) -> None:
+    """Put one colour on a vehicle's bodywork and leave the rest of it alone."""
+    paint = scene.materials.get(models.PAINT)
+    if paint is not None:
+        paint.baseColor = colour
 
 
 def _paint(seed: int) -> tuple:
