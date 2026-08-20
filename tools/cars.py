@@ -50,14 +50,6 @@ The car's own colour multiplies over the map's grain, and a clear coat rides on
 top as ``KHR_materials_clearcoat``. The bodywork is smoothed by angle, so the
 panels are smooth and the crease lines between them stay sharp.
 
-**The paint is a finish rather than a colour.** It is built on a CC0 material
-from ambientCG (``Metal032``) that :func:`OpenGLContext.loaders.cc0.material`
-downloads and caches; ``--paint-maps`` says where those maps are, and a build
-without them paints flat colour instead. The car's own colour multiplies over
-the map's grain, the base is fully metallic and glossy, and a clear coat rides
-on top as ``KHR_materials_clearcoat``. The bodywork is smoothed by angle, so
-panels are smooth and the crease lines between them stay sharp.
-
 **The glass refracts.** Its Principled shader gives the exporter
 ``KHR_materials_transmission`` and ``KHR_materials_ior``; the Volume Absorption
 node and the ``Thickness`` socket on the ``glTF Material Output`` group give it
@@ -89,7 +81,7 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
-# --- The player's car ------------------------------------------------------
+# --- What the vehicles are built to -----------------------------------------
 #
 # These are ``glisteel.car``'s own constants. The bodywork is the box the
 # chassis collider is, so a model that drifts from them is a car whose paint

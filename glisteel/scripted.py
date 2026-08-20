@@ -25,6 +25,12 @@ from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel
 
 __all__ = ['Hold', 'Script']
 
+#: Which key stands for each control when a script presses one. Settled here
+#: rather than chosen per step: a control is a set of keys that mean the same
+#: thing, so any of them will do, and picking one is not a decision to make a
+#: hundred and twenty times a second.
+KEY_FOR = {control: sorted(keys)[0] for control, keys in CONTROLS.items()}
+
 
 @dataclass(frozen=True)
 class Hold:
@@ -119,8 +125,7 @@ class Script:
         """
         self.elapsed += float(dt)
         wanted = self.holding_at(self.elapsed)
-        for control, keys in CONTROLS.items():
-            name = sorted(keys)[0]
+        for control, name in KEY_FOR.items():
             if control in wanted:
                 self.driver.press(name)
             else:

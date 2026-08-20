@@ -303,7 +303,7 @@ class Session:
         if self.world.traffic is not None and not self.run.over:
             self.world.traffic.update(self.car.position, elapsed,
                                       speed=self.car.speed())
-            self._watch_for_a_crash(elapsed)
+            self._watch_for_a_crash()
         self._recover_if_stuck(elapsed)
         pose = self.camera.update(self.car, elapsed)
         self.car.hidden = self.camera.inside
@@ -343,6 +343,10 @@ class Session:
         self.crashes.restart()
         self.run.restart()
         self._stuck_for = 0.0
+        # Nothing of the last race carries into this one: a part-step left over
+        # would be simulated the moment the new one starts.
+        self._accumulated = 0.0
+        self.reflections.context = None
         self._settle()
 
     # -- inside the frame ------------------------------------------------------
@@ -422,7 +426,7 @@ class Session:
         if reason is not None:
             log.info("run over: %s", reason)
 
-    def _watch_for_a_crash(self, dt: float) -> None:
+    def _watch_for_a_crash(self) -> None:
         """End the run if the car met another one hard enough.
 
         The closing speed against the nearest car in front, which is what the
@@ -437,7 +441,7 @@ class Session:
         other = ahead[0]
         closing = closing_speed(self.car.velocity(), other.velocity(),
                                 other.position() - self.car.position)
-        self.crashes.update(max(closing, 0.0), dt)
+        self.crashes.update(max(closing, 0.0))
 
     def _recover_if_stuck(self, elapsed: float) -> None:
         """Put the car back on the road if it has got itself stuck.

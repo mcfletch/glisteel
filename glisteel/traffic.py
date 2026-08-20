@@ -26,9 +26,10 @@ from omi_physics import model
 from OpenGLContext.scenegraph.transform import Transform
 
 from glisteel import models
+from glisteel.geometry import yaw_to_face
 
 __all__ = ['TrafficCar', 'Traffic', 'CRUISING', 'SLOWING', 'PULLING_OFF',
-           'DEFAULT_TRAFFIC']
+           'DEFAULT_TRAFFIC', 'SPEED_LIMIT']
 
 #: What a traffic car is doing. Cruising is the speed limit and its own lane;
 #: slowing is something its driver saw and the player did not; pulling off is a
@@ -93,6 +94,11 @@ LOOK_AHEAD = 130.0
 #: metres. A car appearing on top of somebody is not traffic, it is an ambush.
 CLEAR_OF_PLAYER = 90.0
 
+#: The speed a road is driven at when nobody says, in metres per second: a
+#: hundred kilometres an hour, which is what an open two-lane road is when it is
+#: not being raced.
+SPEED_LIMIT = 27.8
+
 
 class TrafficCar:
     """One car using the road: where it is along it, and what it is doing.
@@ -117,6 +123,8 @@ class TrafficCar:
         self.lane = (float(lane) if lane is not None
                      else course.carriageway_width / 4.0)
         self.state = CRUISING
+        #: Why this car is slowing, or empty while it is not.
+        self.reason = ''
         #: What is in front in this lane, as (gap in metres, its speed), or
         #: None for an open road. Set by :class:`Traffic` each update.
         self.ahead: tuple[float, float] | None = None
@@ -170,6 +178,9 @@ class TrafficCar:
     def brake_for(self, reason: str = '') -> None:
         """Slow down: the driver has seen something the player has not."""
         self.state = SLOWING
+        #: What this driver braked for, for anything asking why a car in front
+        #: is slowing -- a read-out, a replay, or a test.
+        self.reason = str(reason)
         self._until = self._elapsed + SLOW_FOR
 
     def pull_off(self) -> None:
@@ -190,7 +201,9 @@ class TrafficCar:
         step = self.speed * dt
         if self.ahead is not None:
             step = min(step, max(self.ahead[0] - STANDING_GAP, 0.0))
-        self.station = self._along(self.station + self.heading * step)
+        wanted = self.station + self.heading * step
+        self.turn_at_the_end(wanted)
+        self.station = self.on_the_road(wanted)
         wanted_side = self._pulled_off() if self.state == PULLING_OFF else 0.0
         self._sideways += max(-dt * 1.2, min(dt * 1.2,
                                              wanted_side - self._sideways))
@@ -246,14 +259,14 @@ class TrafficCar:
         sideways across the road on every axis but one, which is exactly the
         sort of thing one road running the other way finds.
         """
-        forward = self.forward()
-        return math.atan2(-float(forward[0]), -float(forward[2]))
+        return yaw_to_face(self.forward())
 
     def _decide(self, dt: float) -> None:
         """Whether this driver does something, and what."""
         if self.state != CRUISING:
             if self._elapsed >= self._until:
                 self.state = CRUISING
+                self.reason = ''
             return
         if self._rng.random() < EVENT_RATE * dt:
             if self._rng.random() < PULL_OFF_SHARE:
@@ -261,17 +274,29 @@ class TrafficCar:
             else:
                 self.brake_for('something in the road')
 
-    def _along(self, station: float) -> float:
-        """A station kept on the road: wrapped on a circuit, turned at an end."""
+    def on_the_road(self, station: float) -> float:
+        """Where a station actually falls: wrapped on a circuit, held at an end.
+
+        A question, and only a question. Whether the car should *turn round* as
+        a result is :meth:`turn_at_the_end`, which is a decision -- and having
+        the two in one method meant asking where something was moved the car
+        that asked.
+        """
         length = float(self.course.length)
         if self.course.closed:
             return float(station % length)
-        if station > length or station < 0.0:
-            # An open road runs out. Turning round is what a car does when it
-            # gets to the end of one, and it keeps the road busy either way.
-            self.heading = -self.heading
-            return float(min(max(station, 0.0), length))
-        return float(station)
+        return float(min(max(station, 0.0), length))
+
+    def turn_at_the_end(self, station: float) -> bool:
+        """Turn round if this station is off the end of an open road.
+
+        An open road runs out. Turning round is what a car does when it gets to
+        the end of one, and it keeps the road busy either way.
+        """
+        if self.course.closed or 0.0 <= station <= float(self.course.length):
+            return False
+        self.heading = -self.heading
+        return True
 
     def _frame(self) -> tuple:
         """The centreline point at this station, and the way across the road."""
@@ -304,7 +329,7 @@ class Traffic:
         self.course = course
         self.count = int(count)
         self.reach = float(reach)
-        self.limit = float(limit) if limit is not None else _limit(course)
+        self.limit = float(limit) if limit is not None else SPEED_LIMIT
         self.seed = int(seed)
         self.physics = physics
         #: Every car on the road right now.
@@ -313,9 +338,13 @@ class Traffic:
         self.node = Transform(children=[])
         self._rng = np.random.default_rng(seed)
         self._next = 0
-        self._drawn: dict[int, Any] = {}
-        self._scenes: dict[int, Any] = {}
-        self._bodies: dict[int, int] = {}
+        self._drawn: dict[TrafficCar, Any] = {}
+        self._scenes: dict[TrafficCar, Any] = {}
+        self._bodies: dict[TrafficCar, int] = {}
+        # Keyed on the car itself rather than on id(car): a car is hashable
+        # by identity already, so the two behave the same -- except that an id
+        # is reused once its object is collected, and a mapping outliving the
+        # thing it describes is a bug that waits for the allocator.
         #: One collider shape per kind, since a van and a hatchback are not the
         #: same thing to run into.
         self._shapes: dict[str, Any] = {}
@@ -413,7 +442,7 @@ class Traffic:
 
     def body_of(self, car: TrafficCar) -> int:
         """The physics body driving along under one car."""
-        return self._bodies[id(car)]
+        return self._bodies[car]
 
     def release(self) -> None:
         """Take every car off the road."""
@@ -429,7 +458,7 @@ class Traffic:
         a van is as big to hit as it is to see.
         """
         node = self._art(car)
-        self._drawn[id(car)] = node
+        self._drawn[car] = node
         self.node.children = list(self.node.children) + [node]
         if self.physics is None:
             return
@@ -437,7 +466,7 @@ class Traffic:
         if shape is None:
             shape = self.physics.add_shape(model.Shape.box(car.kind.size()))
             self._shapes[car.kind.name] = shape
-        self._bodies[id(car)] = int(self.physics.add_body(
+        self._bodies[car] = int(self.physics.add_body(
             model.Motion(type=model.KINEMATIC, mass=1200.0),
             collider=model.Collider(shape=shape),
             position=tuple(self._centre(car))))
@@ -458,7 +487,7 @@ class Traffic:
         scene = models.ART.variant(car.kind.model, car.paint,
                                    prepare=lambda one: _repaint(one, car.paint))
         if scene is not None:
-            self._scenes[id(car)] = scene
+            self._scenes[car] = scene
             return Transform(children=[scene.group])
         from glisteel.car import BODY_HEIGHT, car_nodes
         # Without a model, the primitive car -- which is drawn about its own
@@ -469,23 +498,23 @@ class Traffic:
 
     def art_of(self, car: TrafficCar) -> Any:
         """The loaded scene one car is drawn from, for anything asking about it."""
-        return self._scenes.get(id(car))
+        return self._scenes.get(car)
 
     def node_of(self, car: TrafficCar) -> Any:
         """What draws one car."""
-        return self._drawn.get(id(car))
+        return self._drawn.get(car)
 
     def collider_size(self, car: TrafficCar) -> tuple[float, float, float]:
         """How big this car is to hit, in metres."""
         return car.kind.size()
 
     def _retire(self, car: TrafficCar) -> None:
-        self._scenes.pop(id(car), None)
-        node = self._drawn.pop(id(car), None)
+        self._scenes.pop(car, None)
+        node = self._drawn.pop(car, None)
         if node is not None:
             self.node.children = [one for one in self.node.children
                                   if one is not node]
-        body = self._bodies.pop(id(car), None)
+        body = self._bodies.pop(car, None)
         if body is not None and self.physics is not None:
             self.physics.remove_body(body)
 
@@ -493,11 +522,11 @@ class Traffic:
         """Put every car's node and body where the car now is."""
         for car in self.cars:
             at = self._standing(car)
-            node = self._drawn.get(id(car))
+            node = self._drawn.get(car)
             if node is not None:
                 node.translation = tuple(float(v) for v in at)
                 node.rotation = (0.0, 1.0, 0.0, car.heading_angle())
-            body = self._bodies.get(id(car))
+            body = self._bodies.get(car)
             if body is not None and self.physics is not None:
                 self.physics.position[body] = self._centre(car, at)
                 self.physics.orientation[body] = _yaw(car.heading_angle())
@@ -577,13 +606,7 @@ class Traffic:
         return self._where_is(at)[0]
 
 
-def _limit(course: Any) -> float:
-    """The speed a road is driven at when nobody says, in metres per second.
 
-    A hundred kilometres an hour on an open two-lane road, which is what the
-    shipped circuit is when it is not being raced.
-    """
-    return 27.8
 
 
 def _yaw(angle: float) -> tuple:

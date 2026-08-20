@@ -32,12 +32,41 @@ redesign.
 
 **Status, 2026-08-20: the P1 defects and the E, S and T items are fixed**,
 Red/Green throughout — §12 for P1, §13 for the measured performance and security
-work, §14 for the editor's redraw and the typing. A game frame costs 29 % less
+work, §14 for the editor's redraw and the typing, §15 for the P3 tables. A game
+frame costs 29 % less
 than it did, an editor redraw 45× less, a structure query over a terrain chunk
 172× less; both type gates are green and now check the seams rather than `Any`.
 What is left is §14's "still open".
 
 ---
+
+## Remediation status — 2026-08-20
+
+| Group | Items | Status |
+|-------|-------|--------|
+| **P1** correctness and data loss | C1–C10 | **10 of 10 fixed** (§12) |
+| **P2** performance | E1–E12 | **12 of 12 fixed** (§13, §14) |
+| **P2** security and untrusted input | S1–S5 | **5 of 5 fixed** (§13) |
+| **P3** types, gates and testing | T1–T7 | **6 of 7 fixed**; T5 partly (§13, §14) |
+| **P3** API design and organisation | A1–A21 | **18 of 21 fixed**; A13, A20 declined, A11 partly (§15) |
+| **P3** dead code and inconsistency | D1–D22 | **22 of 22 fixed** (§15) |
+
+**77 findings: 73 fixed, 1 withdrawn as wrong (A15), 3 declined with reasons,
+1 partly done (T5).** Every fix was made Red/Green — the test written and seen
+to fail for the stated reason before the code changed.
+
+At the end of it: `glisteel` 931 passed, 1 xfailed; `glisteel-editor` 373
+passed; `ruff` and `mypy` clean on both packages.
+
+### What is still open
+
+| | Why it is open |
+|---|---|
+| **T5** (partly) | The seven lap drives are marked `slow`, taking the suite from 3 m 15 s to 2 m 25 s. That is a saving and not the quick loop the item asked for: the cost is spread more widely than the `--durations` list showed. Standing up a scenario world is the next thing to measure |
+| **A13** | The editor bakes on its UI thread. The fix is a worker and progress, which touches GL-thread ownership in a file another agent is rewriting; it belongs in `EDITOR-REMEDIATION.md`'s baking phase |
+| **A20** | `tools/cars.py` is 1 571 lines and wants splitting. It is under active edit for the vehicle work, so a split now would conflict with that rather than help. The trap it hid is caught by `tests/test_sources.py` |
+| **A11** (partly) | `GlisteelContext.config` is still a class attribute, because the backend has no way to pass one through context construction. It is typed now, which was the part that hid mistakes |
+| **T4** (partly) | `Options` took the *configuration* out of the window's uncovered region, which is where the defects were. `OnInit`, `SwapBuffers` and the light rig remain window-bound, so `game.py`'s coverage figure is still flattered |
 
 ## Remediation checklist
 
@@ -104,7 +133,7 @@ column; §12 records what landed.
 | **T5** | The glisteel suite takes **3 m 42 s** for 674 tests | `glisteel/tests/` | Mark and separate the slow physics traces; keep a sub-minute default loop |
 | **T6** | `race.__all__` omits `Collisions`, `closing_speed`, `off_course`, `SECTORS`, `PATIENCE`, `LOST`, `SURVIVABLE` — three of which `session.py` imports | `race.py:20` | Complete it, or drop `__all__` and rely on the leading underscore |
 
-### P3 — API design and code organisation
+### P3 — API design and code organisation — **landed 2026-08-20, except A13, A20 and part of A11**
 
 | ID | Finding | Where | Fix |
 |----|---------|-------|-----|
@@ -130,7 +159,7 @@ column; §12 records what landed.
 | **A20** | `tools/cars.py` is 1 571 lines with 56 top-level functions | `tools/cars.py` | Split by subject: materials, meshes, hero, wheels, traffic, export |
 | **A21** | `tools/elevation.py` and `measure_form.py` execute on import via top-level `sys.argv` | `tools/elevation.py:14` | A `main()` behind `if __name__ == '__main__'` |
 
-### P3 — Dead code, unused parameters and inconsistency
+### P3 — Dead code, unused parameters and inconsistency — **landed 2026-08-20**
 
 | ID | Finding | Where | Fix |
 |----|---------|-------|-----|
@@ -1000,7 +1029,6 @@ new files.
 
 - **T5's remainder** — the suite is 2 m 25 s without the slow marks and wants to
   be under a minute. Standing up a scenario world is the next thing to measure.
-- **A\*, D\* — the P3 tables**, as ordinary tidying alongside other work.
 
 ## 14. What landed in the third pass — 2026-08-20
 
@@ -1069,6 +1097,64 @@ namespace once, with the values checked once, and the window reads that.
 This does not empty the `# pragma: no cover` region — `OnInit`, `SwapBuffers`
 and the light rig are still window-bound — but it takes the *configuration* out
 of it, which is where the defects were.
+
+## 15. The P3 tables — 2026-08-20
+
+All 22 D items and 18 of the 21 A items. Three are declined below, with reasons.
+
+### Two were defects rather than tidying
+
+**D8 — turning an open road round produced a different road.** `Route.plan()`
+kept the first point first and reversed the rest. For a *circuit* that is right:
+a lap begins where it begins and only the direction round the loop changes. For
+an **open road** it is wrong — turning one round means starting at the far end —
+and what came out was a different shape, not the same road driven the other way.
+The test that found it asserts a route is the same length whichever way it is
+driven.
+
+**D4 — spring markers were seven metres across at every zoom**, while the
+control points beside them were seven pixels. The parameter that would have
+scaled them existed and nothing ever passed it.
+
+### One finding in the review was wrong
+
+**A15 said `TARMAC`/`VERGE`/`ROUGH` were "shared mutable singletons".**
+`omi_physics`' `Surface` is a frozen dataclass, so there was never a hazard: one
+caller cannot change what every car is driving on. The comment beside them now
+says *why* sharing them is safe, which is the useful half of the finding. The
+review was wrong and this records it.
+
+### The rest
+
+| | |
+|---|---|
+| A1 | Four copies of "which way is this pointing", in two conventions, none saying which. `glisteel/geometry.py` has `yaw_of` (read an angle off a direction) and `yaw_to_face` (the rotation that points a mesh that way); they are each other's negation, which is why four unnamed copies were a trap. The camera, the road, the traffic and the trace all call them |
+| A2 | `Trace.columns()` is read off the dataclass, so a window of a drive and the assembly of one no longer enumerate fifteen fields in three lists that have to agree |
+| A3 | `RaceHUD.show(reading)` takes a whole `Readings` — which is exactly what a session answers with — instead of its nine fields, copied across one at a time by the window |
+| A4 | `Car.forward_speed()`; the keyboard no longer reaches through a car to the vehicle under it, and the test doubles got smaller as a result |
+| A5 | `RaceWorld.from_course` builds through `__init__` rather than `cls.__new__`, so there is one description of what a half-built world looks like |
+| A6 | The traffic's three mappings are keyed on the car rather than `id(car)`: identical behaviour, minus the reuse-after-collection hazard |
+| A7 | `SETTLE_DROP`, `GRID_SETBACK`, `LOST_BELOW`, `BORE_MARGIN`, `BORE_APPROACH` and `MOST_LUMINAIRES` sit with the other constants, above the code that reads them |
+| A8 | `TrafficCar.on_the_road()` says where a station falls; `turn_at_the_end()` turns the car round. Asking where something was used to move it |
+| A9 | Covered by E4's invalidation work |
+| A10 | `RouteState` — the undo history is named rather than a four-tuple read by index |
+| A12, A14, A16, A17, A18, A19, A21 | As the table says; A14 in particular closes a recording on the capture exit, which it was skipping |
+
+### Declined, with reasons
+
+- **A13 — the bake blocks the editor's UI thread.** Real, and the fix is a
+  worker plus progress, which touches GL-thread ownership in a file another
+  agent is actively rewriting. It belongs in `EDITOR-REMEDIATION.md`'s baking
+  phase rather than across it.
+- **A20 — `tools/cars.py` is 1 571 lines.** The split is right and the file is
+  under active edit for the vehicle work; doing it now would conflict with that
+  rather than help it. The duplicate-definition trap it hid is already caught by
+  `tests/test_sources.py` (C5).
+- **A11 — `GlisteelContext.config` is a class attribute.** It is typed now
+  (`Options`) rather than an untyped namespace, which was the part that hid
+  mistakes. Making it per-instance means the backend passing it through context
+  construction, which it has no way to do; the class attribute stays, and the
+  reason is here rather than nowhere.
 
 ## Suggested order of work
 

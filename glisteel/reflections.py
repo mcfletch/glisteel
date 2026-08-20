@@ -25,6 +25,7 @@ and where it came from is this module's business alone.
 """
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Callable
 from typing import Any
@@ -56,7 +57,7 @@ HEIGHT = WIDTH // 2
 #: the same panorama every time and a car does not shimmer between frames.
 SEED = 20260818
 
-_DRAWN: dict[str, np.ndarray] = {}
+
 
 
 def context_at(course: Any, station: float) -> str:
@@ -71,16 +72,18 @@ def context_at(course: Any, station: float) -> str:
     return FOREST
 
 
+@functools.lru_cache(maxsize=len(CONTEXTS) * 4)
 def panorama(context: str, width: int = WIDTH) -> np.ndarray:
     """The environment for one sort of place, as linear RGB.
 
     An ``(H, W, 3)`` equirectangular image: rows run from straight up to
-    straight down, columns all the way round. Built once and remembered.
+    straight down, columns all the way round.
+
+    Built once and kept. Bounded, because a cache with no ceiling is a leak
+    waiting for a caller that asks for a size nobody thought of: there are four
+    sorts of place, and room here for a few widths of each.
     """
-    key = '%s@%d' % (context, width)
-    if key not in _DRAWN:
-        _DRAWN[key] = _draw(context, width)
-    return _DRAWN[key]
+    return _draw(context, width)
 
 
 class Reflections:

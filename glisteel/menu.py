@@ -130,12 +130,15 @@ def track_screen(tracks: Sequence[Any],
                       chooser, caption, Separator(top=6),
                       Row(children=[Spacer(), cancel, drive], spacing=8, top=8,
                           name='buttons')])])
-    answered: list[bool] = []
+    answered = False
 
     def finish(started: bool) -> None:
+        # One answer per screen: Drive, Cancel and the panel closing all arrive
+        # here, and the first of them is the designer's decision.
+        nonlocal answered
         if answered:
             return
-        answered.append(started)
+        answered = True
         panel.close(started)
         found = _selected(tracks, chooser) if started else None
         if found is not None and on_choose is not None:

@@ -67,32 +67,32 @@ class RaceHUD(HUDLayer):
         self.map.route = None if course is None else course.centreline
         self.map.closed = bool(course is not None and course.closed)
 
-    def show(self, speed_kph: float, timing: Any = None,
-             off: bool = False, ended: str | None = None,
-             at: Any = None, others: Any = (),
-             phase: str = '', lit: int = 0, lights: int = 0) -> None:
-        """Put this frame's numbers on the readouts.
+    def show(self, reading: Any) -> None:
+        """Put one frame's numbers on the readouts.
 
-        ``ended`` is the reason the run is over, and displaces the off-track
-        warning: once a car is mired there is nothing left to warn about.
-        ``at`` is where the car is and ``others`` where anything else worth
-        marking is, both for the map. ``phase``, ``lit`` and ``lights`` are
-        which part of the race this is and how much of the start rig is burning
-        (:class:`~glisteel.run.Run`).
+        Handed a whole :class:`~glisteel.session.Readings` rather than its
+        fields one at a time: it is exactly what a session answers with, and
+        naming the fields again here meant two lists that had to agree and a
+        third in the window copying between them.
         """
-        self.speed.value = '%3.0f' % max(0.0, speed_kph)
-        self.speed.critical = bool(speed_kph >= FAST_KPH)
+        self.speed.value = '%3.0f' % max(0.0, reading.speed_kph)
+        self.speed.critical = bool(reading.speed_kph >= FAST_KPH)
+        timing = reading.timing
         if timing is not None:
             self.lap.value = '%d   %s' % (len(timing.laps) + 1,
                                           _clock(timing.current))
             self.last.value = timing.last.clock() if timing.last else '--:--.---'
             self.best.value = timing.best.clock() if timing.best else '--:--.---'
-        self._start_rig(phase, lit, lights)
-        self.warning.value = self._middle(phase, timing, ended, off)
-        self.warning.critical = bool(self.warning.value and phase != FINISHED)
-        marks = [(float(one[0]), float(one[2]), 'hudText') for one in others]
-        if at is not None:
-            marks.append((float(at[0]), float(at[2]), 'crosshair'))
+        self._start_rig(reading.phase, reading.lit, reading.lights)
+        self.warning.value = self._middle(reading.phase, timing,
+                                          reading.ended, reading.off)
+        self.warning.critical = bool(self.warning.value
+                                     and reading.phase != FINISHED)
+        marks = [(float(one[0]), float(one[2]), 'hudText')
+                 for one in reading.others]
+        if reading.at is not None:
+            marks.append((float(reading.at[0]), float(reading.at[2]),
+                          'crosshair'))
         self.map.marks = marks
 
     def _start_rig(self, phase: str, lit: int, lights: int) -> None:

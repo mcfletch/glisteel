@@ -73,6 +73,24 @@ from glisteel.world import RaceWorld  # noqa: E402
 log = logging.getLogger(__name__)
 BaseContext: Any = testingcontext.getInteractive()
 
+#: What the keys do, for ``--help``. Its own constant rather than a slice cut
+#: out of the module docstring by searching for two phrases in it: rewording the
+#: docstring would then raise at startup, which is a long way from where anybody
+#: would look for the cause.
+KEYS = """Keys::
+
+    up / w              throttle
+    down / s            brake, and reverse once stopped
+    left / right, a / d steer
+    space               handbrake
+    mouse               steer, with --mouse
+    c                   cockpit / chase / bonnet camera
+    r                   put the car back on the track
+    n                   a fresh race, from the grid
+    escape              the menu
+    F2                  save a screenshot
+"""
+
 #: The scale the default light rig is sized to. A world is kilometres across
 #: and the rig's fill light is placed as a multiple of this, so it is the size
 #: of the *scene the player is in* rather than of the whole map.
@@ -476,11 +494,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     def _update_hud(self) -> None:               # pragma: no cover - needs a window
         if self.hud is None or self.session is None:
             return
-        reading = self.session.readout()
-        self.hud.show(speed_kph=reading.speed_kph, timing=reading.timing,
-                      off=reading.off, ended=reading.ended, at=reading.at,
-                      others=reading.others, phase=reading.phase,
-                      lit=reading.lit, lights=reading.lights)
+        self.hud.show(self.session.readout())
 
     def SwapBuffers(self, *args: Any) -> Any:    # pragma: no cover - needs a window
         """Present the frame, and take the picture when one is asked for.
@@ -499,7 +513,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             sys.stdout.write('captured %s\n' % (self.config.capture,))
             wanted = self.config.picture_track
             if wanted is not None:
-                from glisteel import tracks
                 where = tracks.remember_picture(wanted)
                 if where is not None:
                     sys.stdout.write('recorded it in %s\n' % (where,))
@@ -510,21 +523,34 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             if counter is not None:
                 sys.stdout.write('DRIVE_STATS fps=%s\n' % (counter.recentFps(),))
             sys.stdout.flush()
-            self._shutdown()
+            self._finish()
+            # Straight out, rather than back into a main loop that is mid-frame
+            # and has just been told to present one: the backend owns the loop
+            # and offers no way to leave it from inside a buffer swap. Every
+            # teardown that matters has happened above, which is what
+            # :meth:`_finish` is for -- and is what this used to skip.
             os._exit(0)
             return result
         return super().SwapBuffers(*args)
 
     def OnQuit(self, *args: Any) -> None:        # pragma: no cover - needs a window
-        # Finish the file first: a recording closed after the world has gone is
-        # a recording missing its last frames and its sample tables.
+        self._finish()
+        super().OnQuit(*args)
+
+    def _finish(self) -> None:                   # pragma: no cover - needs a window
+        """Put everything down, whichever way the game is ending.
+
+        Both ways end here -- the player quitting and a capture exiting once it
+        has its frame -- because they were not doing the same thing: the capture
+        path left a recording unclosed, which is a file missing its last frames
+        and its sample tables.
+
+        The recording first: one closed after the world has gone is missing the
+        same thing.
+        """
         if self.recorder is not None:
             self.recorder.close()
             self.recorder = None
-        self._shutdown()
-        super().OnQuit(*args)
-
-    def _shutdown(self) -> None:                 # pragma: no cover - needs a window
         self.close()
 
 
@@ -600,7 +626,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='glisteel', description=__doc__.split('\n\n')[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__[__doc__.index('Keys::'):__doc__.index('The world streams')])
+        epilog=KEYS)
     parser.add_argument('world', nargs='?', default='baked-world/tileset.json',
                         help='the tileset.json of a baked world. Without one, '
                              'the game offers whatever is in the track library '
@@ -760,7 +786,6 @@ def _picture(options: Any, width: int, height: int) -> None:  # pragma: no cover
     behind, which is the view a player recognises the place from -- photographs
     that, and writes the picture's name into the manifest beside the tileset.
     """
-    from glisteel import tracks
     track = tracks.Track.opening(options.world)
     if track is None:
         raise SystemExit('%s is not a world to photograph' % options.world)

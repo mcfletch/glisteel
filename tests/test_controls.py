@@ -13,12 +13,15 @@ STEP = 1.0 / 120.0
 
 
 class _Car:
-    """A car that is standing still, which is all the brake pedal asks about."""
+    """A car that is standing still, which is all the brake pedal asks about.
 
-    class vehicle:
-        @staticmethod
-        def forward_speed() -> float:
-            return 0.0
+    One method, because that is all the pedal reaches for now: it used to go
+    through the car to the vehicle underneath, and a double had to be shaped
+    like both.
+    """
+
+    def forward_speed(self) -> float:
+        return 0.0
 
 
 class _Session:
@@ -97,10 +100,9 @@ class TestTheKeysThatDriveIt:
 
         class _Moving(_Session):
             class car:
-                class vehicle:
-                    @staticmethod
-                    def forward_speed() -> float:
-                        return 20.0
+                @staticmethod
+                def forward_speed() -> float:
+                    return 20.0
         throttle, brake, _ = driver.controls(_Moving(), STEP)
         assert brake == pytest.approx(1.0) and throttle == 0.0
 

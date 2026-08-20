@@ -25,11 +25,13 @@ interpret is a number nobody will maintain.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
+from glisteel.geometry import yaw_of
 from glisteel.session import PHYSICS_STEP
 
 __all__ = ['Trace', 'drive']
@@ -191,15 +193,20 @@ class Trace:
         long after the input being asked about.
         """
         kept = (self.t >= float(start)) & (self.t <= float(end))
-        return Trace(
-            t=self.t[kept], position=self.position[kept], speed=self.speed[kept],
-            yaw=self.yaw[kept], throttle=self.throttle[kept],
-            brake=self.brake[kept], steer=self.steer[kept],
-            wheel_angle=self.wheel_angle[kept], camera=self.camera[kept],
-            camera_yaw=self.camera_yaw[kept],
-            camera_pitch=self.camera_pitch[kept], off_line=self.off_line[kept],
-            on_road=self.on_road[kept], ended=self.ended[kept], step=self.step,
-            laps=list(self.laps))
+        return dataclasses.replace(
+            self, laps=list(self.laps),
+            **{name: getattr(self, name)[kept] for name in self.columns()})
+
+    @classmethod
+    def columns(cls) -> tuple[str, ...]:
+        """The names of the recorded columns, in the order a row carries them.
+
+        Read off the class rather than written out, so a new measure is one
+        field and one value rather than a name repeated in three lists that have
+        to agree -- which is a column swap waiting to happen.
+        """
+        return tuple(one.name for one in dataclasses.fields(cls)
+                     if one.name not in ('step', 'laps'))
 
     # -- everything at once ----------------------------------------------------
 
@@ -286,7 +293,7 @@ def drive(session: Any, script: Any = None, seconds: float | None = None,
             (count + 1) * step,
             tuple(float(v) for v in session.car.position),
             session.car.speed(),
-            _heading(session.car),
+            yaw_of(session.car.forward()),
             watched.last[0], watched.last[1], watched.last[2],
             float(np.mean(steered)) if steered else 0.0,
             tuple(float(v) for v in pose.position),
@@ -300,36 +307,30 @@ def drive(session: Any, script: Any = None, seconds: float | None = None,
     return _assemble(rows, step, laps)
 
 
-def _heading(car: Any) -> float:
-    """Which way the car is pointing, as a yaw about the vertical."""
-    forward = np.asarray(car.forward(), dtype='d')
-    return float(np.arctan2(forward[0], -forward[2]))
+
 
 
 def _assemble(rows: list, step: float, laps: list) -> Trace:
-    """The recorded rows as columns."""
+    """The recorded rows as columns.
+
+    The column names come off :meth:`Trace.columns`, so a row and a trace cannot
+    fall out of step with each other: adding a measure is a field on the class
+    and a value in :func:`drive`, and this needs no edit at all.
+    """
+    names = Trace.columns()
     if not rows:
-        empty = np.zeros(0)
-        return Trace(t=empty, position=np.zeros((0, 3)), speed=empty,
-                     yaw=empty, throttle=empty, brake=empty, steer=empty,
-                     wheel_angle=empty, camera=np.zeros((0, 3)),
-                     camera_yaw=empty, camera_pitch=empty, off_line=empty,
-                     on_road=np.zeros(0, dtype=bool),
-                     ended=np.zeros(0, dtype=object), step=step, laps=laps)
+        return Trace(step=step, laps=laps,
+                     **{name: _EMPTY.get(name, np.zeros(0)) for name in names})
     columns = list(zip(*rows, strict=True))
-    return Trace(
-        t=np.asarray(columns[0], dtype='d'),
-        position=np.asarray(columns[1], dtype='d'),
-        speed=np.asarray(columns[2], dtype='d'),
-        yaw=np.asarray(columns[3], dtype='d'),
-        throttle=np.asarray(columns[4], dtype='d'),
-        brake=np.asarray(columns[5], dtype='d'),
-        steer=np.asarray(columns[6], dtype='d'),
-        wheel_angle=np.asarray(columns[7], dtype='d'),
-        camera=np.asarray(columns[8], dtype='d'),
-        camera_yaw=np.asarray(columns[9], dtype='d'),
-        camera_pitch=np.asarray(columns[10], dtype='d'),
-        off_line=np.asarray(columns[11], dtype='d'),
-        on_road=np.asarray(columns[12], dtype=bool),
-        ended=np.asarray(columns[13], dtype=object),
-        step=step, laps=laps)
+    return Trace(step=step, laps=laps,
+                 **{name: np.asarray(column, dtype=_DTYPE.get(name, 'd'))
+                    for name, column in zip(names, columns, strict=True)})
+
+
+#: The columns that are not plain floats.
+_DTYPE = {'on_road': bool, 'ended': object}
+
+#: What an empty column of each of those looks like.
+_EMPTY = {'position': np.zeros((0, 3)), 'camera': np.zeros((0, 3)),
+          'on_road': np.zeros(0, dtype=bool),
+          'ended': np.zeros(0, dtype=object)}

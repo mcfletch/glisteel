@@ -13,6 +13,9 @@ letting go of it in the middle is straight ahead.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
 __all__ = ['CONTROLS', 'KeyboardDriver', 'KeyboardWheel', 'MouseWheel',
            'TRAVEL', 'CURVE', 'WIND_ON', 'CENTRE']
 
@@ -117,15 +120,25 @@ class KeyboardWheel:
         return self.position
 
 
-#: Which keys do what. Each is a set of names, so the arrows and WASD are the
-#: same control rather than two.
-CONTROLS = {
-    'throttle': {'w', '<up>'},
-    'brake': {'s', '<down>'},
-    'left': {'a', '<left>'},
-    'right': {'d', '<right>'},
-    'handbrake': {' '},
-}
+#: How slowly the car has to be going before the brake becomes a reverse, in
+#: metres per second. Walking pace: below it the car has stopped as far as the
+#: driver is concerned, and holding the key means "go backwards".
+ROLLING = 0.4
+
+#: Which keys do what. Each is a frozen set of names, so the arrows and WASD
+#: are the same control rather than two.
+#:
+#: Frozen, and a mapping rather than a dict: this is the *default*, and a game
+#: whose keys could be rebound by anything that got hold of it would be a game
+#: where one screen's rebinding changed every other. A driver that wants
+#: different keys is handed them (:class:`KeyboardDriver`).
+CONTROLS: Mapping[str, frozenset[str]] = MappingProxyType({
+    'throttle': frozenset({'w', '<up>'}),
+    'brake': frozenset({'s', '<down>'}),
+    'left': frozenset({'a', '<left>'}),
+    'right': frozenset({'d', '<right>'}),
+    'handbrake': frozenset({' '}),
+})
 
 
 class KeyboardDriver:
@@ -142,11 +155,15 @@ class KeyboardDriver:
     where they want it.
     """
 
-    def __init__(self, pointer: MouseWheel | None = None) -> None:
+    def __init__(self, pointer: MouseWheel | None = None,
+                 controls: Mapping[str, frozenset[str]] | None = None) -> None:
         #: The names of the keys that are down.
         self.held: set[str] = set()
         self.keys = KeyboardWheel()
         self.pointer = pointer
+        #: Which keys this driver answers to. :data:`CONTROLS` unless a caller
+        #: says otherwise, which is where rebinding goes.
+        self.controls_for = dict(controls if controls is not None else CONTROLS)
 
     def press(self, name: str) -> None:
         self.held.add(name)
@@ -164,7 +181,7 @@ class KeyboardDriver:
 
     def holding(self, control: str) -> bool:
         """Whether any of the keys for a control is down."""
-        return bool(self.held & CONTROLS[control])
+        return bool(self.held & self.controls_for[control])
 
     def controls(self, session: object, dt: float) -> tuple[float, float, float]:
         """The pedals and the wheel, from whatever is held down.
@@ -180,7 +197,7 @@ class KeyboardDriver:
             # and reverses one that has stopped, which is what an arrow key on
             # a keyboard has to do.
             car = getattr(session, 'car', None)
-            if car is not None and car.vehicle.forward_speed() > 0.4:
+            if car is not None and car.forward_speed() > ROLLING:
                 brake = 1.0
             else:
                 throttle = -1.0

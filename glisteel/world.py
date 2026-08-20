@@ -29,6 +29,8 @@ from OpenGLContext.loaders.tiles3d import fetch
 from OpenGLContext.loaders.tiles3d.frustum import view_projection as frustum_matrix
 from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
 
+from glisteel.geometry import yaw_to_face
+
 __all__ = ['Course', 'RaceWorld', 'courses_in', 'load_courses']
 
 #: How much memory the streamer may hold in tiles. A racing camera sees a long
@@ -45,6 +47,39 @@ DEFAULT_SSE = 12.0
 #: is not the one drawn.
 FOV = math.radians(55.0)
 VIEW_DISTANCE = 4000.0
+
+#: How far under a starting position its ground may be, in metres, before the
+#: world counts as settled. A grid slot sits about a metre over the surface it
+#: is on; anything much further down is a different surface.
+SETTLE_DROP = 4.0
+
+#: How far in from the end of an open road a car is put, in metres. Longer than
+#: a car, so all four wheels are on the surface rather than the back two hanging
+#: over the end of it.
+GRID_SETBACK = 12.0
+
+#: How far under the world's own datum a car has to be to have left it, in
+#: metres. Far enough that a viaduct's valley is not "gone" -- a car on the deck
+#: has ninety metres of air under it and has fallen nowhere.
+LOST_BELOW = 500.0
+
+#: How far past a road's own width a bore's opening in the ground reaches, in
+#: metres. Wide enough to clear the lining, and no wider: the opening is a hole
+#: in the ground with the bore's own tube inside it, and one wider than the tube
+#: is a trench beside the carriageway.
+BORE_MARGIN = 2.0
+
+#: How far up each approach the opening reaches, in metres. The ground beside a
+#: portal is a cutting sampled on a grid metres wide, and where that meets the
+#: untouched hillside it rides over the carriageway; the road's own surface
+#: carries the car through, so opening the ground early costs nothing.
+BORE_APPROACH = 24.0
+
+#: The most lamps a world may declare. A bore has one every twenty-five metres,
+#: so a world of them is thousands rather than millions: past this the number is
+#: not a world but an allocation, and a tileset is something a player may have
+#: been handed by somebody else.
+MOST_LUMINAIRES = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -301,8 +336,7 @@ class Course:
         direction. Taken from the direction itself the car ends up square
         across the road, which is what any road not lying along an axis finds.
         """
-        ahead = self.point(index + 1) - self.point(index)
-        return math.atan2(-float(ahead[0]), -float(ahead[2]))
+        return yaw_to_face(self.point(index + 1) - self.point(index))
 
     def nearest(self, position: Any) -> tuple[int, float]:
         """The nearest centreline point's index, and how far off the *road* it is.
@@ -484,40 +518,6 @@ def _baked_luminaires(extras: Any) -> Any:
     return found.reshape(-1, 3)
 
 
-#: The most lamps a world may declare. A bore has one every twenty-five metres,
-#: so a world of them is thousands rather than millions: past this the number is
-#: not a world but an allocation, and a tileset is something a player may have
-#: been handed by somebody else.
-MOST_LUMINAIRES = 1_000_000
-
-#: How far under a starting position its ground may be, in metres, before the
-#: world counts as settled. A grid slot sits about a metre over the surface it
-#: is on; anything much further down is a different surface.
-SETTLE_DROP = 4.0
-
-#: How far in from the end of an open road a car is put, in metres. Longer than
-#: a car, so all four wheels are on the surface rather than the back two hanging
-#: over the end of it.
-GRID_SETBACK = 12.0
-
-#: How far under the world's own datum a car has to be to have left it, in
-#: metres. Far enough that a viaduct's valley is not "gone" -- a car on the deck
-#: has ninety metres of air under it and has fallen nowhere.
-LOST_BELOW = 500.0
-
-#: How far past a road's own width a bore's opening in the ground reaches, in
-#: metres. Wide enough to clear the lining, and no wider: the opening is a hole
-#: in the ground with the bore's own tube inside it, and one wider than the tube
-#: is a trench beside the carriageway.
-BORE_MARGIN = 2.0
-
-#: How far up each approach the opening reaches, in metres. The ground beside a
-#: portal is a cutting sampled on a grid metres wide, and where that meets the
-#: untouched hillside it rides over the carriageway; the road's own surface
-#: carries the car through, so opening the ground early costs nothing.
-BORE_APPROACH = 24.0
-
-
 class RaceWorld:
     """A baked world, streaming, with a physics world under it.
 
@@ -542,9 +542,17 @@ class RaceWorld:
     #: The tile tree that streams, or None for a world with no tiles.
     terrain: Any
 
-    def __init__(self, tileset_path: str, memory: int = DEFAULT_MEMORY,
+    def __init__(self, tileset_path: str = '', memory: int = DEFAULT_MEMORY,
                  max_sse: float = DEFAULT_SSE, gravity: float = 9.81,
-                 traffic: int = 0) -> None:
+                 traffic: int = 0, _nothing_to_stream: bool = False) -> None:
+        # A world built from a course has nothing to read and nothing to
+        # stream, and says so here rather than by being constructed around
+        # ``__init__`` -- which left two places that had to agree about what a
+        # half-built world looks like. See :meth:`from_course`.
+        self.path = None
+        self.terrain = None
+        if _nothing_to_stream:
+            return
         if not os.path.exists(tileset_path) and not fetch.is_url(tileset_path):
             # An ordinary exception rather than SystemExit: this is a library
             # class, and a menu that offered a world which has since been moved
@@ -585,10 +593,7 @@ class RaceWorld:
         a :class:`~OpenGLContext.scenegraph.terrain.heightfield.HeightField`,
         and ``props`` whatever stands beside the road.
         """
-        world = cls.__new__(cls)
-        #: Nothing was read off disk and nothing streams: what a scenario is.
-        world.path = None
-        world.terrain = None
+        world = cls(_nothing_to_stream=True)
         world._assemble(
             [courses] if isinstance(courses, Course) else list(courses),
             field=field, props=list(props), traffic=traffic, gravity=gravity)

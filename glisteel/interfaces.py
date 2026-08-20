@@ -79,6 +79,10 @@ class CarLike(Protocol):
         """Which way it is pointing, as a unit vector."""
         ...                                      # pragma: no cover - a protocol
 
+    def forward_speed(self) -> float:
+        """How fast it is going along its own nose, signed."""
+        ...                                      # pragma: no cover - a protocol
+
 
 @runtime_checkable
 class CourseLike(Protocol):

@@ -313,31 +313,31 @@ class TestHittingSomething:
 
     def test_a_gentle_touch_is_not_a_crash(self) -> None:
         watch = self._watch()
-        assert watch.update(closing=1.5, dt=0.1) is None
+        assert watch.update(closing=1.5) is None
         assert watch.ended is None
 
     def test_meeting_something_at_speed_is(self) -> None:
         watch = self._watch()
-        assert watch.update(closing=28.0, dt=0.1) is not None
+        assert watch.update(closing=28.0) is not None
 
     def test_it_says_so_once(self) -> None:
         watch = self._watch()
-        watch.update(closing=28.0, dt=0.1)
-        assert watch.update(closing=28.0, dt=0.1) is None
+        watch.update(closing=28.0)
+        assert watch.update(closing=28.0) is None
 
     def test_and_says_what_happened(self) -> None:
         watch = self._watch()
-        assert 'car' in (watch.update(closing=28.0, dt=0.1) or '').lower()
+        assert 'car' in (watch.update(closing=28.0) or '').lower()
 
     def test_restarting_clears_it(self) -> None:
         watch = self._watch()
-        watch.update(closing=28.0, dt=0.1)
+        watch.update(closing=28.0)
         watch.restart()
         assert watch.ended is None
 
     def test_a_caller_may_set_where_the_line_is(self) -> None:
         watch = self._watch(survivable=40.0)
-        assert watch.update(closing=28.0, dt=0.1) is None
+        assert watch.update(closing=28.0) is None
 
 
 class TestHowFastTwoCarsAreClosing:

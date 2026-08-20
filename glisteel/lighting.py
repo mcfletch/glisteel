@@ -29,6 +29,7 @@ Neither class touches OpenGL or the scenegraph: they answer *which* lights and
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -92,6 +93,7 @@ class Luminaires:
         return lamp
 
 
+@dataclass
 class Headlights:
     """The light the car carries, for when the road has none.
 
@@ -99,9 +101,16 @@ class Headlights:
     converged the way a car's are, throws very nearly the same pool. What sells
     them is that the pool *sweeps* as the car turns, and one does that.
 
-    ``fitted`` is whether the car has any at all and ``always`` whether they
-    burn in daylight too; otherwise they come on where it is dark.
+    Its numbers are fields rather than class attributes, as
+    :class:`~glisteel.car.CarSpec` and :class:`~glisteel.driver.DriverStyle`
+    are: a car with a different beam is a different set of numbers, not a
+    subclass.
     """
+
+    #: Whether the car has any at all, and whether they burn in daylight too;
+    #: otherwise they come on where it is dark.
+    fitted: bool = True
+    always: bool = False
 
     #: Where the beam comes from, in the car's own frame: the front of it, at
     #: about the height of a headlamp. Negative Z is forward.
@@ -117,10 +126,6 @@ class Headlights:
 
     #: How hard it burns.
     intensity: float = 3.2
-
-    def __init__(self, fitted: bool = True, always: bool = False) -> None:
-        self.fitted = bool(fitted)
-        self.always = bool(always)
 
     def __repr__(self) -> str:
         return 'Headlights(%s)' % ('fitted' if self.fitted else 'none')

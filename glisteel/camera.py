@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from glisteel.geometry import yaw_of
 from glisteel.interfaces import CarLike
 
 __all__ = ['CameraPose', 'ChaseCamera']
@@ -80,8 +81,7 @@ class CameraPose:
 
     def heading(self) -> float:
         """Yaw in radians from -Z, for a view platform that wants angles."""
-        forward = self.target - self.position
-        return math.atan2(float(forward[0]), -float(forward[2]))
+        return yaw_of(self.target - self.position)
 
     def pitch(self) -> float:
         """Pitch in radians, positive looking up."""
@@ -156,11 +156,9 @@ class ChaseCamera:
         length = float(np.linalg.norm(flat))
         flat = flat / length if length > 1e-6 else np.array([0.0, 0.0, -1.0])
         if self.mode == 'cockpit':
-            # Across the car, which is what puts the eye in the driver's seat
-            # rather than between the two.
-            across = np.cross(flat, UP)
-            eye = (position - flat * COCKPIT_BACK + UP * COCKPIT_UP
-                   + across * COCKPIT_SIDE)
+            # On the car's own centreline: it seats two in single file, so
+            # there is no side for the driver to sit on.
+            eye = position - flat * COCKPIT_BACK + UP * COCKPIT_UP
             return eye, eye + flat * AHEAD_VIEW
         if self.mode == 'bonnet':
             eye = position + flat * BONNET_AHEAD + UP * BONNET_UP

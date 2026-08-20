@@ -153,6 +153,14 @@ class Car:
     def speed_kph(self) -> float:
         return self.vehicle.speed() * 3.6
 
+    def forward_speed(self) -> float:
+        """How fast it is going along its own nose, in metres per second.
+
+        Signed, so a car reversing reads negative -- which is the question
+        anything deciding between a brake and a reverse is actually asking.
+        """
+        return float(self.vehicle.forward_speed())
+
     def velocity(self) -> np.ndarray:
         """How fast it is going and which way, in metres per second.
 

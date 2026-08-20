@@ -1,4 +1,12 @@
-"""Timing a lap, knowing when one has been cut, and knowing when it is over.
+"""What decides how a run is going, and what ends it.
+
+Four rules, each fed a reading and a step and each answering once: how far round
+the car is (:class:`RaceTiming`), whether it is on the road and what it is
+driving on (:class:`OffRoad`), whether it hit something hard enough to matter
+(:class:`Collisions`), and how fast two things are coming together
+(:func:`closing_speed`). They share a shape -- fed, then asked, with a
+``restart`` -- so a session composes them without knowing what each is about.
+
 
 A lap is not "crossed the line": a car that reverses over the start line has
 not done a lap, and one that drives across the infield has not either. So the
@@ -142,6 +150,9 @@ def off_course(course: Any, position: Any, tolerance: float = 12.0) -> bool:
 #: of the carriageway -- gravel, then grass -- where a wheel loses most of its
 #: grip and picks up a great deal of drag. Past that is rough ground, and a car
 #: in it is not coming back out at speed.
+#: One of each is handed to every car that is on it. That is safe because
+#: ``Surface`` is frozen: nothing can change what every car in the process is
+#: driving on by changing what it was given.
 TARMAC = Surface()
 VERGE = Surface(grip=0.45, rolling=0.25)
 ROUGH = Surface(grip=0.30, rolling=0.55)
@@ -246,8 +257,14 @@ class Collisions:
     #: Set once the run is over, and the reason why.
     ended: str | None = None
 
-    def update(self, closing: float, dt: float) -> str | None:
-        """Read a closing speed; return the reason the run ended, once."""
+    def update(self, closing: float) -> str | None:
+        """Read a closing speed; return the reason the run ended, once.
+
+        No time step: what decides a crash is how fast the car arrived at
+        whatever it found, and how long it spent arriving changes nothing about
+        that. The sibling watchers take one because what they measure -- how
+        long a car has been off the road -- accumulates.
+        """
         if self.ended is not None:
             return None
         if float(closing) <= self.survivable:

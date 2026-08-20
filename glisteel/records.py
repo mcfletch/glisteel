@@ -132,9 +132,16 @@ class Records:
                         when=when if when is not None else date.today().isoformat())
         table = self._tables.setdefault(str(track), [])
         table.append(record)
+        # Sorted by time, and by nothing else, so two equal laps keep the order
+        # they were offered in -- and found by identity, because ``index``
+        # answers about the *first* record equal to this one, which for a lap
+        # that ties another is the wrong one.
         table.sort(key=lambda one: one.seconds)
         del table[KEPT:]
-        return table.index(record) + 1 if record in table else None
+        for place, kept in enumerate(table, start=1):
+            if kept is record:
+                return place
+        return None
 
     # -- keeping it ------------------------------------------------------------
 
