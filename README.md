@@ -71,6 +71,69 @@ and the interior and the canopy stay, because they are what that view is *of*: a
 dashboard, a wheel that turns as you steer, and the road seen through glass the
 light bends going through.
 
+## Getting it as a binary
+
+The releases page carries two builds of each tagged version, neither of which
+needs Python installed:
+
+* **`glisteel-<version>-windows-x64.zip`** — unzip it anywhere. `glisteel.exe`
+  drives, and `oglc-bake.exe` beside it bakes a world to drive.
+* **`glisteel_<version>_amd64.deb`** — installs the game and the Python that
+  runs it under `/opt/glisteel`, with `glisteel` and `oglc-bake` in
+  `/usr/games`, and puts the game in the desktop menu. `apt install
+  ./glisteel_*.deb` rather than `dpkg -i`, so that the OpenGL and X11 libraries
+  it asks the machine for are resolved.
+
+**No world travels with either.** A baked world is hundreds of megabytes and the
+one worth driving is the one you made, so a fresh install opens on an empty
+track list. Bake one first:
+
+```bash
+oglc-bake --output my-world --forest tiles
+glisteel my-world/tileset.json
+```
+
+`--forest tiles` is what makes a world the binaries can bake: the default forest
+is drawn with the tree art the [forest
+demo](https://github.com/mcfletch/openglcontext-forest) packages, which is not
+in either build, and `tiles` grows its trees from geometry instead.
+
+### Building them yourself
+
+Both builds are cut by a tag — `dist/v0.1.0a1` builds the distributions for
+`0.1.0a1` and attaches them to a release — and the version in the tag has to be
+the one in `glisteel/__init__.py`. Pushing to `main` builds nothing: these
+artifacts are hundreds of megabytes. `.github/workflows/dist.yml` runs both, and
+`workflow_dispatch` builds them from whatever is checked out without spending a
+version number.
+
+`packaging/` holds what either build needs:
+
+| File | Holds |
+|---|---|
+| `requirements-stack.txt` | where the engine stack comes from, which is the one place either build says so |
+| `entry.py` | the commands a bundle offers, and what each one runs |
+| `glisteel.spec` | the PyInstaller bundle |
+
+To build them by hand, in an environment with the game installed **not**
+editable — PyInstaller follows import statements and cannot see through an
+editable install's import hook:
+
+```bash
+pip install -r packaging/requirements-stack.txt ".[bake]" pyinstaller
+pyinstaller packaging/glisteel.spec --noconfirm     # dist/glisteel/
+
+uv python install --install-dir runtime 3.12
+oglc-deb --project . --extras bake --runtime runtime \
+    --requirement packaging/requirements-stack.txt \
+    --command glisteel --command oglc-bake --output dist
+```
+
+Almost nothing about the engine is in the spec file: PyOpenGL and OpenGLContext
+carry their own PyInstaller hooks, which PyInstaller finds by itself. `oglc-deb`
+is part of the engine too. Both are documented in [Packaging an
+application](https://github.com/mcfletch/openglcontext/blob/main/docs/packaging.html).
+
 ## What is where
 
 The game is deliberately thin. Streaming, rendering, roads and physics belong to

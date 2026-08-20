@@ -11,3 +11,5 @@ build/
 dist/
 baked-world/
 *.blend1
+# The relocatable interpreter oglc-deb is pointed at (uv python install --install-dir)
+runtime/

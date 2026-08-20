@@ -1,0 +1,210 @@
+name: distributions
+
+# The Windows bundle and the Debian package, built from a tag and from nothing
+# else. `dist/v0.1.0a1` builds the distributions for 0.1.0a1 and attaches them
+# to a release; an ordinary push builds nothing, because these artifacts are
+# hundreds of megabytes and take a quarter of an hour between them.
+#
+# The tag is its own namespace rather than a plain `v0.1.0a1` so that cutting a
+# binary release and cutting a source release stay separate decisions, and so
+# that a tag can be moved or re-cut without meaning anything to PyPI. The
+# version in it has to be the one in `glisteel/__init__.py`: a bundle named
+# after a version it does not contain is worse than no bundle.
+#
+#     git tag dist/v0.1.0a1 && git push origin dist/v0.1.0a1
+#
+# `workflow_dispatch` builds the same artifacts from whatever is checked out
+# and attaches them to no release, which is how to test a change to the
+# packaging without spending a version number on it.
+on:
+  push:
+    tags:
+      - 'dist/v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The interpreter the artifacts are built with and, for the Debian package,
+  # the one they carry. One version for both, so a bug reported against either
+  # is a bug in the same Python.
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - id: read
+        name: Read the version, and check the tag agrees with it
+        run: |
+          VERSION=$(python - <<'EOF'
+          import pathlib, re, sys
+          text = pathlib.Path('glisteel/__init__.py').read_text(encoding='utf-8')
+          found = re.search(r'''^__version__\s*=\s*['"]([^'"]+)['"]''', text, re.M)
+          if not found:
+              sys.exit('no __version__ in glisteel/__init__.py')
+          print(found.group(1))
+          EOF
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "glisteel $VERSION"
+          case "$GITHUB_REF" in
+            refs/tags/dist/v*)
+              TAGGED="${GITHUB_REF#refs/tags/dist/v}"
+              if [ "$TAGGED" != "$VERSION" ]; then
+                echo "::error::tag dist/v$TAGGED does not match __version__ $VERSION"
+                exit 1
+              fi
+              ;;
+          esac
+
+  windows:
+    name: windows bundle
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The stack first, from the file that is the one place either build says
+      # where it comes from; then the game with the extra that brings in the
+      # world baker, which travels in the bundle beside it.
+      - name: Install the game and the stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r packaging/requirements-stack.txt
+          python -m pip install ".[bake]"
+          python -m pip install pyinstaller
+
+      # PyOpenGL and OpenGLContext carry their own PyInstaller hooks, found
+      # through their `pyinstaller40` entry points, so the spec has only the
+      # game to describe.
+      - name: Freeze
+        run: pyinstaller packaging/glisteel.spec --noconfirm
+
+      # A bundle that cannot start is not worth uploading, and the ways it
+      # fails -- a plug-in module left behind, a shader that did not travel --
+      # all show up on the first import.
+      - name: Check the bundle runs
+        run: |
+          dist\glisteel\glisteel.exe --help
+          dist\glisteel\oglc-bake.exe --help
+
+      # The import graph PyInstaller built, for reading when the step above
+      # says a module is missing.
+      - name: Keep the build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-log
+          path: build/glisteel/warn-glisteel.txt
+
+      - name: Zip it
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: Compress-Archive -Path dist/glisteel/* -DestinationPath "glisteel-$env:VERSION-windows-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundle
+          path: glisteel-*-windows-x64.zip
+          if-no-files-found: error
+
+  debian:
+    name: debian package
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v5
+
+      # The interpreter that goes *in* the package: a relocatable build, which
+      # is what lets an environment be assembled here and run from /opt.
+      - name: Fetch the relocatable interpreter
+        run: uv python install --install-dir runtime ${{ env.PYTHON_VERSION }}
+
+      # `oglc-deb` is part of the engine, and `--no-deps` because the tool
+      # imports nothing but the standard library: the engine's own dependencies
+      # belong in the package being built, not on the machine building it.
+      - name: Install the packaging tool
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --no-deps \
+            "OpenGLContext @ git+https://github.com/mcfletch/openglcontext@develop" \
+            "PyOpenGL @ git+https://github.com/mcfletch/pyopengl@develop"
+
+      - name: Build the package
+        run: |
+          oglc-deb --project . --extras bake \
+            --runtime runtime \
+            --requirement packaging/requirements-stack.txt \
+            --command glisteel --command oglc-bake \
+            --menu-name 'GLinting Steel' \
+            --categories 'Game;Simulation;' \
+            --output dist
+
+      # Installed with apt rather than dpkg so that the dependencies the
+      # control file names are resolved -- which is also what tests that they
+      # are the right ones.
+      - name: Check it installs and the game starts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./dist/*.deb
+          dpkg-deb --info ./dist/*.deb
+          /usr/games/glisteel --help
+          /usr/games/oglc-bake --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: dist/*.deb
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [version, windows, debian]
+    if: startsWith(github.ref, 'refs/tags/dist/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # `gh` is on the runner already, so the release is cut without trusting a
+      # third-party action with a token that can write to the repository.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ls -l artifacts/
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --title "GLinting Steel $VERSION" \
+            --notes "Binary distributions of GLinting Steel $VERSION.
+
+          * \`glisteel-$VERSION-windows-x64.zip\` -- unzip it anywhere and run
+            \`glisteel.exe\`. \`oglc-bake.exe\` beside it bakes a world to drive:
+            \`oglc-bake.exe --output my-world\`, then \`glisteel.exe my-world\\tileset.json\`.
+          * The \`.deb\` installs the game and the Python that runs it under
+            \`/opt/glisteel\`, with \`glisteel\` and \`oglc-bake\` in \`/usr/games\`.
+
+          No world travels with either: a baked world is hundreds of megabytes,
+          and the one worth driving is the one you made."

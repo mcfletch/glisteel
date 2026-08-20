@@ -1,0 +1,35 @@
+# The engine stack a release build resolves from.
+#
+# This file is the one place either release build -- the Windows bundle and the
+# Debian package -- says where the stack comes from, and it is temporary. The
+# 4.0 line of PyOpenGL and the 3.0 line of OpenGLContext are not released, so
+# for now each project is taken from the branch its work lands on: the same
+# branches the development workspace pins its submodules to. Everything else --
+# numpy, pillow, glfw, pygltflib -- resolves from PyPI as an ordinary
+# dependency and is not named here.
+#
+# **When the stack is released, replace the lines below with version pins** and
+# nothing else about either build changes:
+#
+#     PyOpenGL >= 4.0.0
+#     OpenGLContext >= 3.0.0
+#     ...
+#
+# Until then a build is reproducible only as far as a branch is: two builds a
+# week apart are of different code. Pin a tag or a commit here for a release
+# that has to be rebuildable byte for byte.
+#
+# The two `accelerate` distributions live in subdirectories of their own
+# project's repository and are compiled, so a build host needs a C compiler.
+# They are not optional: the engine requires both.
+
+PyOpenGL @ git+https://github.com/mcfletch/pyopengl@develop
+PyOpenGL-accelerate @ git+https://github.com/mcfletch/pyopengl@develop#subdirectory=accelerate
+simpleparse @ git+https://github.com/mcfletch/simpleparse@master
+PyVRML97 @ git+https://github.com/mcfletch/pyvrml97@develop
+PyVRML97-accelerate @ git+https://github.com/mcfletch/pyvrml97@develop#subdirectory=accelerate
+TTFQuery @ git+https://github.com/mcfletch/ttfquery@master
+omi_audio @ git+https://github.com/mcfletch/omi_audio@main
+omi_physics @ git+https://github.com/mcfletch/omi_physics@develop
+OpenGLContext @ git+https://github.com/mcfletch/openglcontext@develop
+OpenGLContext-editor @ git+https://github.com/mcfletch/openglcontext-editor@main
