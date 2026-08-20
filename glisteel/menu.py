@@ -163,7 +163,10 @@ def finish_screen(result: Any, place: int | None = None,
     failure and is not dressed as one.
 
     There is nothing behind this screen, so Escape does not close it: the race
-    is over and the choice of what happens next has to be made.
+    is over and the choice of what happens next has to be made. **Making one
+    takes it away**, before the handler runs: what happens next is a fresh race
+    or another screen, and this one left standing over either is a modal panel
+    with nothing behind it to dismiss it.
     """
     heading = FINISHED if result.finished else str(result.outcome or '').upper()
     children: list[Any] = [Label(text=heading, name='heading')]
@@ -175,13 +178,27 @@ def finish_screen(result: Any, place: int | None = None,
     children.append(Separator(top=6))
     children.extend(_table(records))
     children.append(Separator(top=6))
+    answered: list[str] = []
+
+    def choose(name: str, handler: Callable[[], None] | None) -> Callable[[], None]:
+        def chosen() -> None:
+            if answered:
+                return
+            answered.append(name)
+            panel.close(name)
+            if handler is not None:
+                handler()
+        return chosen
+
     children.extend(_buttons([
-        ('again', 'Drive it again', on_again, True),
-        ('tracks', 'Another track', on_tracks, False),
-        ('quit', 'Quit', on_quit, False)]))
-    return Panel(title='', scrim=True, modal=True, closeOnEscape=False,
-                 preferredColumns=MENU_COLUMNS,
-                 children=[Column(children=children, spacing=4)])
+        (name, text, choose(name, handler), primary) for name, text, handler,
+        primary in (('again', 'Drive it again', on_again, True),
+                    ('tracks', 'Another track', on_tracks, False),
+                    ('quit', 'Quit', on_quit, False))]))
+    panel = Panel(title='', scrim=True, modal=True, closeOnEscape=False,
+                  preferredColumns=MENU_COLUMNS,
+                  children=[Column(children=children, spacing=4)])
+    return panel
 
 
 # -- the pieces ----------------------------------------------------------------

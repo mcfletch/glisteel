@@ -9,13 +9,13 @@ from glisteel.race import Lap, RaceTiming, off_course
 from glisteel.world import Course
 
 
-def _oval(points=64, radius=100.0):
+def _oval(points=64, radius=100.0, start=0.0):
     angle = np.linspace(0.0, 2 * math.pi, points, endpoint=False)
     line = np.stack([radius * np.cos(angle), np.zeros(points),
                      radius * np.sin(angle)], axis=-1)
     return Course(name='circuit', centreline=line, carriageway_width=8.0,
                   total_width=16.0, closed=True,
-                  length=float(2 * math.pi * radius))
+                  length=float(2 * math.pi * radius), start=start)
 
 
 def _drive(timing, course, start=0, stop=None, step=1, dt=0.1):
@@ -90,6 +90,47 @@ class TestGoingRound:
 
     def test_before_any_lap_there_is_no_best(self) -> None:
         assert RaceTiming(_oval()).best is None
+
+
+class TestTheLineTheWorldDrew:
+    """A lap is timed across the line the world put down, wherever that is.
+
+    A world says where its start line is; timed from the point the centreline
+    array happens to begin at instead, the clock turns over somewhere down the
+    back of the circuit and the time is for a lap nobody drove.
+    """
+
+    def _round(self, timing, course, dt=0.1):
+        """A lap starting and ending at the line the course names."""
+        first = course.start_index
+        total = len(course.centreline)
+        order = [(first + step) % total for step in range(1, total + 1)]
+        return [lap for lap in
+                (timing.update(course.point(index), dt) for index in order)
+                if lap is not None]
+
+    def test_a_lap_turns_over_at_that_line(self) -> None:
+        course = _oval(start=300.0)
+        timing = RaceTiming(course)
+        timing.update(course.point(course.start_index), 0.1)
+        assert len(self._round(timing, course)) == 1
+
+    def test_and_not_at_the_start_of_the_array(self) -> None:
+        """Round from the world's line to just short of it: no lap yet."""
+        course = _oval(start=300.0)
+        timing = RaceTiming(course)
+        timing.update(course.point(course.start_index), 0.1)
+        first = course.start_index
+        total = len(course.centreline)
+        found = [timing.update(course.point((first + step) % total), 0.1)
+                 for step in range(1, total)]
+        assert not any(lap is not None for lap in found)
+
+    def test_the_car_is_on_the_line_when_the_lap_starts(self) -> None:
+        course = _oval(start=300.0)
+        timing = RaceTiming(course)
+        timing.update(course.point(course.start_index), 0.1)
+        assert timing.progress == pytest.approx(0.0, abs=1.0 / 64)
 
 
 class TestWhatDoesNotCount:

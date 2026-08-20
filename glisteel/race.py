@@ -75,15 +75,25 @@ class RaceTiming:
 
     def sector_of(self, position: Any) -> int:
         """Which sector of the circuit a point is nearest."""
+        return int(self.round_from_the_line(position) * self.sectors)
+
+    def round_from_the_line(self, position: Any) -> float:
+        """How far round the circuit a point is, 0 at the line and 1 back at it.
+
+        Measured from where the world drew its start line
+        (:attr:`~glisteel.world.Course.start_index`) rather than from wherever
+        the centreline's array happens to begin: those are the same place only
+        by accident, and timed from the second the clock turns over somewhere
+        down the back of the circuit.
+        """
         index, _ = self.course.nearest(position)
-        return int(index * self.sectors // len(self.course.centreline))
+        total = len(self.course.centreline)
+        return float((index - self.course.start_index) % total) / total
 
     def update(self, position: Any, dt: float) -> Lap | None:
         """Advance the clock; return a lap if one has just been completed."""
-        index, _ = self.course.nearest(position)
-        total = len(self.course.centreline)
-        self.progress = index / total
-        sector = int(index * self.sectors // total)
+        self.progress = self.round_from_the_line(position)
+        sector = int(self.progress * self.sectors)
 
         if not self.started or self._last_sector is None:
             # The clock starts when the car first moves off the line, not when

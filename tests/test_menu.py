@@ -223,12 +223,14 @@ class TestTheFinish:
 
     def test_each_button_calls_its_handler(self):
         called = []
-        panel = menu.finish_screen(
-            Result(seconds=84.0, laps=1),
-            on_again=lambda: called.append('again'),
-            on_tracks=lambda: called.append('tracks'),
-            on_quit=lambda: called.append('quit'))
         for name in ('again', 'tracks', 'quit'):
+            # One screen per button: choosing takes the screen away, so a
+            # second choice on the same one is a press nobody made.
+            panel = menu.finish_screen(
+                Result(seconds=84.0, laps=1),
+                on_again=lambda: called.append('again'),
+                on_tracks=lambda: called.append('tracks'),
+                on_quit=lambda: called.append('quit'))
             widget(panel, name).on_activate(None)
         assert called == ['again', 'tracks', 'quit']
 
@@ -247,6 +249,43 @@ class TestTheFinish:
     def test_it_cannot_be_escaped_out_of(self):
         """There is nothing behind it to go back to: the race is over."""
         assert not menu.finish_screen(Result(seconds=84.0, laps=1)).closeOnEscape
+
+    def test_choosing_something_takes_the_screen_away(self):
+        """Whatever is chosen, the race behind it is what happens next.
+
+        A finish left standing over the world it asked about is a modal panel
+        with nothing behind it to dismiss it: the car is back on the grid and
+        the player cannot reach it.
+        """
+        for name in ('again', 'tracks', 'quit'):
+            panel = menu.finish_screen(Result(seconds=84.0, laps=1),
+                                       on_again=lambda: None,
+                                       on_tracks=lambda: None,
+                                       on_quit=lambda: None)
+            widget(panel, name).on_activate(None)
+            assert panel.closed, name
+
+    def test_and_it_is_gone_before_the_handler_runs(self):
+        """What the handler does next -- another screen, a fresh race -- is
+        done with this one already off the stack."""
+        seen = []
+        panel = menu.finish_screen(Result(seconds=84.0, laps=1),
+                                   on_again=lambda: seen.append(panel.closed))
+        widget(panel, 'again').on_activate(None)
+        assert seen == [True]
+
+    def test_a_button_with_no_handler_still_dismisses_it(self):
+        panel = menu.finish_screen(Result(seconds=84.0, laps=1))
+        widget(panel, 'again').on_activate(None)
+        assert panel.closed
+
+    def test_it_answers_once_however_often_it_is_pressed(self):
+        called = []
+        panel = menu.finish_screen(Result(seconds=84.0, laps=1),
+                                   on_again=lambda: called.append('again'))
+        widget(panel, 'again').on_activate(None)
+        widget(panel, 'again').on_activate(None)
+        assert called == ['again']
 
 
 if __name__ == '__main__':

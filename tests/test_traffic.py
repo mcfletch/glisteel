@@ -142,6 +142,27 @@ class TestWhatItDoesNext:
         assert car.state == PULLING_OFF
         assert abs(float(car.position()[0])) > 4.0
 
+    def test_and_stops_beside_the_road_rather_than_in_the_trees(self) -> None:
+        """A car pulls onto the verge. Where it ends up is measured from the
+        road, so the side of it the car was already keeping is part of the
+        distance rather than something to add to it -- counted twice, a car
+        that pulled off is a car rooted a metre and a half inside the forest.
+        """
+        course = _course()
+        car = _car(course=course)
+        car.pull_off()
+        for _ in range(60 * 8):
+            car.advance(1.0 / 60.0)
+        assert abs(float(car.position()[0])) <= course.total_width / 2.0
+
+    def test_and_it_is_off_the_carriageway_all_the_same(self) -> None:
+        course = _course()
+        car = _car(course=course)
+        car.pull_off()
+        for _ in range(60 * 8):
+            car.advance(1.0 / 60.0)
+        assert abs(float(car.position()[0])) > course.carriageway_width / 2.0
+
     def test_and_it_comes_to_a_stop(self) -> None:
         car = _car()
         car.pull_off()
@@ -502,46 +523,66 @@ def _pointing(yaw):
     return tuple(turn @ nose)
 
 
-class TestStandingOnTheGround:
-    """A car's station says where along the road it is, not how high the road
-    is where it goes off it -- and a ground function asked the wrong question
-    puts the whole fleet in the air."""
+class TestStandingOnTheRoad:
+    """A car is placed by how far along the road it is and how far across it,
+    so where its wheels meet the surface is something the road itself answers.
 
-    def _fleet(self, ground=None):
+    Asking the physics what is under a car instead answers about whatever is
+    standing there -- which includes the car's own collider, a metre of it, so
+    the whole fleet bounces between the road and its own roof; and it answers
+    about nothing at all where the surface under a car has not been built yet,
+    which over a viaduct is the valley floor twenty metres down.
+    """
+
+    def _fleet(self, course=None):
         from omi_physics.world import PhysicsWorld
         world = PhysicsWorld()
-        return world, Traffic(course=_ring(), count=1, seed=2, physics=world,
-                              ground=ground)
+        return world, Traffic(course=course or _ring(), count=1, seed=2,
+                              physics=world)
 
-    def test_without_a_ground_it_rides_the_road(self) -> None:
+    def test_a_car_rides_the_road_it_is_on(self) -> None:
         _world, traffic = self._fleet()
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
         assert float(traffic._standing(traffic.cars[0])[1]) < 1.5
 
-    def test_a_ground_is_asked_where_the_car_is(self) -> None:
-        asked = []
-
-        def under(position):
-            asked.append(np.asarray(position, dtype='d').copy())
-            return -12.0
-        _world, traffic = self._fleet(ground=under)
-        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
-        assert asked and len(asked[0]) == 3
-        assert float(np.hypot(asked[0][0], asked[0][2])) > 200.0
-
-    def test_and_the_car_ends_up_on_it(self) -> None:
-        """It stands on the ground, and is hit about its own middle."""
-        _world, traffic = self._fleet(ground=lambda position: -12.0)
+    def test_and_it_is_hit_about_its_own_middle(self) -> None:
+        _world, traffic = self._fleet()
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
         car = traffic.cars[0]
-        assert float(traffic._standing(car)[1]) == pytest.approx(-12.0)
         assert float(traffic._centre(car)[1]) == pytest.approx(
-            -12.0 + car.kind.height / 2.0)
+            float(traffic._standing(car)[1]) + car.kind.height / 2.0)
 
-    def test_ground_that_says_nothing_leaves_it_on_the_road(self) -> None:
-        _world, traffic = self._fleet(ground=lambda position: None)
-        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
-        assert float(traffic._standing(traffic.cars[0])[1]) < 1.5
+    def test_it_stands_on_the_surface_rather_than_on_the_crown(self) -> None:
+        """A road is crowned so that it drains, and a car keeping its own side
+        of one stands lower than the middle of it by the camber."""
+        course = _course()
+        car = _car(course=course, station=100.0)
+        drop = course.road_profile().section_offset(car.lane)
+        assert float(car.position()[1]) == pytest.approx(float(drop), abs=1e-6)
+        assert float(drop) < 0.0
+
+    def test_and_a_car_pulled_onto_the_verge_stands_on_the_verge(self) -> None:
+        course = _course()
+        car = _car(course=course)
+        car.pull_off()
+        for _ in range(60 * 8):
+            car.advance(1.0 / 60.0)
+        across = abs(float(car.position()[0]))
+        assert float(car.position()[1]) == pytest.approx(
+            float(course.road_profile().section_offset(across)), abs=1e-6)
+
+    def test_a_car_climbing_rides_the_line_it_is_on(self) -> None:
+        """Between two points of the centreline as well as at them: a fleet
+        that only knows the sampled heights hops from one to the next."""
+        rising = _course()
+        rising.centreline[:, 1] = rising.centreline[:, 2] * 0.05
+        heights = []
+        car = _car(course=rising, station=100.0)
+        for _ in range(200):
+            car.station += 0.25
+            heights.append(float(car.position()[1]))
+        steps = np.diff(heights)
+        assert float(steps.max() - steps.min()) < 1e-6
 
 
 class TestWhatTheTrafficIsMadeOf:

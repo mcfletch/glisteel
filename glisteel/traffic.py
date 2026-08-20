@@ -47,8 +47,10 @@ BRAKE = 4.5
 SLOW_TO = 0.35
 SLOW_FOR = 6.0
 
-#: How far off the centreline a car pulled off sits, in metres past the
-#: carriageway's own edge, and how long it takes to get there.
+#: How far past the carriageway's own edge a car pulled off sits, in metres,
+#: and how long it takes to get there. Onto the verge and no further: the
+#: forest starts a metre or so beyond that, and a car parked in it is a car
+#: that drove through trees to get there.
 OFF_ROAD = 1.6
 PULL_OFF_SECONDS = 14.0
 
@@ -189,16 +191,37 @@ class TrafficCar:
         if self.ahead is not None:
             step = min(step, max(self.ahead[0] - STANDING_GAP, 0.0))
         self.station = self._along(self.station + self.heading * step)
-        wanted_side = (self.course.carriageway_width / 2.0 + OFF_ROAD
-                       if self.state == PULLING_OFF else 0.0)
+        wanted_side = self._pulled_off() if self.state == PULLING_OFF else 0.0
         self._sideways += max(-dt * 1.2, min(dt * 1.2,
                                              wanted_side - self._sideways))
 
+    def _pulled_off(self) -> float:
+        """How much further out than its own side a car pulling off goes.
+
+        :data:`OFF_ROAD` past the carriageway's edge is where it ends up, and
+        it is already :attr:`lane` out from the centreline, so what it has left
+        to travel is the difference. Added to the lane instead, a car that
+        pulled off is standing half its own width past the verge, which on this
+        road is inside the trees.
+        """
+        return max(float(self.course.carriageway_width) / 2.0 + OFF_ROAD
+                   - self.lane, 0.0)
+
     def position(self) -> np.ndarray:
-        """Where the car is: on its own side of the road, on the surface."""
+        """Where the car is: on its own side of the road, on the surface.
+
+        The height is the road's own, taken from the centreline at this station
+        and dropped by the camber at this distance across
+        (:meth:`glisteel.world.Course.surface_offset`). The road knows where
+        its surface is everywhere it goes -- through a bore, over a deck, on
+        the ground -- so nothing is asked of the physics, which would answer
+        about whatever else is standing there and about nothing at all where
+        the surface under a car has not been built yet.
+        """
         centre, right = self._frame()
-        out = self.lane * self.heading + self._sideways * self.heading
+        out = (self.lane + self._sideways) * self.heading
         at: np.ndarray = centre + right * out
+        at[1] += float(self.course.surface_offset(abs(out)))
         return at
 
     def velocity(self) -> np.ndarray:
@@ -277,17 +300,13 @@ class Traffic:
 
     def __init__(self, course: Any, count: int = CARS, reach: float = REACH,
                  limit: float | None = None, seed: int = 0,
-                 physics: Any = None, ground: Any = None) -> None:
+                 physics: Any = None) -> None:
         self.course = course
         self.count = int(count)
         self.reach = float(reach)
         self.limit = float(limit) if limit is not None else _limit(course)
         self.seed = int(seed)
         self.physics = physics
-        #: The ground a car sits on, ``ground(position) -> height or None``;
-        #: without it a car rides the centreline's own height, which is the
-        #: road's -- right wherever the road is on the ground.
-        self.ground = ground
         #: Every car on the road right now.
         self.cars: list[TrafficCar] = []
         #: What draws them. Mount it once; its children come and go.
@@ -480,23 +499,23 @@ class Traffic:
                 node.rotation = (0.0, 1.0, 0.0, car.heading_angle())
             body = self._bodies.get(id(car))
             if body is not None and self.physics is not None:
-                self.physics.position[body] = self._centre(car)
+                self.physics.position[body] = self._centre(car, at)
                 self.physics.orientation[body] = _yaw(car.heading_angle())
 
     def _standing(self, car: TrafficCar) -> np.ndarray:
         """Where a car meets the road: its own position, on the surface."""
-        at = np.asarray(car.position(), dtype='d').copy()
-        if self.ground is not None:
-            found = self.ground(at)
-            if found is not None:
-                at[1] = float(found)
-        return at
+        return np.asarray(car.position(), dtype='d')
 
-    def _centre(self, car: TrafficCar) -> np.ndarray:
-        """Where the middle of a car is: half its own height off the road."""
-        at = self._standing(car)
-        at[1] += car.kind.height / 2.0
-        return at
+    def _centre(self, car: TrafficCar, at: Any = None) -> np.ndarray:
+        """Where the middle of a car is: half its own height off the road.
+
+        ``at`` is where its wheels are, for a caller that has already worked
+        that out.
+        """
+        found = (self._standing(car) if at is None
+                 else np.asarray(at, dtype='d')).copy()
+        found[1] += car.kind.height / 2.0
+        return found
 
     def ahead_of(self, position: Any, forward: Any, reach: float = REACH,
                  width: float = IN_THE_WAY) -> list[TrafficCar]:

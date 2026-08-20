@@ -6,6 +6,41 @@ import numpy as np
 import pytest
 
 
+class TestWhereALapBegins:
+    """A world says where its own start line is, and the game has to put the
+    car on it.
+
+    The baker writes the station its chequered line and its gantry are built
+    at. Ignored, the car is stood at whatever point of the centreline the array
+    happens to begin at -- which on a circuit routed through a landscape is
+    somewhere else entirely, and quite possibly half on the shoulder -- while
+    the line the lap is timed across is drawn a kilometre away.
+    """
+
+    def _ring(self, start=0.0, points=64, radius=100.0):
+        from glisteel.world import courses_in
+        angle = np.linspace(0.0, 2 * math.pi, points, endpoint=False)
+        line = np.stack([radius * np.cos(angle), np.zeros(points),
+                         radius * np.sin(angle)], axis=-1)
+        return courses_in({'extras': {'roads': [{
+            'name': 'ring', 'centreline': line.tolist(), 'closed': True,
+            'length': 2 * math.pi * radius, 'start': start}]}})[0]
+
+    def test_a_world_that_names_one_is_taken_at_its_word(self) -> None:
+        course = self._ring(start=300.0)
+        assert course.stations[course.start_index] == pytest.approx(300.0,
+                                                                    abs=12.0)
+
+    def test_and_a_world_that_does_not_starts_where_its_line_does(self) -> None:
+        assert self._ring().start_index == 0
+
+    def test_the_car_is_stood_on_the_line_the_world_drew(self) -> None:
+        course = self._ring(start=300.0)
+        at, _heading = course.grid_position(course.start_index)
+        along = course.stations[course.nearest(at)[0]]
+        assert float(along) == pytest.approx(300.0, abs=12.0)
+
+
 class TestHowFarOffTheLineACarIs:
     """Measured to the road, not to the nearest point written down for it. A
     course is a shape sampled every few metres, and a car exactly on the line

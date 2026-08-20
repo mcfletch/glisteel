@@ -787,14 +787,23 @@ def build_hero(materials):
 #: it read as a car and that guesswork got wrong: the width is nearly constant
 #: from the front arches to the tail, the whole body is low, and the front
 #: arches stand above the bonnet between them.
+#:
+#: **The bonnet leaves the screen at the belt line and falls from there.** The
+#: driver's eye is a hand's width over the front arches, so a bonnet that
+#: starts below the base of the screen is seen edge-on for its whole length and
+#: reads as a bar of metal with the arches standing up at each end of it, with
+#: the road showing between them. Leaving the screen at the height the glass
+#: meets it and falling to the nose over the next metre gives the eye the
+#: *surface*, which is what a driver sees over. The arches still stand proud of
+#: it, by four centimetres rather than eleven.
 _HULL_SECTIONS = [
     (NOSE, car_section(0.42, -0.300, -0.060, 0.020, 0.30, 0.01, tuck=0.86)),
     (2.00, car_section(0.558, -0.306, -0.011, 0.078, 0.41, 0.01, tuck=0.86)),
-    (1.81, car_section(0.751, -0.310, 0.088, 0.109, 0.56, 0.01, tuck=0.82)),
-    (1.62, car_section(0.831, -0.310, 0.167, 0.150, 0.62, 0.01, tuck=0.78)),
-    (1.43, car_section(0.906, -0.310, 0.290, 0.170, 0.62, tuck=0.72,
+    (1.81, car_section(0.751, -0.310, 0.088, 0.128, 0.56, 0.01, tuck=0.82)),
+    (1.62, car_section(0.831, -0.310, 0.167, 0.186, 0.62, 0.01, tuck=0.78)),
+    (1.43, car_section(0.906, -0.310, 0.290, 0.246, 0.62, tuck=0.72,
                        well=WELL - 0.07)),
-    (FRONT_AXLE, car_section(HALF_W, -0.310, 0.340, 0.235, 0.62, tuck=0.62,
+    (FRONT_AXLE, car_section(HALF_W, -0.310, 0.340, 0.300, 0.62, tuck=0.62,
                              shoulder=0.74, well=WELL)),
     (1.05, car_section(0.906, -0.310, 0.330, 0.270, 0.62, tuck=0.62,
                        shoulder=0.74, well=WELL - 0.07)),

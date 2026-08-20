@@ -222,6 +222,20 @@ class TestTheFinish:
         session.restart()
         assert (session.run.phase, session.timing.current) == (COUNTDOWN, 0.0)
 
+    def test_and_stands_it_on_the_grid_from_wherever_it_got_to(self) -> None:
+        """The surfaces a car drives on are held near it and dropped behind
+        it, so a grid the player left a kilometre back has nothing under it
+        until the world is brought in around it again. A car put there without
+        that falls through the world and keeps falling."""
+        session = _session(scenarios.straight(length=1600.0),
+                           driver=_Pedals(throttle=1.0))
+        _drive(session, 25.0)
+        session.restart()
+        _drive(session, 1.0)
+        road = session.course.point(session.grid)[1]
+        assert abs(float(session.car.position[1]) - road) < 1.0, \
+            session.car.position
+
 
 class TestPuttingTheCarBack:
     def test_a_car_through_the_floor_of_the_world_is_put_back(self) -> None:

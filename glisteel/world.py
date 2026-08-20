@@ -91,6 +91,10 @@ class Course:
     total_width: float
     closed: bool
     length: float
+    #: How far along the centreline the lap begins, in metres -- where the
+    #: world drew its own start line and stood its gantry. Zero for a road with
+    #: no line on it, which is where its own start is anyway.
+    start: float = 0.0
     structures: tuple[Structure, ...] = ()
     #: The road's cross-section as the world wrote it, or empty for a world
     #: that only said how wide the road is.
@@ -119,6 +123,25 @@ class Course:
         return RoadProfile(lane_width=self.carriageway_width / 2.0, lanes=2,
                            shoulder_width=beside * 0.4,
                            verge_width=beside * 0.6)
+
+    @functools.cached_property
+    def _section(self) -> Any:
+        """This road's cross-section, worked out once.
+
+        A baked world's road does not change shape, and this is asked about
+        every vehicle on it every frame.
+        """
+        return self.road_profile()
+
+    def surface_offset(self, across: Any) -> Any:
+        """How far below the crown the road's surface is, that far out.
+
+        ``across`` is one distance from the centreline or an array of them, in
+        metres. What puts anything placed by how far along and how far across
+        the road it is -- a traffic car, a marker -- at the height the road
+        actually is there, rather than at the height of its crown.
+        """
+        return self._section.section_offset(across)
 
     @functools.cached_property
     def stations(self) -> np.ndarray:
@@ -192,7 +215,8 @@ class Course:
         but a tool that edits a course in place has to be able to say so, and a
         cache with no way to clear it is a trap rather than a saving.
         """
-        for name in ('stations', 'segments', 'ground_line', 'radii'):
+        for name in ('stations', 'segments', 'ground_line', 'radii',
+                     '_section', 'start_index'):
             self.__dict__.pop(name, None)
         self._last_nearest = None
 
@@ -356,18 +380,23 @@ class Course:
         """A point of the centreline, moved ``offset`` metres to its right."""
         return self.point(index) + self.across(index) * float(offset)
 
-    @property
+    @functools.cached_property
     def start_index(self) -> int:
         """Which point of the line a car is put on to begin with.
 
-        The first point on a circuit, because that is where the lap starts and
-        ends. An open road has no line, and its first point is a place where
-        half the car hangs over the end with nothing under the back wheels, so
-        the grid is set back far enough along it for a car to stand on the road.
+        The point nearest :attr:`start`, which is where the world drew its
+        chequered line and stood its gantry: a car stood anywhere else is a car
+        on a grid the lap is not timed from, and on a circuit routed through a
+        landscape that is as likely to be a shoulder on a bend as a straight.
+
+        An open road has no line, and its first point is a place where half the
+        car hangs over the end with nothing under the back wheels, so the grid
+        is set back far enough along it for a car to stand on the road.
         """
+        wanted = max(float(self.start), 0.0 if self.closed else GRID_SETBACK)
+        found = int(np.searchsorted(self.stations, wanted))
         if self.closed:
-            return 0
-        found = int(np.searchsorted(self.stations, GRID_SETBACK))
+            return found % len(self.centreline)
         return min(found, max(len(self.centreline) - 2, 0))
 
     def grid_position(self, index: int = 0, height: float = 1.0,
@@ -409,6 +438,7 @@ def courses_in(document: Any) -> list[Course]:
             total_width=float(road.get('totalWidth', 12.0)),
             closed=bool(road.get('closed', False)),
             length=float(road.get('length', 0.0)),
+            start=float(road.get('start', 0.0)),
             profile=dict(road.get('profile') or {}),
             structures=tuple(
                 Structure(kind=str(one.get('kind', 'dirt')),
@@ -598,8 +628,7 @@ class RaceWorld:
         if traffic and self.course is not None:
             from glisteel.traffic import Traffic
             self.traffic = Traffic(self.course, count=int(traffic),
-                                   physics=self.physics,
-                                   ground=self.ground_under)
+                                   physics=self.physics)
 
     def _bores(self) -> Any:
         """Where the ground is not there, because a road runs inside it.

@@ -160,6 +160,10 @@ lap begins and ends, with a chequered line painted across the tarmac under it,
 so the timer turning over is something a driver saw coming. Its two legs are
 solid: clip one and the run ends the way hitting anything else does.
 
+**The world says where that line is**, as a distance along the centreline, and
+it is where the car is stood on the grid and where the clock turns over. A world
+that names none begins where its centreline does.
+
 **There is a map.** The whole circuit, bottom left, with the car on it and the
 traffic marked, so a driver knows what is round the next bend and how much of
 the lap is left.
@@ -171,6 +175,11 @@ altogether. None of them will drive through the car in front, and that includes
 yours -- a car on the grid is a car in the road. They are placed and driven by
 distance along the course rather than simulated as vehicles, which is why there
 can be eight of them for nothing measurable.
+
+**They ride the road's own surface**, at the height its centreline runs at and
+dropped by the camber at the distance across they keep -- through a bore, over a
+deck and on the ground alike. One pulled off stands on the verge, 1.6 m past the
+carriageway's edge, which leaves half a car between it and the treeline.
 
 **The steering keys wind a wheel on and off.** Left and right are a key each, so
 the raw input is full lock or none; held straight to the car that is a spin at
@@ -321,22 +330,34 @@ the wheel.
 inputs, a real driver puts in a continuous small correction holding the car on
 the line, and a keyboard cannot express it. Without that, every tap is a
 *permanent* change of direction: the wheel centres, the car keeps the heading,
-and it crosses the road until the road runs out. So with nothing held, the wheel
-is put where it needs to be to bring the car back to the way the road goes
-(`glisteel.assist`).
+and it crosses the road until the road runs out. A crowned road does the same
+thing more slowly and in one direction, since the surface falls away to each
+side so that it drains. So with nothing held, the wheel is put where it needs to
+be to hold the car on the line it is on (`glisteel.assist`).
+
+**The line is the player's.** Whatever the car is on when the wheel is let go is
+what gets held, drawn back inside the carriageway's edge by half a car and no
+further. Steering out and letting go is how a lane is changed, and the aid then
+holds the new one — which is what makes a pass something you can hold rather
+than something you fight the wheel through. An aid with a line of its own, the
+middle of the road or the middle of a lane, pulls the car across the road under
+a player who put it somewhere else on purpose.
 
 `--assist` is how much of that correction is used, and it is the steering
 difficulty dial: **0 hands the car back entirely** and is the car as the physics
 has it; 1 holds the line for you. What a 0.3 s tap — about the shortest input at
-the frame rates a full world runs at — does to the car:
+the frame rates a full world runs at — leaves behind, driven flat out on a
+straight:
 
-| speed | `--assist 0` | `--assist 0.55` |
+| speed at the tap | `--assist 0` | `--assist 0.55` |
 |---|---|---|
-| 32 km/h | 5.4 m off the line | **0.3 m** |
-| 86 km/h | 7.6 m off the line | **0.4 m** |
-| 86 km/h, 0.6 s hold | 19.6 m | **1.7 m** |
+| 32 km/h | 6.2 m off the line | **0.4 m** |
+| 86 km/h | 7.0 m off the line | **0.4 m** |
+| 86 km/h, 0.6 s hold | 16.5 m | **2.2 m** |
 
-The carriageway is 7.2 m wide.
+The carriageway is 7.2 m wide. With the aid on those are where the car *settles*
+and stays; without it they are where it had got to by the time it stopped, still
+crossing the road.
 
 ### Lights, and the eight of them there are
 

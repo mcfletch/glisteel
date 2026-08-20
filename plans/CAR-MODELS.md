@@ -187,6 +187,16 @@ glass and the bonnet stay, which is what puts a dashboard, a windscreen and
 something to look over in front of the driver. The chase and bonnet views draw
 all four.
 
+**The bonnet leaves the screen at the belt line.** The driver's eye is at
+`COCKPIT_UP` (0.40 over the body's centre) and the front arches top out at 0.34,
+so the eye is a hand's width over them: a bonnet whose crown starts below the
+base of the screen and falls from there is seen almost edge-on for its whole
+length. It reads as a bar of metal with the arches standing up at each end and
+the road showing between them, which is not a bonnet. The crown leaves the
+screen at the height the glass meets it and falls to the nose over the next
+metre, so what the eye gets is the *surface*. The arches still stand proud of
+it, by 0.04 rather than 0.11.
+
 ### Wheels
 
 Separate files because they are placed four times and animated: two variants

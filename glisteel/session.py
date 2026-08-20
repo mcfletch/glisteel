@@ -204,7 +204,7 @@ class Session:
         #: Which part of the race this is, and what it lets through to the car.
         self.run = Run(laps=laps)
         #: The steering the game puts in while the player is not steering.
-        self.assist = Straighten(course, strength=assist, lane=self.lane)
+        self.assist = Straighten(course, strength=assist)
         self._accumulated = 0.0
         self._stuck_for = 0.0
         self._settle()
@@ -337,7 +337,7 @@ class Session:
         """A fresh race, from the grid, on the lights."""
         self.grid = self.course.start_index
         position, heading = self._grid_placement()
-        self.car.place(position, heading)
+        self._stand_the_car(position, heading)
         self.timing.restart()
         self.watch.restart()
         self.crashes.restart()
@@ -368,8 +368,27 @@ class Session:
         index, _ = self.course.nearest(self.car.position)
         position, heading = self.course.grid_position(index, height=1.5,
                                                       lane=self.lane)
-        self.car.place(position, heading)
+        self._stand_the_car(position, heading)
         self.camera.reset()
+
+    def _stand_the_car(self, position: Any, heading: float) -> None:
+        """Put the car down there, with the world brought in around it first.
+
+        The surfaces a car meets are held near it and dropped behind it
+        (:meth:`glisteel.world.RaceWorld.stream`), so a place the car is not is
+        a place with nothing under it: a grid the player left a kilometre back
+        has no road, and a car put on it falls through the world and goes on
+        falling. Streaming the world around the spot before the car arrives is
+        what puts the ground there to land on.
+        """
+        where = tuple(float(v) for v in np.asarray(position, dtype='d')[:3])
+        if not self.world.settled(where):
+            log.warning('the ground at %.0f, %.0f has not loaded; '
+                        'the car may fall', where[0], where[2])
+        self.car.place(position, heading)
+        # The line the aid was holding was a line on the road the car was on
+        # before it was picked up, which is not where it is now.
+        self.assist.release()
 
     def _carry_on(self) -> None:
         """Let the race go on: the lap is abandoned, the race is not."""
