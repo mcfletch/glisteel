@@ -43,6 +43,7 @@ from typing import Any
 import numpy as np
 
 from glisteel.driver import Autopilot, DriverStyle
+from glisteel.interfaces import CourseLike, SessionLike
 
 __all__ = ['DEADZONE', 'MARGIN', 'STRENGTH', 'Straighten']
 
@@ -74,7 +75,7 @@ class Straighten:
     race and changing :attr:`strength` mid-race takes effect on the next step.
     """
 
-    def __init__(self, course: Any, strength: float = STRENGTH,
+    def __init__(self, course: CourseLike, strength: float = STRENGTH,
                  deadzone: float = DEADZONE, margin: float = MARGIN) -> None:
         self.strength = float(strength)
         self.deadzone = float(deadzone)
@@ -128,7 +129,7 @@ class Straighten:
         edge = max(float(course.carriageway_width) / 2.0 - self.margin, 0.0)
         return max(-edge, min(edge, across))
 
-    def steer(self, session: Any, wanted: float) -> float:
+    def steer(self, session: SessionLike, wanted: float) -> float:
         """What reaches the wheel, given what the player asked for."""
         if not self.helping:
             return float(wanted)

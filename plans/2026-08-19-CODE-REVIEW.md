@@ -30,10 +30,12 @@ performance profile in which **75 % of an editor redraw and 25 % of a game frame
 are spent recomputing constants**. All of it is local; none of it needs a
 redesign.
 
-**Status, 2026-08-19: the P1 correctness defects and the measured P2/P3 items
-are fixed**, Red/Green throughout — see §12 for P1 and §13 for the rest. A frame
-of the game costs 29 % less than it did, a structure query over a terrain chunk
-172× less, and both type gates are green. What is left is §13's "still open".
+**Status, 2026-08-20: the P1 defects and the E, S and T items are fixed**,
+Red/Green throughout — §12 for P1, §13 for the measured performance and security
+work, §14 for the editor's redraw and the typing. A game frame costs 29 % less
+than it did, an editor redraw 45× less, a structure query over a terrain chunk
+172× less; both type gates are green and now check the seams rather than `Any`.
+What is left is §14's "still open".
 
 ---
 
@@ -994,23 +996,79 @@ new files.
 | T6 | `race.__all__` names what the module has |
 | T7 | Landed with C2 |
 
-### Still open
+### Still open after the second pass
 
-- **T3 — `Any` on almost every parameter.** The four `Protocol`s (a course, a
-  car, a physics world, a driveable session) are the largest remaining quality
-  item. `mypy` being green makes this worth doing rather than academic: the
-  gate can now hold what the Protocols would assert.
-- **T4 — the window layer.** 289 of `game.py`'s 368 statements are still behind
-  `# pragma: no cover`, and it still reports 100 %. Three decisions were hoisted
-  in the first pass (`bindings`, `opening_fault`, `would_lose_work`); the rest
-  of `OnInit`, `_settle` and `SwapBuffers` remain.
-- **E1, E2, E4 — the editor's redraw**, worth 261 ms → sub-millisecond. Held
-  back deliberately: `scene.py` is being rewritten concurrently by the work
-  `EDITOR-REMEDIATION.md` tracks, and these three changes belong in that pass
-  rather than across it.
 - **T5's remainder** — the suite is 2 m 25 s without the slow marks and wants to
   be under a minute. Standing up a scenario world is the next thing to measure.
 - **A\*, D\* — the P3 tables**, as ordinary tidying alongside other work.
+
+## 14. What landed in the third pass — 2026-08-20
+
+### The editor's redraw (E1, E2, E4)
+
+`_rebuild` runs on every pointer movement during a drag, so a redraw *is* what
+dragging feels like. A warm one — every cache primed, which is what a drag finds
+— measured piece by piece, before and after:
+
+```
+                before      after
+start_mark()    196.4 ms    1.65 ms
+markers()        31.8 ms    2.80 ms
+guide()          28.7 ms    1.26 ms
+build() total   261.2 ms    5.79 ms
+```
+
+| ID | What changed |
+|----|--------------|
+| E1 | `start_mark` reached past `MapScene.world()` to `Project.world()`, which documents itself as built fresh each time — a whole `ProceduralWorld` settled per redraw to read one number off it |
+| E2 | `heights_at()` samples the ground for a whole line in one call, the way `_contour_shape` always has and says why; `height_at()` is now the single-point way in rather than the only one |
+| E4 | `None` from `structures()` is an answer — a circuit over flat ground carries nothing — and also meant "not worked out yet", so the alignment was settled again every redraw. A sentinel tells the two apart |
+
+Also: a water surface is narrowed before its wave clock is set, so a child of the
+water group that is a marker rather than a sheet cannot raise.
+
+### T3 — the seams, written down
+
+`glisteel/interfaces.py` holds five `Protocol`s — `CarLike`, `CourseLike`,
+`VehicleLike`, `PhysicsLike`, `SessionLike` — and the seams that took `Any` now
+take those: the autopilot, the steering aid, the camera and the car.
+
+They are `Protocol`s rather than base classes because the suite drives most of
+the game through doubles, and a seam only the real class could satisfy is a seam
+that could not be tested. Each says the *least* its users need, which is what
+makes a double against it small.
+
+**This is checked rather than decorative.** Applying them made mypy reject
+`Session` where a `SessionLike` was wanted, because a mutable Protocol attribute
+is invariant; the members that are only ever read are properties now, and the
+real classes satisfy them. It also turned up that `Car.world` was the *physics*
+world rather than the `RaceWorld` its name suggested — it is `Car.physics`.
+
+### T4 — the command line, checked where a test can reach it
+
+`glisteel/options.py` holds `Options`: a typed dataclass built from the parsed
+namespace once, with the values checked once, and the window reads that.
+
+- **The defensive `getattr(self.config, name, default)` calls are gone** — nine
+  of them. Each had quietly written a second default beside the parser's, and
+  `--traffic` had two that disagreed: `DEFAULT_TRAFFIC` in the parser and `0` at
+  the point that read it, so the documented default was not the one a player
+  got.
+- **`--size` is an argparse type**, so `--size wide` is the usage message every
+  other malformed option gets rather than a `ValueError` out of the middle of
+  `main`.
+- **The values are validated**: a negative lap count, a steering aid outside 0
+  to 1, a view the game does not have, a negative traffic count and a negative
+  screen-space error are refused by name, at the command line, rather than
+  reaching the physics.
+- **`--picture` no longer mutates what the player asked for**; it takes a
+  `dataclasses.replace` copy, which re-runs the same checks.
+- A test can build an `Options` without a parser, which is what made any of the
+  above testable: `tests/test_options.py` is 21 cases and needs no window.
+
+This does not empty the `# pragma: no cover` region — `OnInit`, `SwapBuffers`
+and the light rig are still window-bound — but it takes the *configuration* out
+of it, which is where the defects were.
 
 ## Suggested order of work
 

@@ -30,6 +30,8 @@ from typing import Any
 
 import numpy as np
 
+from glisteel.interfaces import CarLike, CourseLike, SessionLike
+
 __all__ = ['Autopilot', 'DriverStyle']
 
 #: Standing still, the car looks this far up the road; at speed it looks this
@@ -92,7 +94,7 @@ class Autopilot:
     car and a fresh one can be dropped in mid-race.
     """
 
-    def __init__(self, course: Any, style: DriverStyle | None = None,
+    def __init__(self, course: CourseLike, style: DriverStyle | None = None,
                  lane: float = 0.0) -> None:
         self.course = course
         self.style = style or DriverStyle()
@@ -116,7 +118,8 @@ class Autopilot:
                              else self.course.lane_point(index, self.lane))
         return found
 
-    def controls(self, session: Any, dt: float) -> tuple[float, float, float]:
+    def controls(self, session: SessionLike, dt: float
+                 ) -> tuple[float, float, float]:
         """Drive the session's car: a :class:`~glisteel.session.Controller`.
 
         What it looks at first is whatever is in front of it, because a driver
@@ -127,7 +130,7 @@ class Autopilot:
         self.following(*(found if found is not None else (None, 0.0)))
         return self.update(session.car)
 
-    def update(self, car: Any) -> tuple[float, float, float]:
+    def update(self, car: CarLike) -> tuple[float, float, float]:
         """The throttle, brake and steer this driver would use right now.
 
         The steering is worked out as an **angle for the front wheels** and only
@@ -144,7 +147,7 @@ class Autopilot:
         return (*self._pedals(speed, self.target_speed(index, speed)),
                 self.steering(car, index=index, position=position, speed=speed))
 
-    def steering(self, car: Any, index: int | None = None,
+    def steering(self, car: CarLike, index: int | None = None,
                  position: Any = None, speed: float | None = None) -> float:
         """The steering input that puts this car back on the line.
 
@@ -170,7 +173,7 @@ class Autopilot:
         return self._input_for(car, self._front_wheels(car, heading, speed),
                                speed)
 
-    def _front_wheels(self, car: Any, heading: float, speed: float) -> float:
+    def _front_wheels(self, car: CarLike, heading: float, speed: float) -> float:
         """The front-wheel angle that closes a heading error, in radians.
 
         Pure pursuit: a car of wheelbase *L* held on one steering angle follows
@@ -183,7 +186,7 @@ class Autopilot:
         base = self._wheelbase(car)
         return math.atan2(2.0 * base * math.sin(heading), max(reach, 1e-6))
 
-    def _input_for(self, car: Any, wanted: float, speed: float) -> float:
+    def _input_for(self, car: CarLike, wanted: float, speed: float) -> float:
         """The control input that asks the front wheels for that angle."""
         lock = self._lock(car, speed)
         if lock <= 0.0:                                  # pragma: no cover
@@ -191,13 +194,13 @@ class Autopilot:
         return float(np.clip(wanted / lock, -1.0, 1.0))
 
     @staticmethod
-    def _wheelbase(car: Any) -> float:
+    def _wheelbase(car: CarLike) -> float:
         vehicle = getattr(car, 'vehicle', None)
         base = vehicle.wheelbase() if vehicle is not None else 0.0
         return base if base > 0.0 else WHEELBASE
 
     @staticmethod
-    def _lock(car: Any, speed: float) -> float:
+    def _lock(car: CarLike, speed: float) -> float:
         vehicle = getattr(car, 'vehicle', None)
         if vehicle is None:                              # pragma: no cover
             return STEER_LOCK
@@ -210,7 +213,7 @@ class Autopilot:
         reach = LOOK_AHEAD_METRES + speed * LOOK_AHEAD_SECONDS
         return self.line_at(index + self._points_for(reach))
 
-    def _error_towards(self, car: Any, position: np.ndarray,
+    def _error_towards(self, car: CarLike, position: np.ndarray,
                        aim: np.ndarray) -> float:
         """How far round the car has to come to point at somewhere, in radians.
 
@@ -227,7 +230,7 @@ class Autopilot:
         return math.atan2(float(np.cross(forward, to_aim)[1]),
                           float(np.dot(forward, to_aim)))
 
-    def _back_to_the_line(self, car: Any, position: np.ndarray, index: int,
+    def _back_to_the_line(self, car: CarLike, position: np.ndarray, index: int,
                           speed: float) -> float:
         """The extra heading wanted for being off the line, in radians.
 

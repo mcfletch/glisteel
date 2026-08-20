@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
+
+from glisteel.interfaces import CarLike
 
 __all__ = ['CameraPose', 'ChaseCamera']
 
@@ -137,7 +138,7 @@ class ChaseCamera:
         """
         self._position = None
 
-    def update(self, car: Any, dt: float) -> CameraPose:
+    def update(self, car: CarLike, dt: float) -> CameraPose:
         wanted, target = self._wanted(car)
         if self.onboard or self._position is None or dt <= 0:
             self._position = wanted
@@ -148,7 +149,7 @@ class ChaseCamera:
             self._position = self._position + (wanted - self._position) * blend
         return CameraPose(position=self._position.copy(), target=target)
 
-    def _wanted(self, car: Any) -> tuple[np.ndarray, np.ndarray]:
+    def _wanted(self, car: CarLike) -> tuple[np.ndarray, np.ndarray]:
         position = np.asarray(car.position, dtype='d')
         forward = np.asarray(car.forward(), dtype='d')
         flat = forward - UP * float(np.dot(forward, UP))

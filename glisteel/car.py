@@ -30,6 +30,7 @@ from OpenGLContext.scenegraph.switch import Switch
 from OpenGLContext.scenegraph.transform import Transform
 
 from glisteel import models
+from glisteel.interfaces import PhysicsLike
 
 log = logging.getLogger(__name__)
 
@@ -98,10 +99,14 @@ class Car:
     step and drawing runs at whatever the display manages.
     """
 
-    def __init__(self, world: Any, spec: CarSpec | None = None,
+    def __init__(self, physics: PhysicsLike, spec: CarSpec | None = None,
                  position: Any = (0.0, 2.0, 0.0), heading: float = 0.0) -> None:
         self.spec = spec or CarSpec()
-        self.world = world
+        #: The physics world this car is simulated in -- not the
+        #: :class:`~glisteel.world.RaceWorld` it is driven in, which the car
+        #: does not know about.
+        self.physics = physics
+        world = physics    # named for the calls below, which are the world's
         # The lower body, not the whole car. A collider is centred on the body
         # it belongs to, so a box tall enough to take in the canopy would reach
         # as far below the floor as the canopy stands above it and catch on the
@@ -156,7 +161,7 @@ class Car:
         whether the other car is coming or going.
         """
         found: np.ndarray = np.asarray(
-            self.world.linear_velocity[self.body], dtype='d')
+            self.physics.linear_velocity[self.body], dtype='d')
         return found
 
     def forward(self) -> np.ndarray:
@@ -171,7 +176,8 @@ class Car:
     def follow(self, dt: float) -> None:
         """Move the scenegraph onto the simulation, and turn the wheels."""
         self.node.translation = tuple(float(v) for v in self.position)
-        self.node.rotation = _axis_angle(self.world.orientation[self.body])
+        self.node.rotation = _axis_angle(
+            self.physics.orientation[self.body])
         for index, (wheel, node) in enumerate(
                 zip(self.vehicle.wheels, self._wheel_nodes, strict=True)):
             local = np.asarray(wheel.spec.position, dtype='d')

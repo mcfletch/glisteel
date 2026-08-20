@@ -31,6 +31,7 @@ keys it delivers, and where it points the view.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import os
 import sys
@@ -62,6 +63,7 @@ from glisteel.lighting import (  # noqa: E402
     LAMP_COLOUR,
     Headlights,
 )
+from glisteel.options import DEFAULT_SIZE, Options, window_size  # noqa: E402
 from glisteel.records import Records  # noqa: E402
 from glisteel.session import RACE_LAPS, Session  # noqa: E402
 from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel  # noqa: E402
@@ -100,7 +102,8 @@ LAMP_FALLOFF = (1.0, 0.0, 0.02)
 class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     """The game window: a run to advance, a scene to draw, and keys to deliver."""
 
-    config: Any = None
+    #: What this run was asked for. Checked once, at the command line.
+    config: Options = None      # type: ignore[assignment]
     #: The run this window is showing.
     session: Session | None = None
     _capture: Any = None
@@ -174,9 +177,9 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.close()
         self.track = track
         self.session = Session(world, CarSpec(),
-                               view=getattr(self.config, 'view', None) or VIEWS[0],
-                               laps=getattr(self.config, 'laps', RACE_LAPS),
-                               assist=getattr(self.config, 'assist', ASSIST))
+                               view=self.config.view,
+                               laps=self.config.laps,
+                               assist=self.config.assist)
         self.session.driver = self._driver()
         self._told = False
         # The engine's own sky and light rig, rather than one written here: a
@@ -217,7 +220,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         """
         from OpenGLContext.scenegraph.light import PointLight, SpotLight
         self.headlights = Headlights(
-            fitted=getattr(self.config, 'headlights', True))
+            fitted=self.config.headlights)
         self._beam = SpotLight(color=BEAM_COLOUR,
                                intensity=self.headlights.intensity,
                                cutOffAngle=self.headlights.spread,
@@ -374,7 +377,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             assert self.session is not None
             return Autopilot(self.session.course, lane=self.session.lane)
         self.keyboard = KeyboardDriver(
-            MouseWheel() if getattr(self.config, 'mouse', False) else None)
+            MouseWheel() if self.config.mouse else None)
         return self.keyboard
 
     def _bind_keys(self) -> None:                # pragma: no cover - needs a window
@@ -494,7 +497,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             result = super().SwapBuffers(*args)
             self.setCurrent()
             sys.stdout.write('captured %s\n' % (self.config.capture,))
-            wanted = getattr(self.config, 'picture_track', None)
+            wanted = self.config.picture_track
             if wanted is not None:
                 from glisteel import tracks
                 where = tracks.remember_picture(wanted)
@@ -629,8 +632,9 @@ def build_parser() -> argparse.ArgumentParser:
                              'timed lap is (default: %(default)s)')
     parser.add_argument('--autopilot', action='store_true',
                         help='let the car drive itself round the circuit')
-    parser.add_argument('--size', default='1280x720', metavar='WxH',
-                        help='window size (default: %(default)s)')
+    parser.add_argument('--size', default=DEFAULT_SIZE, type=window_size,
+                        metavar='WIDTHxHEIGHT',
+                        help='window size (default: %dx%d)' % DEFAULT_SIZE)
     parser.add_argument('--view', choices=VIEWS, default=VIEWS[0],
                         help='which view to start in, which `c` then cycles '
                              '(default: %(default)s)')
@@ -680,8 +684,13 @@ def main(argv: list[str] | None = None) -> int:
     on running (:meth:`GlisteelContext.open`).
     """
     logging.basicConfig(level=logging.INFO)
-    options = build_parser().parse_args(argv)
-    width, _, height = options.size.partition('x')
+    parsed = build_parser().parse_args(argv)
+    try:
+        options = Options.from_namespace(parsed)
+    except ValueError as error:
+        sys.stderr.write('%s\n' % (error,))
+        return 2
+    width, height = options.size
     GlisteelContext.config = options
     named = tracks.Track.opening(options.world)
     if named is None and options.world != _default_world():
@@ -693,7 +702,7 @@ def main(argv: list[str] | None = None) -> int:
                'oglc-bake --output %s' % (os.path.dirname(options.world)
                                           or 'world',)))
         return 1
-    return _run(options, int(width), int(height))     # pragma: no cover - a window
+    return _run(options, width, height)               # pragma: no cover - a window
 
 
 def _default_world() -> str:
@@ -755,13 +764,14 @@ def _picture(options: Any, width: int, height: int) -> None:  # pragma: no cover
     track = tracks.Track.opening(options.world)
     if track is None:
         raise SystemExit('%s is not a world to photograph' % options.world)
-    options.capture = os.path.join(track.directory, tracks.PICTURE)
-    options.view = 'chase'
-    options.autopilot = True
-    if not options.drive_seconds:
-        options.drive_seconds = PICTURE_SECONDS
-    options.picture_track = track
-    _capture(options, width, height)
+    # A copy rather than the settings the player asked for, so what --picture
+    # overrides is visible here rather than discovered by whatever reads it
+    # next; ``replace`` re-checks the result the way any other Options is.
+    _capture(dataclasses.replace(
+        options, capture=os.path.join(track.directory, tracks.PICTURE),
+        view='chase', autopilot=True, picture_track=track,
+        drive_seconds=options.drive_seconds or PICTURE_SECONDS),
+        width, height)
 
 
 def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
