@@ -32,7 +32,11 @@ STEP = 1.0 / 120.0
 @pytest.fixture
 def floor():
     world = PhysicsWorld()
-    static_ground(world, size=4000.0)
+    # Wide enough to hold a full-throttle run: this car settles at about 73
+    # metres a second, so half a minute of it covers better than two
+    # kilometres, and a car that reaches the edge falls off the world and
+    # reads as still accelerating.
+    static_ground(world, size=12000.0)
     return world
 
 
@@ -121,14 +125,16 @@ class TestTheCar:
             float(light.position[1]), abs=0.01)
 
     def test_a_softer_spring_squats_lower(self, floor) -> None:
-        from omi_physics.vehicle import car_wheels
+        import dataclasses
         stiff = Car(floor, CarSpec(), position=(-20.0, 2.0, 0))
         soft = Car(floor, CarSpec(), position=(20.0, 2.0, 0))
+        # The same car with softer springs and nothing else changed: where the
+        # wheels hang decides where the body rides, so a set built from
+        # defaults rather than from this car's own would be a different car.
         soft.vehicle.wheels = [
-            type(wheel)(spec=spec) for wheel, spec in zip(
-                soft.vehicle.wheels,
-                car_wheels(suspension_stiffness=8.0, radius=0.33,
-                           suspension_travel=0.22), strict=True)]
+            type(wheel)(spec=dataclasses.replace(wheel.spec,
+                                                 suspension_stiffness=8.0))
+            for wheel in soft.vehicle.wheels]
         for _ in range(int(3.0 / STEP)):
             stiff.update(STEP)
             soft.update(STEP)
@@ -408,7 +414,7 @@ class TestHowItAccelerates:
     def test_and_reaches_a_road_speed(self, floor) -> None:
         car = Car(floor, position=(0, 1.0, 0))
         _drive(floor, car, 30.0, throttle=1.0)
-        assert 35.0 < car.speed() < 70.0
+        assert 60.0 < car.speed() < 85.0
 
     def test_and_stops_there_rather_than_creeping_up(self, floor) -> None:
         car = Car(floor, position=(0, 1.0, 0))
@@ -452,23 +458,26 @@ class TestTheCarIsTheModel:
         for name in (models.BODY, models.INTERIOR, models.GLASS):
             assert name in drawn, 'the car does not draw its %s' % (name,)
 
-    def test_the_cockpit_view_keeps_the_interior_and_the_glass(self, floor) -> None:
-        """Only the bodywork goes: the driver looks at a dash through a screen."""
+    def test_the_cockpit_view_draws_the_wheel_and_nothing_else(self, floor
+                                                               ) -> None:
+        """What a driver needs in front of them is the road and the wheel that
+        turns in it. Bodywork seen from inside is bodywork in the way."""
         car = Car(floor)
         car.hidden = True
         drawn = [one.DEF for one in _named(car.node)]
-        assert models.BODY not in drawn
-        assert models.INTERIOR in drawn and models.GLASS in drawn
+        assert models.COLUMN in drawn
+        for gone in (models.BODY, models.INTERIOR, models.GLASS, models.BONNET):
+            assert gone not in drawn, 'the cockpit still draws its %s' % (gone,)
 
     def test_it_draws_the_bonnet_as_its_own_shell(self, floor) -> None:
         car = Car(floor)
         assert models.BONNET in [one.DEF for one in _named(car.node)]
 
-    def test_and_the_cockpit_view_keeps_it(self, floor) -> None:
-        """A seat with no bonnet under it is a camera flying down the road."""
+    def test_and_the_view_from_outside_keeps_the_whole_car(self, floor) -> None:
         car = Car(floor)
-        car.hidden = True
-        assert models.BONNET in [one.DEF for one in _named(car.node)]
+        drawn = [one.DEF for one in _named(car.node)]
+        for name in (models.BODY, models.INTERIOR, models.GLASS, models.BONNET):
+            assert name in drawn, 'the car does not draw its %s' % (name,)
 
     def test_a_model_with_no_bonnet_still_makes_a_car(self, floor, monkeypatch) -> None:
         """Only the player's car is looked out of; the traffic needs none."""
@@ -533,15 +542,20 @@ def _reachable(node, out=None):
 
 
 def _named(node, out=None):
-    """Every node in a subtree that carries a DEF name."""
+    """Every node a subtree would *draw* that carries a DEF name.
+
+    A switch is followed down the branch it has chosen and no other: what the
+    other branches hold is exactly what is not on the screen.
+    """
     out = [] if out is None else out
     if getattr(node, 'DEF', ''):
         out.append(node)
     for child in getattr(node, 'children', None) or ():
         _named(child, out)
-    for choice in getattr(node, 'choice', None) or ():
-        if getattr(node, 'whichChoice', -1) >= 0:
-            _named(choice, out)
+    choices = getattr(node, 'choice', None) or ()
+    which = getattr(node, 'whichChoice', -1)
+    if choices and 0 <= which < len(choices):
+        _named(choices[which], out)
     return out
 
 
@@ -561,10 +575,15 @@ class TestTheDriverSitsWhereTheModelPutsThem:
     """
 
     def _eye(self, floor):
-        """The cockpit eye, in the car's own space: the car is at the origin."""
+        """The cockpit eye in the *model's* space, which is what it is checked
+        against: the car is put at the origin, and the eye is brought back down
+        by the drop the bodywork is hung at
+        (:attr:`~glisteel.car.CarSpec.mass_drop`), since the body's own origin
+        is where its mass is rather than the middle of the shell."""
         car = Car(floor, position=(0.0, 0.0, 0.0))
         camera = ChaseCamera('cockpit')
-        return np.asarray(camera.update(car, 0.0).position, dtype='d'), car
+        eye = np.asarray(camera.update(car, 0.0).position, dtype='d')
+        return eye - np.array([0.0, car.spec.mass_drop, 0.0]), car
 
     def test_the_eye_is_inside_the_cabin(self, floor) -> None:
         eye, car = self._eye(floor)

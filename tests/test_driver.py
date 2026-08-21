@@ -319,6 +319,7 @@ class TestHoldingTheLine:
             car.control(*pilot.update(car))
             car.update(STEP)
             world.step(STEP)
+        assert not car.upside_down(), 'it came back on its roof'
         assert course.nearest(car.position)[1] < 2.0
 
 

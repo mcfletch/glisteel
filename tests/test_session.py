@@ -201,7 +201,10 @@ class TestTheFinish:
 
     def test_a_finished_car_is_no_longer_driven(self) -> None:
         session = _session(scenarios.circuit(), driver=_Pedals(throttle=1.0))
-        _drive(session, 2.0)
+        # Enough to be moving, and no more: what is measured is that the
+        # throttle stops reaching the car, not how far it rolls afterwards --
+        # and coasting down from this car's full pull is a very long way.
+        _drive(session, 0.8)
         # The flag, wherever the car has got to: what is being tested is what
         # the phase does to the controls, not how long a lap of this takes.
         session.run.update(0.0, laps=session.run.laps)
@@ -420,3 +423,75 @@ class TestWhenTheCarNeedsItsOwnLight:
 
     def test_a_course_with_no_bores_is_never_dark(self) -> None:
         assert not _session(scenarios.circuit()).in_the_dark()
+
+
+class TestWritingDownACrash:
+    """A run that ends against another car is read backwards from the moment
+    it did, and "HIT A CAR" on its own says nothing about which car or where
+    it came from. The record carries both sides of the road, so a car met
+    nose to nose and one clipped on the way back into lane are told apart.
+    """
+
+    @staticmethod
+    def _kept(session):
+        kept: list = []
+
+        class Keeping:
+            @staticmethod
+            def mark(name, **fields):
+                kept.append((name, fields))
+
+        session.telemetry = Keeping()
+        return kept
+
+    @staticmethod
+    def _head_on(session, gap=3.0, speed=30.0):
+        """An oncoming car in whichever lane the player's car is in."""
+        from glisteel.traffic import TrafficCar
+        course = session.world.course
+        index, _distance = course.nearest(session.car.position)
+        here = float(course.stations[index])
+        other = TrafficCar(course, here + gap, heading=-1, limit=speed)
+        other.lane = -session.across()
+        session.world.traffic.cars[:] = [other]
+        return other
+
+    def test_it_says_what_the_car_hit(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        self._head_on(session)
+        kept = self._kept(session)
+        session._watch_for_a_crash()
+        assert [name for name, _ in kept] == ['crash']
+        fields = kept[0][1]
+        assert fields['oncoming'] is True
+        assert fields['closing'] > 9.0
+        assert fields['gap'] == pytest.approx(3.0, abs=1.0)
+
+    def test_and_which_side_of_the_road_each_of_them_was_on(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        self._head_on(session)
+        kept = self._kept(session)
+        session._watch_for_a_crash()
+        fields = kept[0][1]
+        assert fields['across'] == pytest.approx(session.across(), abs=0.01)
+        assert fields['theirs'] == pytest.approx(session.across(), abs=0.5)
+
+    def test_and_whether_the_driver_was_part_way_past_something(self) -> None:
+        session = _session(traffic=1, driver=_Pedals())
+        session.advance(FRAME)
+        session.driver.overtaking = True
+        self._head_on(session)
+        kept = self._kept(session)
+        session._watch_for_a_crash()
+        assert kept[0][1]['passing'] is True
+
+    def test_a_crash_is_written_down_once_rather_than_every_frame(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        self._head_on(session)
+        kept = self._kept(session)
+        for _ in range(5):
+            session._watch_for_a_crash()
+        assert [name for name, _ in kept] == ['crash']

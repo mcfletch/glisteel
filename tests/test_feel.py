@@ -183,8 +183,13 @@ class TestBeingMired:
         trace = _drive(self.LINE, seconds=14.0, assist=0.0)
         assert trace.why_it_ended() is not None
 
-    def _after_it_ended(self, seconds=14.0):
-        """The speeds recorded from the moment the run was over."""
+    def _after_it_ended(self, seconds=24.0):
+        """The speeds recorded from the moment the run was over.
+
+        Long enough for the slide to finish: the car reaches the verge at a
+        hundred and fifty and the whole of what is being measured is what
+        happens after that, so the record has to outlast it.
+        """
         trace = _drive(self.LINE, seconds=seconds, assist=0.0)
         over = [index for index, why in enumerate(trace.ended) if why]
         assert over, "the run did not end at all"
@@ -215,3 +220,119 @@ class TestBeingMired:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestWhatTheCarHasToPassWith:
+    """An electric supercar's numbers, which is what a pass is made of.
+
+    Getting by somebody is a speed *difference* built in the length of road the
+    driver can see, so what decides whether passing is a manoeuvre or a chore
+    is the thrust left at the speed the pass happens at -- not the standstill
+    figure, where nobody overtakes. A car with a hot hatch's power spends ten
+    seconds alongside and makes every pass a bet on a road nobody can see that
+    far down.
+
+    Read from the tuning rather than driven, so the budget is cheap enough to
+    keep: the shape is ``min(engine_force, power / v) - drag * v**2`` and the
+    figures it gives are the ones a drive measures.
+    """
+
+    def _car(self):
+        from glisteel.car import CarSpec
+        return CarSpec()
+
+    def thrust(self, spec, kph):
+        """Newtons left over at that speed, after the air."""
+        v = float(kph) / 3.6
+        tuning = spec.tuning
+        power = tuning.engine_force * tuning.base_speed
+        engine = min(tuning.engine_force, power / v)
+        return engine - tuning.drag * v * v
+
+    def test_it_has_a_supercar_s_power(self) -> None:
+        spec = self._car()
+        power = spec.tuning.engine_force * spec.tuning.base_speed
+        assert power >= 400_000, '%.0f kW is not a supercar' % (power / 1000)
+
+    def test_there_is_thrust_left_at_passing_speed(self) -> None:
+        """Half a g at 140 km/h: a pass measured in seconds, not in tens."""
+        spec = self._car()
+        pull = self.thrust(spec, 140.0) / spec.mass
+        assert pull >= 0.45 * 9.81, '%.2f g at 140 km/h' % (pull / 9.81)
+
+    def test_and_still_at_the_speed_the_circuit_is_driven_at(self) -> None:
+        spec = self._car()
+        pull = self.thrust(spec, 200.0) / spec.mass
+        assert pull > 0.0, 'nothing left at the design speed'
+
+    def test_the_top_end_clears_the_speed_the_road_is_built_for(self) -> None:
+        """The circuit is laid out for 200 km/h; a car that tops out near it
+        is one the road is driving rather than the driver."""
+        spec = self._car()
+        power = spec.tuning.engine_force * spec.tuning.base_speed
+        top = (power / spec.tuning.drag) ** (1.0 / 3.0) * 3.6
+        assert top >= 260.0, 'tops out at %.0f km/h' % top
+
+
+class TestItSlidesRatherThanRolls:
+    """A car on flat tarmac runs out of grip before it runs out of stability.
+
+    A body tips when the sideways pull passes ``(track / 2) / h``, where ``h``
+    is how high its mass sits. Below what the tyres can ask for, that is not a
+    limit a driver can feel and recover from -- it is the car going over,
+    from a steering input on flat ground with nothing to trip on. The limit
+    has to be the tyres, so that losing grip is a slide.
+    """
+
+    def _flat(self, spec=None):
+        from omi_physics.world import PhysicsWorld
+        from glisteel.car import Car
+        from OpenGLContext.scenegraph import basenodes as _bn  # noqa: F401
+        import tests.test_driver as td
+        world = PhysicsWorld()
+        td.static_ground(world, size=3000.0)
+        return world, Car(world, spec, position=(0.0, 2.0, 0.0))
+
+    def settled_height(self):
+        """How high the mass sits once the car is standing on its springs."""
+        world, car = self._flat()
+        for _ in range(int(3.0 / PHYSICS_STEP)):
+            car.control(0.0, 0.0, 0.0)
+            car.update(PHYSICS_STEP)
+            world.step(PHYSICS_STEP)
+        return float(car.position[1])
+
+    def test_the_mass_sits_low_enough_to_corner_on(self) -> None:
+        """Well clear of what a corner asks for.
+
+        Not clear of the tyres' own peak, which this car cannot reach: the
+        wheels have to hang below the mass they carry, and that bounds how low
+        the mass can go while the body's origin is also its collider. What it
+        has to clear is the road: a car that tips at less than a hard corner
+        is one that goes over rather than sliding, and 1.4 g is half again
+        what a road corner asks. The check that the car actually stays on its
+        wheels is the one below.
+        """
+        from glisteel.car import CarSpec
+        spec = CarSpec()
+        tips = (spec.track / 2.0) / self.settled_height()
+        assert tips > 1.4, 'tips at %.2f g' % tips
+
+    def test_full_lock_at_speed_does_not_put_it_on_its_roof(self) -> None:
+        """The hardest input there is, on flat ground, at the speed it
+        happens at: the car should slide, and stay on its wheels."""
+        rolled = []
+        for speed in (20.0, 30.0, 45.0, 60.0):
+            world, car = self._flat()
+            while car.speed() < speed:
+                car.control(1.0, 0.0, 0.0)
+                car.update(PHYSICS_STEP)
+                world.step(PHYSICS_STEP)
+            for _ in range(int(4.0 / PHYSICS_STEP)):
+                car.control(0.0, 0.0, 1.0)
+                car.update(PHYSICS_STEP)
+                world.step(PHYSICS_STEP)
+                if car.upside_down():
+                    rolled.append(speed)
+                    break
+        assert not rolled, 'rolled over at %s m/s' % rolled

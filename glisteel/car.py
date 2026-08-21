@@ -49,19 +49,44 @@ class CarSpec:
     """What kind of car this is.
 
     ``mass`` and the wheels decide how it behaves; ``paint`` decides how it
-    looks. The tuning defaults are a fast road car: enough power to spin the
-    wheels out of a slow corner, enough brake to stop it, and a steering lock
-    that eases off as the speed rises.
+    looks -- though the bodywork itself is a **generated** asset: the shells
+    this loads (``models.HERO`` and the traffic's) are written by
+    ``tools/cars.py``, a Blender script, and are build output. Anything about
+    the shape of a car belongs there; what belongs here is how it behaves and
+    where the art is hung relative to the body (:attr:`mass_drop`).
+
+    The tuning defaults are an electric supercar: enough power to spin
+    the wheels out of a slow corner and to make a pass a manoeuvre rather than
+    a wait, enough brake to stop it, and a steering lock that eases off as the
+    speed rises.
     """
 
     mass: float = 1180.0
     wheelbase: float = 2.55
-    track: float = 1.58
+    track: float = 1.70
     wheel_radius: float = 0.33
     ride_height: float = 0.14
+    #: How far below the middle of the shell the car's mass sits, in metres.
+    #:
+    #: A body tips when the sideways pull passes ``(track / 2) / h``, and ``h``
+    #: is this. With the mass at the middle of the bodywork the car tipped at
+    #: 1.1 g and went over from a steering input on flat ground; the mass of
+    #: this one is where an electric car's is, in the floor between the axles,
+    #: which lifts that to 1.5 g and leaves the car sliding instead.
+    #:
+    #: The simulation has no separate centre of mass -- a body's origin is its
+    #: mass, its collider and what the art hangs off -- so this is spent by
+    #: hanging the wheels and the bodywork that much higher on the body: see
+    #: :meth:`wheels` and :meth:`_build_nodes`. That is also what bounds it.
+    #: The wheels have to stay *below* the mass they carry, and they are
+    #: mounted ``ride_height`` under the middle of the shell, so anything past
+    #: about 0.17 lifts them over it and the car pivots on its springs on
+    #: landing rather than settling. Going lower than that wants a real centre
+    #: of mass in ``omi_physics``, which carries the field and does not use it.
+    mass_drop: float = 0.15
     paint: tuple[float, float, float] = (0.62, 0.09, 0.07)
     tuning: VehicleTuning = field(default_factory=lambda: VehicleTuning(
-        engine_force=9000.0, brake_force=16000.0, maximum_steer=0.52,
+        engine_force=20000.0, brake_force=16000.0, maximum_steer=0.52,
         steer_speed=3.2, rolling_resistance=0.02, downforce=6.0,
         # Full lock is half a radian, which is a car park; at speed the same
         # input has to be a gentler turn or every touch of a key is a spin. The
@@ -71,19 +96,28 @@ class CarSpec:
         # g -- hard cornering, and inside what the tyres and the wings have.
         steer_falloff_speed=10.0,
         # An electric drivetrain: all of it from a standstill, and constant
-        # power from fifteen metres a second on, so the pull falls away as the
-        # speed rises instead of shoving just as hard at a hundred and sixty.
-        base_speed=15.0,
-        # The air, and what actually decides how fast this car will go. Higher
-        # than a coupe's own drag, which is the honest way to say that the top
-        # speed is chosen -- a little under two hundred, which is what a forest
-        # road with hundred-and-eighty-metre corners is worth driving at.
+        # power from here on, so the pull falls away as the speed rises instead
+        # of shoving just as hard at a hundred and sixty. Where that begins is
+        # what sets the power for a given thrust, and the thrust is what the
+        # rear tyres will take off the line -- asking for more only spins them,
+        # and a car that cannot launch is slower everywhere. So the top end is
+        # bought here rather than there: four hundred and twenty kilowatts in
+        # something that weighs this little, which is a hundred to a hundred
+        # and sixty in two seconds. What a pass is made of is the thrust left
+        # at the speed the pass happens at, and this leaves half a g at a
+        # hundred and forty.
+        base_speed=21.0,
+        # The air, and what actually decides how fast this car will go: a
+        # little under two hundred and eighty, well clear of the two hundred
+        # the circuits are laid out for, so the driver runs out of road and
+        # nerve before the car runs out of top end.
         drag=0.9))
 
     def wheels(self) -> list[Any]:
         """The four wheels, rear-driven, front-steered."""
         return car_wheels(wheelbase=self.wheelbase, track=self.track,
-                          height=-BODY_HEIGHT / 2.0 + self.ride_height,
+                          height=(-BODY_HEIGHT / 2.0 + self.ride_height
+                                  + self.mass_drop),
                           drive='rear', radius=self.wheel_radius,
                           suspension_travel=0.22, suspension_stiffness=26.0,
                           suspension_damping=0.55, grip=1.9)
@@ -229,47 +263,65 @@ class Car:
 
     @property
     def hidden(self) -> bool:
-        """Whether the car's own bodywork is left out of the frame.
+        """Whether the car is being looked out of rather than at.
 
-        For the view from the driver's seat, which is a point inside it: what
-        that view would otherwise show is the outside of this car's bodywork,
-        from within. The interior and the canopy stay -- they are what that view
-        is *of* -- and the node stays in the scene and keeps following the
-        physics, so nothing has to be added or removed as the player changes
-        view.
+        From the driver's seat the car is drawn as **the steering wheel and
+        nothing else**: what a driver needs in front of them is the road and
+        the wheel turning in it, and bodywork seen from a point inside it is
+        bodywork in the way of that. From anywhere outside, the whole car is
+        drawn.
+
+        The node stays in the scene either way and keeps following the physics,
+        so nothing is added or removed as the player changes view.
         """
         return bool(self._shell.whichChoice < 0)
 
     @hidden.setter
     def hidden(self, value: bool) -> None:
         self._shell.whichChoice = -1 if value else 0
+        self._cabin.whichChoice = 1 if value else 0
 
     def _build_nodes(self) -> tuple[Transform, Switch, list[Transform]]:
         """The scenegraph the car is drawn as: shells, wheels, and the rim.
 
-        The bodywork sits in a ``Switch`` of its own so the cockpit view can
-        drop it without touching anything else; everything the driver looks at
-        from inside hangs outside that switch.
+        Two switches, because a car has two audiences. The **shell** carries
+        everything that is only worth drawing from outside -- the bodywork and
+        the wheels -- and the **cabin** chooses between the whole inside of the
+        car and the steering wheel on its own, which is what the view from the
+        driver's seat is.
         """
         wheels = [Transform(children=[Transform(children=self._wheel_art(spec))])
                   for spec in self.vehicle.wheels]
-        exterior, inside = self._shell_art()
+        exterior, inside, steering = self._shell_art()
         # The wheels are switched with the bodywork rather than with the
         # interior: they belong to the outside of the car, and four wheels
         # without the arches around them are discs rolling along in mid-air.
         # They keep following the suspension either way; a switch that is off
         # simply does not draw them.
-        shell = Switch(choice=[Transform(children=[*exterior, *wheels])],
+        # The bodywork rides :attr:`CarSpec.mass_drop` above the body's origin,
+        # which is where the mass is; the wheels do not, because the springs
+        # they hang from were raised by the same amount and they are already
+        # where the road put them.
+        lifted = (0.0, self.spec.mass_drop, 0.0)
+        shell = Switch(choice=[Transform(children=[
+            Transform(translation=lifted, children=exterior), *wheels])],
                        whichChoice=0)
-        return Transform(children=[shell, *inside]), shell, wheels
+        # The steering column is part of the interior as well as being the
+        # cockpit's whole subject, and a node in two places in a scenegraph is
+        # drawn wherever it is reached -- so the same one serves both choices.
+        cabin = Switch(choice=[Transform(translation=lifted, children=inside),
+                               Transform(translation=lifted, children=steering)],
+                       whichChoice=0)
+        self._cabin = cabin
+        return Transform(children=[shell, cabin]), shell, wheels
 
-    def _shell_art(self) -> tuple[list[Any], list[Any]]:
-        """What is drawn outside the car, and what is drawn inside it.
+    def _shell_art(self) -> tuple[list[Any], list[Any], list[Any]]:
+        """What is drawn outside the car, inside it, and from the seat.
 
-        The bonnet counts as inside. It is bodywork and painted like the rest of
-        it, but it is also most of what a driver sees, and a seat with no bonnet
-        under it is a camera flying down the road -- so it stays when the rest of
-        the outside goes. A model that carries no bonnet is drawn without one.
+        Three answers because there are three views of one car. Outside is the
+        bodywork; inside is the whole cabin, seen through the glass from
+        anywhere else; and from the seat it is the steering column alone, which
+        is the one part of a car a driver wants between them and the road.
         """
         scene = models.ART.load(models.HERO)
         if scene is not None:
@@ -281,14 +333,17 @@ class Car:
                     inside.append(bonnet)
                 self._steering = scene.player_named(models.STEER_CLIP, loop=False)
                 self.rim = scene.getDEF(models.RIM)
-                return outside, inside
+                column = scene.getDEF(models.COLUMN)
+                return outside, inside, [column] if column is not None else []
             log.warning('%s is missing one of its named shells', models.HERO)
         paint = PBRMaterial(baseColor=self.spec.paint, metallic=0.55,
                             roughness=0.32)
         glass = PBRMaterial(baseColor=(0.10, 0.13, 0.16), metallic=0.1,
                             roughness=0.08)
+        # Drawn from primitives there is no wheel to leave in the frame, so the
+        # driver's seat is the road and nothing else.
         return ([_painted(car_body_mesh(paint), paint)],
-                [_painted(cabin_mesh(glass), glass)])
+                [_painted(cabin_mesh(glass), glass)], [])
 
     def _wheel_art(self, spec: Any) -> list[Any]:
         """One wheel's geometry: the shipped model, or a cylinder.

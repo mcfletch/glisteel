@@ -21,16 +21,18 @@ and through a bore where it does not. The second drives it.
 |---|---|
 | `up` / `w` | throttle |
 | `down` / `s` | brake, and reverse once stopped |
-| `left` `right` / `a` `d` | steer |
+| `left` `right` / `a` `d` | steer, and see "Ways of driving it" below |
 | `space` | handbrake |
-| mouse | steer, with `--mouse` |
+| mouse | steer, with `--mouse`, under any way of driving |
 | `c` | cockpit / chase / bonnet camera |
 | `r` | put the car back on the track |
 | `n` | a fresh race, from the grid |
 | `escape` | the menu |
 | `F2` | screenshot |
 
-`glisteel --autopilot` drives itself, which is the quickest way to see a lap and
+`glisteel --control lanes` drives it by picking a lane rather than by steering;
+`--control` is the switch between the ways of driving, and the section below
+says what each is. `glisteel --autopilot` drives itself, which is the quickest way to see a lap and
 the same code an opponent car would use; `--view chase` starts in a view other
 than the driver's seat.
 
@@ -38,6 +40,125 @@ Naming a world that is not there is a message and a non-zero status, which is
 what a script wants. Picking one from the track chooser that cannot be raced —
 moved since it was listed, or baked without a circuit in it — puts the reason on
 the menu and leaves the game running, which is what a player wants.
+
+### Ways of driving it
+
+**What a steering key means is a choice, and `--control` is that choice.** The
+keyboard says a key is down or it is not; what the game makes of that decides
+how hard the car is to place on the road. These are being tried against each
+other rather than settled — see
+[plans/CONTROL-SCHEMES.md](plans/CONTROL-SCHEMES.md).
+
+| `--control` | The steering key means | The car |
+|---|---|---|
+| `wheel` | turn the front wheels, and hold the line between inputs | the default, and what the game has always had |
+| `loose` | turn the front wheels, with nothing put in for you | as the physics has it; `--assist 0` by another name |
+| `line` | move the car across the road, and stay there | placed where you mean, with the road held for you |
+| `lanes` | take the lane over, and hold it | you drive the pedals and decide when to pass |
+| `chauffeur` | anything you touch takes the car | it drives itself until you interrupt, and hands back after two seconds |
+
+`line` and `lanes` steer by **where the car is across the road** rather than by
+how far its wheels are turned, which is the difference that makes a tap a step
+across the road instead of a permanent change of direction. Both work in the
+road's own **drivable zone** — its width, its lanes, and which of them have
+something coming the other way — so a road with four lanes offers four, and the
+lane taken is counted from the one the car is in.
+
+**The lane switch does the steering and nothing else.** A press asks for the
+lane over; held down it goes on taking lanes, one at a time, and stops where the
+road does. It does not touch the pedals, it does not look for what is coming the
+other way, and it will not stop you arriving at a corner too fast: a driver can
+still crash the car, but not because of the steering.
+
+**A press with somebody alongside is kept, not thrown away.** Ask for a lane
+there is no room in and the car does not move over -- and does not forget you
+asked. It takes the lane the moment there is room, which is once you have made
+that room: lift off and drop in behind them, or stay on it and go by. The
+pedals are yours, so the timing is yours; what the switch guarantees is that
+the press always meant something. A lane asked for is let go of after six
+seconds, so a press nobody remembers making does not move the car later.
+
+**A lane change is a manoeuvre, and it is speed aware.** The line the car is
+held on travels to the new lane as a raised cosine — no sideways speed at either
+end, so the car leaves one lane and arrives in the next rather than swerving and
+being caught — and how long it takes is set by what the car can actually do
+there: never more than a fifth of a g sideways, and never more than half of what
+the front wheels could ask for at the speed it is doing. At walking pace, where
+the steering lock buys a much smaller sideways push than it does at eighty, the
+same change takes longer.
+
+**In `lanes` the road's own advice is on the HUD.** The car reads the corners
+ahead the way the signs beside the road do, and more than 20 km/h over what the
+sign advises reads `SLOW TO 60` over the speedometer. The other ways of driving
+leave the signs to speak for themselves.
+
+`--mouse` is a *source*, not a way of driving, so it goes with any of them:
+under `wheel` where the pointer is across the window is where the steering wheel
+is, and under `line` and `lanes` how far it is from the middle is how fast the
+car moves across the road.
+
+`--assist` is the strength of the line-holding aid, and it is the difficulty dial
+for `wheel`. `loose` turns it off and `line` and `lanes` use all of it, since
+under those the aid *is* the steering.
+
+**`--autopilot` drives the way you would.** With a `--control` that steers for
+the driver, the car is driven by a *stand-in*: something that presses the same
+keys a player would — the pedals, and the lane key when there is something worth
+getting past — rather than reaching past the controls and steering. That is what
+makes a lap driven by the machine worth watching: what it shows is the way of
+driving, not the road. Where the steering *is* the wheel (`wheel`, `loose`)
+there is nothing to show in pressing a key to wind one, and it steers directly.
+
+```bash
+glisteel /tmp/world/tileset.json --autopilot --control lanes \
+    --record lap.mp4 --record-seconds 130
+```
+
+`--pace` is how hard it drives, as a fraction of what the road and the racing
+speed allow. It is the dial to turn to find how fast a way of driving *can* be
+driven. On a 4 km world of 178-to-482 m bends, posted at 80, at the default
+pace: a clear lap is 1:34.6 at a 141 km/h average, and a lap through the
+default traffic is 1:52.9 with nine cars passed. The target is 200 km/h; what a
+road gives is what its corners hold, and this one holds 199 at the limit of
+grip and 141 driven properly.
+
+**The checks a pass needs are the driver's**, not the lane switch's. The
+stand-in pulls out only when the lane it is going to is clear, when the gap in
+front is long enough to get across in before it is arrived at, and — on a road
+with traffic coming the other way — when there is road enough in *sight* to
+finish in. It asks again every frame against what is *left* of the pass, and
+gives it up and comes back the moment that stops being true — up to the point
+where the two cars are alongside, after which coming back across the crown is
+coming back onto the other car and finishing is the only way out. That is
+exactly the job the mode leaves to a player, done by something that is not one.
+
+**A pass is an acceleration.** Held at the following distance all the way past,
+a car sits out in the other lane at the speed of the thing it is passing until
+the road runs out; so the gap it keeps while getting by is a racing one
+(`PASSING_GAP`) rather than the two seconds it keeps behind something it means
+to stay behind. It still has the room to stop in, so a pass that goes wrong is a
+pass given up rather than a car driven into the back of.
+
+**Coming back in is done with the right foot.** There is no gap beside a car
+you are level with; one has to be made. Past it, the way in is forward and the
+stand-in stays on the throttle until the gap is there; still beside it, the way
+in is backward and it lifts off and drops in behind. Five seconds is all it
+gives to making the gap -- one that has not opened by then is not going to --
+after which it drives the road again and asks for the lane when it comes. It is
+the same thing a player does in `lanes`, which is why the stand-in does it
+rather than the steering.
+
+**It looks as far up the road as it would take to stop.** Stopping from 200 km/h
+takes a quarter of a kilometre, so a driver watching a fixed hundred metres
+meets a stopped car with no room left however early it brakes: the look-ahead is
+the braking distance from the speed it is doing plus the road covered while
+deciding, and never less than the road a pass is decided over.
+
+**And what is in front is in front *on the road*.** A straight line from the
+nose leaves the road at the first bend, so a car two hundred metres up a curving
+road is off that line and reads as nothing in front — until the bend swings it
+onto the line all at once, inside braking distance. Traffic is looked for along
+the course, which is what a driver looking at a road actually sees.
 
 ### Recording a drive
 
@@ -143,14 +264,17 @@ what makes it a *game*.
 | Module | Holds |
 |---|---|
 | `world.py` | a baked world: its tiles, its physics, and the roads it carries |
-| `car.py` | the car — its body, its wheels, and how it is drawn |
+| `car.py` | the car — its body, its wheels, and how it is drawn (the *art* is generated: see below) |
 | `models.py` | which model is which, and the names the game drives one by |
+| `tools/cars.py` | the Blender script that **generates** the hero car, its wheels and all five traffic vehicles |
 | `reflections.py` | what the car reflects, and how that follows the road |
 | `camera.py` | where the player watches from |
-| `driver.py` | the autopilot: pure pursuit, and a speed the corner allows |
+| `driver.py` | the autopilot: pure pursuit, a speed the corner allows, and a stand-in that drives through the controls |
 | `race.py` | lap timing that a shortcut does not fool, and leaving the road |
 | `run.py` | which part of the race this is, and what it lets through to the car |
 | `assist.py` | the steering the game puts in while the player is not steering |
+| `schemes.py` | the ways of driving, and the switch between them |
+| `zone.py` | the road as somewhere to be: its width, its lanes, and which way they go |
 | `lighting.py` | what lights a bore, and what the car carries into one |
 | `tracks.py` | the worlds a player can choose between, and where their files live |
 | `records.py` | the best times driven on each track |
@@ -161,6 +285,14 @@ what makes it a *game*.
 | `scripted.py` | a drive written down: which controls are held, and when |
 | `trace.py` | what a drive did, as numbers, and the measures over them |
 | `game.py` | the window, the keys, and what is drawn |
+
+**No vehicle in this game is hand-modelled — every one is generated by a Python
+script.** The player's car, its two wheels and the five traffic vehicles are
+seven assets out of one run of `tools/cars.py`. Change what a car *looks like*
+and the change belongs in that script, not in a `.blend` and not in the
+scenegraph; the `.glb` files are build output. What the game may legitimately do
+at mount time is place a generated model relative to the physics body, which is
+what `CarSpec.mass_drop` is.
 
 **The car is a model, and so is everything else on the road.** The vehicles in
 `glisteel/assets/cars/` are ours, built by `tools/cars.py` — a Blender script
@@ -202,11 +334,18 @@ is a wall in the middle of an open road. So the carriageway is swept from the
 centreline and the ground is cut from the landscape's own height field, each in
 chunks held near the car. Nothing streams underneath it.
 
-**The road warns you.** A generated road knows its own curvature, its own grade
-and where its tunnels are, so the signs beside it are worked out from the
-alignment rather than placed by hand: a bend tighter than the design speed
-allows, a dip, a crest, a bore ahead. Each stands a stopping distance before
-what it is about.
+**The road warns you, in Ontario's language.** A generated road knows its own
+curvature, its own grade and where its tunnels are, so the signs beside it are
+worked out from the alignment rather than placed by hand: a bend tighter than
+the design speed allows, a dip, a crest, a bore ahead. Each is a black symbol on
+a yellow diamond and stands a stopping distance before what it is about.
+
+**A bend's sign says how fast it is worth.** The road works out what its own
+radius will hold — `sqrt(grip · g · r)` — and the tab under the diamond carries
+60% of it, rounded down to 10 km/h, because a plate carrying the limit is a
+plate that is wrong for a wet road or a cold tyre. **And the road is posted**:
+`MAXIMUM 80 km/h` on a white plate, repeated every 1500 m, skipping anywhere a
+warning already stands.
 
 **And there are things to hit.** Boulders lie on the verges and in the trees
 either side, close enough that a car leaving the road meets one. They come out
@@ -231,13 +370,33 @@ that names none begins where its centreline does.
 traffic marked, so a driver knows what is round the next bend and how much of
 the lap is left.
 
-**`--traffic 8` puts other people on the road.** They drive at the limit in
-both directions, keep their own side, and decide for themselves: a car brakes
-for something its driver can see and you cannot, or pulls off the road
-altogether. None of them will drive through the car in front, and that includes
-yours -- a car on the grid is a car in the road. They are placed and driven by
-distance along the course rather than simulated as vehicles, which is why there
-can be eight of them for nothing measurable.
+**`--traffic` puts other people on the road.** They drive at the road's own
+posted limit, keep their own side, and decide for themselves: a car brakes for
+something its driver can see and you cannot, or pulls off the road altogether.
+None of them will drive through the car in front, and that includes yours -- a
+car on the grid is a car in the road. They are placed and driven by distance
+along the course rather than simulated as vehicles, which is why there can be
+eight of them for nothing measurable.
+
+**Which way they go is what kind of road it is.** A closed course is a circuit
+and a circuit is raced one way round; an open road carries traffic both ways.
+It matters because passing on a two-lane road means using the lane the oncoming
+traffic is in, and how much road that takes grows with speed: getting by an
+80 km/h car at 200 needs the best part of half a kilometre of clear road, which
+is further than any bend allows a driver to see. A race on a circuit is a lane
+change, and is not judged as the other manoeuvre.
+
+**How many of them there are is worked out rather than picked.** A car lives
+from the far edge of the reach in front to the far edge behind, and one is put
+out the moment one goes -- so how often the racer catches one is how long a car
+lasts divided by how many are out there. `cars_for()` turns "one to pass every
+ten seconds" into a count for the speeds actually in play; `--traffic` overrides
+it, and `--traffic 0` is an empty circuit, which is what a timed lap is.
+
+**They join the road out beyond where it is drawn**, in a band at the edge of
+the reach, and drive in from there. A car placed any nearer is a car that was
+not there a moment ago, which is a pop-in to look at and a lie to anyone
+deciding whether the road ahead is clear.
 
 **They ride the road's own surface**, at the height its centreline runs at and
 dropped by the camber at the distance across they keep -- through a bore, over a
@@ -264,9 +423,14 @@ head, and it gives a position rather than a rate. The keys override the pointer
 while one is down.
 
 **The drivetrain is electric.** All of the force from a standstill and constant
-*power* from fifteen metres a second on, so the pull falls away as the speed
-rises rather than shoving as hard at a hundred and sixty as at thirty. What
-decides the top speed is the air: about a hundred and ninety.
+*power* from twenty-one metres a second on, so the pull falls away as the speed
+rises rather than shoving as hard at a hundred and sixty as at thirty. Four
+hundred and twenty kilowatts in something that weighs 1180 kg: a hundred in
+under two seconds, a hundred to a hundred and sixty in two, and half a g still
+in hand at a hundred and forty -- which is what a pass is actually made of,
+since getting by somebody is a speed difference built in the road you can see.
+What decides the top speed is the air: a little under two hundred and eighty,
+clear of the two hundred the circuits are laid out for.
 
 **The car is a rigid body on four spring-loaded rays** — `omi_physics`'
 `RaycastVehicle`. There are no wheels in the simulation: each is a ray cast

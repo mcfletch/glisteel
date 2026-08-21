@@ -39,12 +39,15 @@ CHASE_BACK = 7.5
 CHASE_UP = 2.6
 CHASE_AHEAD = 9.0
 
-#: Where a driver's eyes are, relative to the car body's own centre: a little
-#: back of it and above it. The body sits about two thirds of a metre off the
-#: road, so this puts the eye at about the height of a
-#: real one. The car seats two in single file down the centreline, so the eye
-#: goes there too: ``glisteel.models`` names the column the model puts the wheel
-#: on, and ``tests/test_car_and_camera.py`` holds the two together.
+#: Where a driver's eyes are, measured from the **middle of the bodywork**: a
+#: little back of it and above it. Not from the car's origin, which is where
+#: its mass is and sits lower than the shell
+#: (:attr:`~glisteel.car.CarSpec.mass_drop`); :meth:`ChaseCamera._wanted` adds
+#: that drop back on, so retuning where the mass sits moves the car on its
+#: springs without moving the driver in their seat. The car seats two in single
+#: file down the centreline, so the eye goes there too: ``glisteel.models``
+#: names the column the model puts the wheel on, and
+#: ``tests/test_car_and_camera.py`` holds the two together.
 COCKPIT_BACK = 0.10
 COCKPIT_UP = 0.40
 COCKPIT_SIDE = 0.0
@@ -151,6 +154,11 @@ class ChaseCamera:
 
     def _wanted(self, car: CarLike) -> tuple[np.ndarray, np.ndarray]:
         position = np.asarray(car.position, dtype='d')
+        # Up onto the middle of the bodywork: what the car is drawn around,
+        # and what the views below are measured from. The body's own origin is
+        # its mass, which rides lower than the shell it is wrapped in.
+        position = position + UP * float(
+            getattr(getattr(car, 'spec', None), 'mass_drop', 0.0))
         forward = np.asarray(car.forward(), dtype='d')
         flat = forward - UP * float(np.dot(forward, UP))
         length = float(np.linalg.norm(flat))

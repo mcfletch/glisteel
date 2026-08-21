@@ -269,6 +269,47 @@ def circuit(radius_x: float = 150.0, radius_z: float = 95.0) -> Scenario:
     return Scenario(name='circuit', plan=plan, closed=True)
 
 
+def oval(straight: float = 1000.0, radius: float = 220.0) -> Scenario:
+    """A circuit with straights on it: two of them, joined by two bends.
+
+    What a ring cannot offer is anywhere to *see*: the view round a bend of
+    radius *r* runs `sqrt(8 * r * clear)`
+    (:func:`~OpenGLContext.scenegraph.road.sight_distances`), which on a
+    circuit small enough to drive round in a test is a hundred metres or so,
+    and getting by an 80 km/h car at racing speed wants half as much again. So
+    a ring is a road nobody overtakes on, whoever is driving.
+
+    A straight is where a pass happens on any real circuit, and this is the
+    piece to ask for when what is being tried is the overtaking rather than the
+    steering. ``straight`` is how long each one is and ``radius`` how tight the
+    bends joining them are.
+
+    Long by the standards of a test circuit, because what a pass needs is the
+    road it will *finish* in: getting by an 80 km/h car at racing speed takes
+    the better part of ten seconds, and the two cars closing on each other
+    cover half a kilometre in that. Seven hundred metres of it is a straight
+    the stand-in looks down and declines, over and over.
+
+    Laid out anticlockwise from the near end of the right-hand straight, so the
+    plan runs on from itself all the way round and closes on where it began.
+    """
+    ends = max(int(math.pi * radius / SPACING), 8)
+    along = max(int(straight / SPACING), 8)
+    run = np.linspace(0.0, straight, along, endpoint=False)
+    # Up the right-hand straight, round the far bend, down the left-hand one,
+    # and round the near bend to where it started.
+    far = np.linspace(0.0, math.pi, ends, endpoint=False)
+    near = np.linspace(math.pi, 2.0 * math.pi, ends, endpoint=False)
+    plan = np.concatenate([
+        np.stack([np.full(along, radius), run], axis=-1),
+        np.stack([radius * np.cos(far), straight + radius * np.sin(far)],
+                 axis=-1),
+        np.stack([np.full(along, -radius), straight - run], axis=-1),
+        np.stack([radius * np.cos(near), radius * np.sin(near)], axis=-1),
+    ])
+    return Scenario(name='oval', plan=plan, closed=True)
+
+
 #: Every piece by name, for a test or a command line that takes one.
 CATALOGUE: dict[str, Callable[[], Scenario]] = {
     'straight': straight,
@@ -279,6 +320,7 @@ CATALOGUE: dict[str, Callable[[], Scenario]] = {
     'crest': crest,
     'dip': dip,
     'circuit': circuit,
+    'oval': oval,
 }
 
 

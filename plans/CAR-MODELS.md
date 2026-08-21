@@ -80,7 +80,7 @@ already assume them.
 | Up | +Y in glTF (Blender Z-up, exporter converts) | engine convention |
 | Forward | **-Z** | `omi_physics.car_wheels` puts the front axle at `-half_base` |
 | Authoring direction | nose along **-Y** in Blender | `export_glb` turns the root π about Z, as in `arsenal.py`; Blender's Front view then looks the car in the face |
-| Body origin | centre of the chassis box, not the floor | `Car.follow` sets `node.translation` from the body centre |
+| Body origin | centre of the chassis box, not the floor | `Car._build_nodes` hangs the shell `CarSpec.mass_drop` above the physics body, whose own origin is the car's *mass* and rides lower |
 | Wheel origin | hub centre; axle along **+X**; spin about X, steer about Y | `Car.follow` sets `(0,1,0,steer)` on the wheel node and `(1,0,0,spin)` on its child |
 
 The player's car is authored to the numbers already in `glisteel.car` and
@@ -188,7 +188,8 @@ something to look over in front of the driver. The chase and bonnet views draw
 all four.
 
 **The bonnet leaves the screen at the belt line.** The driver's eye is at
-`COCKPIT_UP` (0.40 over the body's centre) and the front arches top out at 0.34,
+`COCKPIT_UP` (0.40 over the middle of the bodywork, which is what the model is
+built around) and the front arches top out at 0.34,
 so the eye is a hand's width over them: a bonnet whose crown starts below the
 base of the screen and falls from there is seen almost edge-on for its whole
 length. It reads as a bar of metal with the arches standing up at each end and

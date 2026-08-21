@@ -29,7 +29,9 @@ from glisteel import models
 from glisteel.geometry import yaw_to_face
 
 __all__ = ['TrafficCar', 'Traffic', 'CRUISING', 'SLOWING', 'PULLING_OFF',
-           'DEFAULT_TRAFFIC', 'SPEED_LIMIT']
+           'DEFAULT_TRAFFIC', 'SPEED_LIMIT', 'MEETING_SECONDS', 'RETIRE',
+           'EDGE_BAND',
+           'cars_for']
 
 #: What a traffic car is doing. Cruising is the speed limit and its own lane;
 #: slowing is something its driver saw and the player did not; pulling off is a
@@ -62,16 +64,102 @@ PULL_OFF_SHARE = 0.25
 
 #: How far from the player traffic exists, in metres, and how many cars there
 #: are inside that. Past it there is nothing to see and nothing to hit.
-REACH = 320.0
+#:
+#: Far enough that a driver can *decide* things: at two hundred against a road
+#: posted at eighty, two cars meet at over seventy metres a second, so a pass
+#: that takes six seconds needs the better part of half a kilometre of road
+#: known to be empty. A shorter reach is a road nobody can overtake on, because
+#: nobody can see far enough down it to know.
+REACH = 600.0
 CARS = 10
 
-#: How many cars a road carries unless somebody says otherwise. Traffic is what
-#: makes a lap different from the last one -- a car in the wrong place turns a
-#: corner a driver knows into one they have to think about -- so a road has some
-#: by default. Six over the reach puts something in front of the player about
-#: nine times out of ten without turning the lap into a queue; twelve is a busy
-#: road and nothing is a time trial.
-DEFAULT_TRAFFIC = 6
+#: How much further than the reach a car is followed before it is retired, as
+#: a fraction of it. A car just past the edge is a car the player has only
+#: this moment driven by, and taking it away there is taking it away in the
+#: mirror.
+RETIRE = 0.25
+
+#: How wide the band at the edge of the reach is that new cars join in, in
+#: metres. Traffic arrives from beyond the end of the road the player has and
+#: drives in from there: a car placed anywhere nearer is a car that was not
+#: there a moment ago, which is a pop-in to look at and a lie to anyone
+#: deciding whether the road ahead is clear. Wide enough to hold a road's
+#: worth of traffic at :data:`HEADWAY` apart, since every car alive joins
+#: through it.
+EDGE_BAND = 560.0
+
+#: How many cars a road carries unless somebody says otherwise.
+#:
+#: Traffic is what makes a lap different from the last one, and what a racer's
+#: lap is *made of*: something to catch and get by every few seconds. The number
+#: is chosen from that rather than picked -- see :func:`cars_for`, which turns
+#: "one to pass every ten seconds" into a count over the reach. A road with
+#: nothing on it is a time trial.
+#: The speed a road is driven at when nobody says, in metres per second: a
+#: hundred kilometres an hour, which is what an open two-lane road is when it is
+#: not being raced.
+SPEED_LIMIT = 22.2
+
+MEETING_SECONDS = 10.0
+
+#: How fast the driver those cars are put there for gets round, in m/s.
+#:
+#: The **average over a lap**, not the speed they see on the straights: what
+#: decides how often a racer arrives at somebody else is how quickly they cover
+#: the road, and a lap is mostly corners. Aim the count at the top speed
+#: instead and the road is sized for a racer nobody can be, so the traffic
+#: arrives half as often as it was asked to.
+#:
+#: Measured rather than chosen, and measured *in traffic*, which is the
+#: condition being sized for: a clear lap of the shipped 4 km circuit is
+#: 1:34.6 and a lap through this much of it is 1:52.9. The two settle on each
+#: other -- this speed asks for that many cars, and that many cars produce this
+#: speed.
+RACING_SPEED = 120.0 / 3.6
+
+
+def cars_for(seconds: float = MEETING_SECONDS, racing: float = RACING_SPEED,
+             limit: float = SPEED_LIMIT, reach: float = REACH,
+             two_way: bool = False) -> int:
+    """How many cars put one in front of a racer every ``seconds``.
+
+    A car exists from where it joins the road to where it is retired, and one
+    is put out the moment one goes -- so the road is a queue: how many are
+    alive at once is how often a new one arrives times how long each lasts. Of
+    what arrives, only the cars put out *in front* and going the racer's own
+    way are ever passed, so the count is what makes those arrive at the
+    asked-for rate with the rest carried alongside them.
+
+    How long one lasts is the road it covers *relative to the racer* divided by
+    the speed the two close at: a car put out in front is met and then left
+    behind, which is most of the reach twice over; one put out behind only
+    falls back to where it is retired. A car coming the other way does all of
+    that at the sum of the two speeds rather than the difference, so it is gone
+    in a quarter of the time -- which is why a two-way road needs more of them
+    on it to be passed as often.
+
+    Written down rather than picked, because the number that makes a good lap
+    depends on how fast the racer goes and how fast the road is posted, and one
+    chosen for a pair of those numbers is wrong for any other pair.
+    """
+    reach = float(reach)
+    # What a car covers relative to the racer before it is retired: the whole
+    # reach in front and the way back out of it, or, for one put out behind,
+    # only the road between the reach and where it is retired.
+    in_front = reach * (2.0 + RETIRE)
+    behind = reach * RETIRE
+    catching = max(float(racing) - float(limit), 1e-3)
+    meeting = float(racing) + float(limit)
+    if not two_way:
+        kinds = [(1.0, in_front / catching)]
+    else:
+        kinds = [(0.25, in_front / catching), (0.25, behind / catching),
+                 (0.25, in_front / meeting), (0.25, behind / meeting)]
+    passed, alive = kinds[0][0], sum(share * lasts for share, lasts in kinds)
+    return max(int(round(alive / passed / max(float(seconds), 1e-3))), 1)
+
+
+DEFAULT_TRAFFIC = cars_for(two_way=True)
 
 #: How far apart two cars going the same way are placed, at least, in metres.
 HEADWAY = 45.0
@@ -94,10 +182,6 @@ LOOK_AHEAD = 130.0
 #: metres. A car appearing on top of somebody is not traffic, it is an ambush.
 CLEAR_OF_PLAYER = 90.0
 
-#: The speed a road is driven at when nobody says, in metres per second: a
-#: hundred kilometres an hour, which is what an open two-lane road is when it is
-#: not being raced.
-SPEED_LIMIT = 27.8
 
 
 class TrafficCar:
@@ -232,10 +316,19 @@ class TrafficCar:
         the surface under a car has not been built yet.
         """
         centre, right = self._frame()
-        out = (self.lane + self._sideways) * self.heading
+        out = self.side()
         at: np.ndarray = centre + right * out
         at[1] += float(self.course.surface_offset(abs(out)))
         return at
+
+    def side(self) -> float:
+        """How far to the road's own right this car is, in metres.
+
+        Signed in the *road's* frame rather than the car's, so a car coming the
+        other way is on the other side of the crown -- which is what somebody
+        deciding whether a lane is clear is asking about.
+        """
+        return float((self.lane + self._sideways) * self.heading)
 
     def velocity(self) -> np.ndarray:
         """How fast it is going and which way, in metres per second."""
@@ -325,11 +418,25 @@ class Traffic:
 
     def __init__(self, course: Any, count: int = CARS, reach: float = REACH,
                  limit: float | None = None, seed: int = 0,
-                 physics: Any = None) -> None:
+                 physics: Any = None, two_way: bool | None = None) -> None:
         self.course = course
         self.count = int(count)
         self.reach = float(reach)
-        self.limit = float(limit) if limit is not None else SPEED_LIMIT
+        #: Whether cars come the other way as well. A road has two sides to
+        #: it, and a circuit is a road.
+        #:
+        #: It is what makes passing worth anything: the lane a driver pulls
+        #: into is the lane somebody else is coming down, so a pass is a
+        #: decision to get right and the time it buys is bought with a risk.
+        #: Take the oncoming traffic away and the other lane is just more
+        #: road -- there is nothing to come back to your own side for, and a
+        #: driver can sit out there for a whole lap.
+        self.two_way = True if two_way is None else bool(two_way)
+        # What the road is posted at is what the traffic on it does. A road
+        # that says nothing gets the default limit.
+        posted = float(getattr(course, 'posted', 0) or 0.0)
+        self.limit = float(limit) if limit is not None else (
+            posted / 3.6 if posted > 0.0 else SPEED_LIMIT)
         self.seed = int(seed)
         self.physics = physics
         #: Every car on the road right now.
@@ -357,30 +464,36 @@ class Traffic:
         being driven.
         """
         at = np.asarray(position, dtype='d').reshape(-1)[:3]
-        self._look_ahead(at, speed)
+        # Where the player is on the road, found once. Every car put out this
+        # frame joins relative to that same point, and finding a point on a
+        # course is a pass over the whole centreline.
+        here = self._look_ahead(at, speed)
         for car in self.cars:
             car.advance(dt)
         keeping: list[TrafficCar] = []
         leaving: list[TrafficCar] = []
         for car in self.cars:
             (keeping if float(np.linalg.norm(car.position() - at))
-             <= self.reach * 1.25 else leaving).append(car)
+             <= self.reach * (1.0 + RETIRE) else leaving).append(car)
         self.cars = keeping
         for car in leaving:
             self._retire(car)
         while len(self.cars) < self.count:
-            fresh = self._spawn(at)
+            fresh = self._spawn(at, here)
             if fresh is None:
                 break
             self.cars.append(fresh)
             self._show(fresh)
         self._follow()
 
-    def _look_ahead(self, at: Any, speed: float) -> None:
+    def _look_ahead(self, at: Any, speed: float) -> float:
         """Tell every car what is in front of it in its own lane.
 
         The player counts: a car sitting on the grid is a car in the road, and
         traffic that drove through it would be traffic nobody could race.
+
+        Answers how far along the road the player is, because finding that is
+        the expensive part of this and the rest of the frame wants it too.
         """
         here, side = self._where_is(at)
         mine = float(np.sign(side) or 1.0)
@@ -408,6 +521,7 @@ class Traffic:
                     continue
                 nearest = int(np.nanargmin(gaps))
                 car.following(float(gaps[nearest]), float(speeds[nearest]))
+        return here
 
     def _reaches(self, car: TrafficCar, stations: Any) -> np.ndarray:
         """How far in front of ``car`` each station is; NaN for anything behind.
@@ -546,36 +660,80 @@ class Traffic:
         found[1] += car.kind.height / 2.0
         return found
 
+    def around(self, position: Any, forward: Any, ahead: float = REACH,
+               behind: float = 0.0, width: float = IN_THE_WAY
+               ) -> list[tuple[float, TrafficCar]]:
+        """The cars near something, each with how far along the road it is.
+
+        The gap is positive in front and negative behind, measured **along the
+        road** rather than along the line the nose points down -- see
+        :meth:`ahead_of` for why that distinction matters. ``ahead`` and
+        ``behind`` are how far to look each way, and ``width`` is how far across
+        the road still counts. Nearest first, whichever side it is on.
+        """
+        way = np.asarray(forward, dtype='d').reshape(-1)[:3]
+        if float(np.linalg.norm(way)) < 1e-9:    # pragma: no cover - no heading
+            return []
+        at = np.asarray(position, dtype='d').reshape(-1)[:3]
+        index, _distance = self.course.nearest(at)
+        stations = self.course.stations
+        here = float(stations[int(np.clip(index, 0, len(stations) - 1))])
+        offset = at - self.course.point(index)
+        mine = float(np.dot(offset, self.course.across(index)))
+        # Which way this is facing along the road, so somebody turned round is
+        # not told the road behind them is the road in front.
+        heading = 1.0 if float(np.dot(way, self.course.point(index + 1)
+                                      - self.course.point(index))) >= 0.0 else -1.0
+        found = []
+        for car in self.cars:
+            gap = (car.station - here) * heading
+            if self.course.closed:
+                gap = math.remainder(gap, self.course.length)
+            if -float(behind) <= gap <= float(ahead) and abs(car.side() - mine) < width:
+                found.append((gap, car))
+        return sorted(found, key=lambda one: abs(one[0]))
+
     def ahead_of(self, position: Any, forward: Any, reach: float = REACH,
                  width: float = IN_THE_WAY) -> list[TrafficCar]:
         """The cars in front of something looking that way, nearest first.
 
-        What an autopilot or a driving aid asks: not "what is near" but "what am
-        I about to arrive at". ``width`` is how far to either side still counts
-        -- a car's width by default, so the other lane does not; a driver
-        deciding whether it has room to swerve asks for the whole road.
-        """
-        at = np.asarray(position, dtype='d').reshape(-1)[:3]
-        way = np.asarray(forward, dtype='d').reshape(-1)[:3]
-        length = float(np.linalg.norm(way))
-        if length < 1e-9:                        # pragma: no cover - no heading
-            return []
-        way = way / length
-        found = []
-        for car in self.cars:
-            offset = car.position() - at
-            along = float(np.dot(offset, way))
-            aside = float(np.linalg.norm(offset - way * along))
-            if 0.0 < along <= reach and aside < width:
-                found.append((along, car))
-        return [car for _along, car in sorted(found, key=lambda one: one[0])]
+        What an autopilot or a driving aid asks: not "what is near" but "what
+        am I about to arrive at". ``width`` is how far across the road still
+        counts -- a car's width by default, so the other lane does not; a
+        driver deciding whether it has room to swerve asks for the whole road.
 
-    def _spawn(self, at: Any) -> TrafficCar | None:
-        """A new car somewhere within reach, on a side with room for it."""
-        here = self._station_of(at)
+        **Along the road**, not along the line the nose points down. A straight
+        line from the nose leaves the road at the first bend, so a car a couple
+        of hundred metres up a curving road is off that line and reads as
+        nothing in front -- until the bend swings it onto the line all at once,
+        inside braking distance. A driver looking at a road sees what is on the
+        road, and this is what a driver would be told.
+        """
+        near = self.around(position, forward, ahead=reach, behind=0.0,
+                           width=width)
+        return [car for gap, car in near if gap > 0.0]
+
+    def _spawn(self, at: Any, here: float | None = None) -> TrafficCar | None:
+        """A new car at the edge of the reach, on a side with room for it.
+
+        ``here`` is how far along the road the player is, for a caller that
+        has already worked it out -- which the frame has, and which costs a
+        search over the whole centreline to find again.
+        """
+        here = self._station_of(at) if here is None else float(here)
         for _try in range(12):
-            heading = 1 if self._rng.random() < 0.5 else -1
-            offset = float(self._rng.uniform(-self.reach, self.reach))
+            heading = 1 if not self.two_way or self._rng.random() < 0.5 else -1
+            # In through the band at the edge of the reach, which is the one
+            # place a car can arrive without anybody watching it arrive.
+            edge = self.reach - float(self._rng.uniform(0.0, EDGE_BAND))
+            # Behind only where something might come *from* behind. Traffic
+            # going the racer's own way and slower than them is caught by
+            # being driven up to, so one put behind is one met a whole lap
+            # later -- a car spent on nothing. What comes the other way is
+            # met wherever it starts.
+            behind = ((self.two_way or heading < 0)
+                      and self._rng.random() < 0.5)
+            offset = -edge if behind else edge
             station = here + offset
             if not self.course.closed:
                 station = min(max(station, 0.0), self.course.length)

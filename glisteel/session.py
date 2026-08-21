@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
+from OpenGLContext.telemetry import NOT_RECORDING
 
 from glisteel.assist import STRENGTH, Straighten
 from glisteel.camera import VIEWS, CameraPose, ChaseCamera
@@ -33,6 +34,7 @@ from glisteel.car import Car, CarSpec
 from glisteel.race import Collisions, OffRoad, RaceTiming, closing_speed, off_course
 from glisteel.reflections import Reflections
 from glisteel.run import COUNTDOWN, Run
+from glisteel.traffic import IN_THE_WAY
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +54,20 @@ MAXIMUM_CATCHUP = 0.1
 
 #: How far up the road a driver looks for something to run into, in metres.
 AHEAD_REACH = 140.0
+
+#: How far up the road a driver looks for something coming the other way when
+#: the road has no opinion, in metres. Further than :data:`AHEAD_REACH`,
+#: because two cars approaching close at the sum of their speeds: at a hundred
+#: each this is under five seconds. What is normally used instead is the road's
+#: own :meth:`~glisteel.world.Course.sight_ahead`, since what a driver can see
+#: coming is what the bend in front of them allows.
+ONCOMING_REACH = 260.0
+
+#: How far ahead and how far behind a lane has to be clear before a car may move
+#: into it, in metres. Behind as well as ahead, because what a driver coming back
+#: in after a pass is asking about is beside and just behind them.
+LANE_AHEAD = 24.0
+LANE_BEHIND = 14.0
 
 #: A car that has stopped somewhere it should not be -- wedged against a bank,
 #: on its roof, off the map -- is put back on the road after this long. Long
@@ -131,6 +147,10 @@ class Readings:
     #: Lamps burning on the start rig, and how many there are in it.
     lit: int = 0
     lights: int = 0
+    #: How fast the road ahead is worth, in km/h, as the sign before it says.
+    #: Zero for an open road, and for a driver whose way of driving does not
+    #: ask (:attr:`glisteel.schemes.ControlScheme.advises`).
+    caution: int = 0
 
 
 @dataclass
@@ -207,6 +227,13 @@ class Session:
         self.assist = Straighten(course, strength=assist)
         self._accumulated = 0.0
         self._stuck_for = 0.0
+        self._ended_at: str | None = None
+        #: Where this run writes down what it did, for a failure nobody
+        #: watched to be read back afterwards
+        #: (:mod:`OpenGLContext.telemetry`). Marks go nowhere until a caller
+        #: hands over a recording, so the drive marks unconditionally and a
+        #: run nobody asked to record pays a call.
+        self.telemetry: Any = NOT_RECORDING
         self._settle()
 
     # -- the state of the run --------------------------------------------------
@@ -219,6 +246,35 @@ class Session:
                 return str(watcher.ended)
         return None
 
+    def _mark_the_end(self) -> None:
+        """Write down how the run finished, once.
+
+        The line a reader looks for first: a session record four minutes long
+        is read from its end, and what ended the drive is the question the
+        rest of it is evidence for.
+        """
+        why = self.ended
+        if why is None or self._ended_at is not None:
+            return
+        self._ended_at = why
+        index, _distance = self.course.nearest(self.car.position)
+        self.telemetry.mark(
+            'drive-ended', why=why, speed=round(self.car.speed_kph(), 1),
+            across=round(self.across(), 2),
+            station=round(float(self.course.stations[index]), 1),
+            lap=len(self.timing.laps))
+
+    def across(self) -> float:
+        """How far to the road's own right the car is, in metres.
+
+        Where it *is*, rather than which lane it was asked for: a car that has
+        stopped halfway between the two is the thing worth writing down.
+        """
+        at = np.asarray(self.car.position, dtype='d').reshape(-1)[:3]
+        index, _distance = self.course.nearest(at)
+        return float(np.dot(at - self.course.point(index),
+                            self.course.across(index)))
+
     def readout(self) -> Readings:
         """This frame's numbers, for a HUD or for a recorded run."""
         others = (self.world.traffic.cars
@@ -227,7 +283,20 @@ class Session:
             speed_kph=self.car.speed_kph(), timing=self.timing,
             off=self.watch.off, ended=self.ended, at=self.car.position,
             others=[car.position() for car in others],
-            phase=self.run.phase, lit=self.run.lit, lights=self.run.lights)
+            phase=self.run.phase, lit=self.run.lit, lights=self.run.lights,
+            caution=self.caution())
+
+    def caution(self) -> int:
+        """How fast the road ahead is worth, in km/h, or 0 for nothing to say.
+
+        Only for a driver who is being advised: a player steering the car
+        themselves is reading the signs beside the road, and a second copy of
+        what they say on the screen is the game talking over them.
+        """
+        if not getattr(self.driver, 'advises', False):
+            return 0
+        index, _distance = self.course.nearest(self.car.position)
+        return int(self.course.caution_ahead(index, self.car.speed()))
 
     def in_the_dark(self) -> bool:
         """Whether the car is somewhere it needs its own light.
@@ -253,6 +322,63 @@ class Session:
                       seconds=best.seconds if best is not None else None,
                       laps=len(self.timing.laps))
 
+    @property
+    def two_way(self) -> bool:
+        """Whether anything on this road comes the other way.
+
+        What decides how much road a pass needs: getting by something on a
+        circuit everybody laps the same way is a lane change, and getting by
+        something on a road is a manoeuvre in the lane the oncoming traffic
+        is in. A road with nothing on it is neither, and says so as a road.
+        """
+        traffic = self.world.traffic
+        # A property of the road rather than of who happens to be on it: a road
+        # with nobody on it still has two sides, and a driver who forgot that
+        # on an empty lap would have to remember it on a busy one.
+        return True if traffic is None else bool(traffic.two_way)
+
+    def sight(self, over: float = 0.0) -> float:
+        """How far down the road the car can see, in metres.
+
+        The road's own answer (:meth:`~glisteel.world.Course.sight_ahead`):
+        a straight is looked along and a bend is not looked round.
+
+        ``over`` asks for the least that will be seen anywhere in the next that
+        many metres, which is what a driver deciding on a manoeuvre needs: the
+        road has to stay open for as long as the manoeuvre takes, and a pass
+        begun on the last of a straight is a pass abandoned in the bend after
+        it.
+        """
+        index, _distance = self.course.nearest(self.car.position)
+        if over > 0.0:
+            return float(self.course.sight_over(index, over))
+        return float(self.course.sight_ahead(index))
+
+    def car_ahead(self, reach: float = AHEAD_REACH) -> Any:
+        """The nearest car in front in this lane, or None for an open road.
+
+        The car itself rather than a distance to it, for a driver that has to
+        keep track of *which* one: somebody part-way past a car has nothing in
+        front of them any more -- what they pulled out for is beside them, and
+        whether they may come back in is a question about that car and no
+        other.
+        """
+        if self.world.traffic is None:
+            return None
+        ahead = self.world.traffic.ahead_of(self.car.position,
+                                            self.car.forward(), reach=reach)
+        return ahead[0] if ahead else None
+
+    def along(self, other: Any) -> float:
+        """How far up the road something is from the car, in metres.
+
+        Negative for something behind it. Measured along the car's own nose, so
+        it is the answer to "is that thing past me yet" whatever lane either of
+        them is in.
+        """
+        offset = np.asarray(other.position(), dtype='d') - self.car.position
+        return float(np.dot(offset, self.car.forward()))
+
     def traffic_ahead(self, reach: float = AHEAD_REACH
                       ) -> tuple[float, float] | None:
         """What is in front in this lane: how far, and how fast it is going.
@@ -261,15 +387,92 @@ class Session:
         traffic drives into the back of the first car it catches, so this is
         what a :class:`Controller` asks before deciding its speed.
         """
-        if self.world.traffic is None:
+        first = self.car_ahead(reach)
+        if first is None:
             return None
-        ahead = self.world.traffic.ahead_of(self.car.position,
-                                            self.car.forward(), reach=reach)
-        if not ahead:
-            return None
-        first = ahead[0]
         offset = np.asarray(first.position(), dtype='d') - self.car.position
         return float(np.linalg.norm(offset)), float(first.speed)
+
+    def lane_clear(self, across: float, ahead: float = LANE_AHEAD,
+                   behind: float = LANE_BEHIND) -> bool:
+        """Whether the lane at that offset is clear to move into.
+
+        ``across`` is metres to the road's own right, as everything across a
+        road is measured here. Looks both ways along it, because moving into a
+        lane is as much about what is beside and just behind as about what is in
+        front of it -- a driver coming back in after a pass is asking exactly
+        that.
+
+        What the lane switch asks about a lane already asked for
+        (:class:`~glisteel.schemes.Lanes`), and what a player in easy mode is
+        looking at when they decide to come back in. It answers whether there
+        is *room*, not whether to pass: the decision stays the driver's, and so
+        do the pedals that make the room.
+        """
+        if self.world.traffic is None:
+            return True
+        forward = self.car.forward()
+        width = float(self.course.carriageway_width)
+        near = (self.world.traffic.ahead_of(self.car.position, forward,
+                                            reach=ahead, width=width)
+                + self.world.traffic.ahead_of(self.car.position, -forward,
+                                              reach=behind, width=width))
+        return not any(abs(one.side() - float(across)) < IN_THE_WAY
+                       for one in near)
+
+    def lane_ahead(self, across: float, reach: float = AHEAD_REACH
+                   ) -> tuple[float, float] | None:
+        """What is up the lane at that offset: how far, and how fast.
+
+        ``across`` is metres to the road's own right, as everything across a
+        road is measured here; None for a lane with nothing in it. What a
+        driver asks before moving into a lane, whether pulling out to pass or
+        coming back in afterwards: a lane is clear enough to move into when
+        there is room in it to shed the speed being carried into it, and that
+        is a question about a distance and a speed rather than about a window.
+        """
+        if self.world.traffic is None:
+            return None
+        found = self.world.traffic.ahead_of(
+            self.car.position, self.car.forward(), reach=reach,
+            width=float(self.course.carriageway_width))
+        for car in found:
+            if abs(car.side() - float(across)) >= IN_THE_WAY:
+                continue
+            offset = np.asarray(car.position(), dtype='d') - self.car.position
+            return float(np.linalg.norm(offset)), float(car.speed)
+        return None
+
+    def oncoming(self, reach: float | None = None
+                 ) -> tuple[float, float] | None:
+        """What is coming the other way: how far off, and how fast it closes.
+
+        None for a clear road. What a driver asks before pulling out to pass on
+        a two-lane road, where the only lane to pass in is the one with the
+        traffic coming towards you in it. The closing speed is the sum of the
+        two, which is what makes the answer different from
+        :meth:`traffic_ahead`: a car alongside at the same speed is not
+        approaching at all, and one head-on at the same speed is approaching
+        twice as fast as it looks.
+
+        ``reach`` is how far to look; left out, it is as far as the road lets
+        the car see (:meth:`sight`), because a driver cannot be told about
+        something round a bend they are not looking round.
+        """
+        if self.world.traffic is None:
+            return None
+        reach = self.sight() if reach is None else float(reach)
+        forward = self.car.forward()
+        found = self.world.traffic.ahead_of(
+            self.car.position, forward, reach=reach,
+            width=float(self.course.carriageway_width))
+        for car in found:
+            if float(np.dot(car.forward(), forward)) >= 0.0:
+                continue                         # going my way: not oncoming
+            offset = np.asarray(car.position(), dtype='d') - self.car.position
+            return (float(np.linalg.norm(offset)),
+                    float(self.car.speed() + abs(car.speed)))
+        return None
 
     # -- the frame -------------------------------------------------------------
 
@@ -305,6 +508,7 @@ class Session:
                                       speed=self.car.speed())
             self._watch_for_a_crash()
         self._recover_if_stuck(elapsed)
+        self._mark_the_end()
         pose = self.camera.update(self.car, elapsed)
         self.car.hidden = self.camera.inside
         changed = self.reflections.update(self.car.position)
@@ -441,7 +645,34 @@ class Session:
         other = ahead[0]
         closing = closing_speed(self.car.velocity(), other.velocity(),
                                 other.position() - self.car.position)
-        self.crashes.update(max(closing, 0.0))
+        if self.crashes.update(max(closing, 0.0)) is not None:
+            self._mark_the_crash(other, closing)
+
+    def _mark_the_crash(self, other: Any, closing: float) -> None:
+        """Write down what the car hit, on the frame it hit it.
+
+        A run that ends in a crash is read backwards from here, and the
+        question is always the same one: what was it and where did it come
+        from. So the record carries the other car's side of the road and
+        whether it was coming the other way, alongside the car's own -- two
+        cars nose to nose in the same lane and one clipped coming back in are
+        the same closing speed and different bugs.
+        """
+        between = np.asarray(other.position(), dtype='d').reshape(-1)[:3] \
+            - np.asarray(self.car.position, dtype='d').reshape(-1)[:3]
+        facing = float(np.dot(np.asarray(self.car.forward(),
+                                         dtype='d').reshape(-1)[:3],
+                              np.asarray(other.forward(),
+                                         dtype='d').reshape(-1)[:3]))
+        self.telemetry.mark(
+            'crash', closing=round(float(closing), 1),
+            gap=round(float(np.linalg.norm(between)), 1),
+            across=round(self.across(), 2),
+            theirs=round(float(other.side()), 2),
+            oncoming=facing < 0.0,
+            speed=round(self.car.speed_kph(), 1),
+            their_speed=round(float(other.speed) * 3.6, 1),
+            passing=bool(getattr(self.driver, 'overtaking', False)))
 
     def _recover_if_stuck(self, elapsed: float) -> None:
         """Put the car back on the road if it has got itself stuck.

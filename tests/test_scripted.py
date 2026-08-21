@@ -50,7 +50,9 @@ class TestDrivingIt:
         assert trace.speed.max() > 10.0
 
     def test_and_the_brake_stops_it(self) -> None:
-        trace = drive(_session(), Script.parse('throttle 0..6; brake 6..9'))
+        # Six seconds of this car is fifty metres a second, and stopping from
+        # there takes about four: the brake is held long enough to finish.
+        trace = drive(_session(), Script.parse('throttle 0..6; brake 6..12'))
         assert trace.speed[:600].max() > 10.0
         assert trace.speed[600:].min() < 0.5
 
