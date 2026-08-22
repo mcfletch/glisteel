@@ -122,8 +122,13 @@ PICTURE_SECONDS = 25.0
 #: baked into it, and this is only for the car and the road under the fitting.
 #: Without the square term a lamp lights the whole bore evenly and the tunnel
 #: comes out as a brightly lit corridor rather than a dark one with lamps in it.
+#:
+#: Low, for the same reason. The lining already carries the pool this lamp
+#: throws, so anything this adds to the *walls* is that lamp counted twice --
+#: and a bore whose walls are lit twice is a white corridor rather than the
+#: dark one a headlight is worth having in.
 LAMP_REACH = 30.0
-LAMP_INTENSITY = 3.0
+LAMP_INTENSITY = 0.9
 LAMP_FALLOFF = (1.0, 0.0, 0.02)
 
 
@@ -286,13 +291,16 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
                 self._beam.direction = tuple(self.headlights.aim(forward))
         if not self._lamps:
             return
-        wanted = (self.session.world.luminaires.nearest(car.position)
-                  if dark else [])
+        # Not gated on being in a bore: a lamp is dark long before the car
+        # is out of one, so distance is what turns them off and there is no
+        # threshold at the portal for them to be switched at.
+        wanted = self.session.world.luminaires.burning(car.position)
         for slot, lamp in enumerate(self._lamps):
             if slot < len(wanted):
+                index, share = wanted[slot]
                 lamp.location = tuple(
-                    self.session.world.luminaires.at(wanted[slot]))
-                lamp.intensity = LAMP_INTENSITY
+                    self.session.world.luminaires.at(index))
+                lamp.intensity = LAMP_INTENSITY * share
                 lamp.on = True
             else:
                 lamp.on = False

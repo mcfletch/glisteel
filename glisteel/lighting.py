@@ -50,6 +50,17 @@ LAMP_COLOUR = (1.0, 0.72, 0.36)
 BEAM_COLOUR = (0.92, 0.95, 1.0)
 
 
+def _fade(share: float) -> float:
+    """One at the lamp, nothing at the edge of the reach, smooth between.
+
+    Smooth in its *slope* as well as its value, so a lamp neither appears nor
+    goes out with an edge to it: what the eye catches is the change in the
+    rate of change as much as the change itself.
+    """
+    left = 1.0 - min(max(float(share), 0.0), 1.0)
+    return float(left * left * (3.0 - 2.0 * left) * left)
+
+
 class Luminaires:
     """The lamps in a world's bores, and which of them are worth a real light.
 
@@ -86,6 +97,35 @@ class Luminaires:
             return []
         order = within[np.argsort(away[within])][:self.count]
         return [int(one) for one in order]
+
+    def burning(self, position: Any) -> list[tuple[int, float]]:
+        """Which lamps to light from where the car is, and how brightly.
+
+        Each is paired with a *share* of full strength that falls to nothing
+        by :attr:`reach`, so a lamp is already out by the time it stops being
+        one of the nearest and the next one arrives dark. Bound at full
+        strength and dropped at full strength, the set changing is a step
+        change in the picture -- and in a bore it changes every twenty-five
+        metres, which is the whole length of it flickering.
+
+        Nearest first, so a caller can hold one light per slot and move it.
+        """
+        at = np.asarray(position, dtype='d')[:3]
+        if not len(self.lamps) or not self.count:
+            return []
+        away: np.ndarray = np.linalg.norm(self.lamps - at, axis=1)
+        order = np.argsort(away)[:self.count + 1]
+        near = away[order]
+        # Nothing left by the first lamp there is no light for, so the one on
+        # its way out is already dark when it goes and the one arriving is
+        # dark when it arrives. Where every lamp in the world fits at once,
+        # that is the reach instead.
+        horizon = float(near[-1]) if len(near) > self.count else self.reach
+        horizon = min(max(horizon, 1e-6), self.reach)
+        return [(int(index), _fade(float(distance) / horizon))
+                for index, distance in zip(order[:self.count], near,
+                                          strict=False)
+                if distance < horizon]
 
     def at(self, index: int) -> np.ndarray:
         """Where one lamp hangs."""

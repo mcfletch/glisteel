@@ -107,3 +107,53 @@ class TestTheHeadlights:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestLampsThatDoNotPop:
+    """A light bound at full strength and dropped at full strength is a step
+    change in the picture. What the driver should see instead is a lamp that is
+    already dim by the time it goes, and dim again when the next one arrives."""
+
+    def _lamps(self, spacing=25.0, count=12):
+        from glisteel.lighting import Luminaires
+        along = np.arange(count) * spacing
+        return Luminaires(np.stack([along, np.full(count, 5.0),
+                                    np.zeros(count)], axis=-1))
+
+    def test_a_lamp_overhead_burns_at_its_full_strength(self) -> None:
+        lamps = self._lamps()
+        found = dict(lamps.burning((0.0, 1.0, 0.0)))
+        assert found[0] > 0.9
+
+    def test_one_at_the_edge_of_the_reach_is_out(self) -> None:
+        lamps = self._lamps()
+        found = dict(lamps.burning((0.0, 1.0, 0.0)))
+        assert min(found.values()) < 0.05
+
+    def test_they_dim_with_distance_rather_than_switching(self) -> None:
+        lamps = self._lamps()
+        found = lamps.burning((0.0, 1.0, 0.0))
+        shares = [share for _index, share in found]
+        assert shares == sorted(shares, reverse=True)
+
+    def test_no_more_of_them_burn_than_there_are_lights_for(self) -> None:
+        lamps = self._lamps(count=40)
+        assert len(lamps.burning((300.0, 1.0, 0.0))) <= lamps.count
+
+    def test_a_world_with_no_bores_lights_none(self) -> None:
+        from glisteel.lighting import Luminaires
+        assert Luminaires(None).burning((0.0, 0.0, 0.0)) == []
+
+    def test_the_share_never_jumps_as_the_car_drives_under_them(self) -> None:
+        """The test the eye is doing: step along the road and no lamp's
+        contribution may change by much between one step and the next."""
+        lamps = self._lamps(count=20)
+        was: dict = dict(lamps.burning((0.0, 1.0, 0.0)))
+        worst = 0.0
+        for step in range(1, 400):
+            now = dict(lamps.burning((step * 0.5, 1.0, 0.0)))
+            for index in set(now) | set(was):
+                worst = max(worst,
+                            abs(now.get(index, 0.0) - was.get(index, 0.0)))
+            was = now
+        assert worst < 0.05, 'a lamp jumped by %.2f in half a metre' % worst

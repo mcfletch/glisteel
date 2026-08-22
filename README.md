@@ -316,9 +316,19 @@ carefully it is modelled. The road already knows what it is running through —
 its structures say where the bores and the bridges are, and everywhere else is
 forest — so `reflections.py` hands the renderer a small panorama of that place:
 a canopy overhead with sky broken through it, a bore with a lit portal fore and
-aft, open sky over a treeline on a viaduct. The engine's IBL probe notices the
-environment changed and rebuilds, which happens at a portal rather than at a
-frame.
+aft, open sky over a treeline on a viaduct.
+
+**And it arrives over a stretch of road rather than at a line.** A portal is a
+line on the ground and the light does not change on it: coming out from under
+the canopy the daylight arrives over the length of the approach, and going in
+the shade closes over the car. So what the renderer is handed is the *mixture*
+of places within 90 m — `mix_at` weights them by how near each is, `blended`
+sums the panoramas in those proportions — and the engine's IBL probe is rebuilt
+when that mixture has moved the light by a tenth. A handful of rebuilds over a
+crossing, rather than one at the portal that changes the brightness of the whole
+scene in a single frame. This environment lights the scene and not only the car,
+and a forest and a viaduct differ by more than three times in how much light
+they carry.
 
 **The road comes with the world.** A pile of triangles does not say where a
 track goes, so the baker writes the centreline, the cross-section, the lean of
@@ -621,7 +631,13 @@ twenty-five metres, so a bore is lit **twice**:
   distance and costs nothing to draw.
 - **The few fittings the car is among become real lights.** That is what the
   lamp positions in the tileset's `extras` are for: a car under a lamp has no
-  idea it is under one, and a baked pool cannot tell it.
+  idea it is under one, and a baked pool cannot tell it. Each is dimmed by how
+  far off it is (`Luminaires.burning`), so a fitting is already out by the time
+  it stops being one of the nearest and the next one arrives dark — bound and
+  dropped at full strength instead, and a bore twenty-five metres a lamp is a
+  bore that flickers its whole length. They are dim rather than bright for the
+  same reason the lining carries its own pool: anything a real light adds to the
+  walls is that lamp counted twice.
 
 The budget divides two for the sun and its sky fill, four for the luminaires,
 one for the headlights — seven of eight, with one left for whatever a world

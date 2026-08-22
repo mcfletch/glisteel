@@ -109,12 +109,12 @@ class TestChangingItOnTheWay:
         watching.update((0.0, 0.0, 100.0))
         watching.update((0.0, 0.0, 400.0))
         assert watching.context == reflections.TUNNEL
-        assert len(applied) == 2
+        assert len(applied) > 1
 
     def test_and_not_while_the_road_stays_the_same(self) -> None:
         """A probe rebuilt every frame is a probe rebuilt for nothing."""
         applied, watching = self._watcher()
-        for station in (100.0, 120.0, 180.0, 240.0):
+        for station in (100.0, 120.0, 180.0, 200.0):
             watching.update((0.0, 0.0, station))
         assert len(applied) == 1
 
@@ -122,6 +122,52 @@ class TestChangingItOnTheWay:
         applied, watching = self._watcher()
         watching.update((0.0, 0.0, 400.0))
         assert np.array_equal(applied[-1], reflections.panorama(reflections.TUNNEL))
+
+
+class TestArrivingRatherThanSwitching:
+    """This environment is what lights the *scene*, not only the car, so
+    exchanging one for another in a single frame is the whole picture changing
+    brightness at once -- which is what a driver sees at every portal. Light
+    does not do that: coming out of a bore the daylight arrives over the length
+    of the approach, and going in the dark closes over the car.
+    """
+
+    def _driven(self, step=5.0, first=600.0, last=900.0):
+        """Every environment handed over while driving over the viaduct.
+
+        The worst of the four: a forest closes the sky out and a viaduct opens
+        all of it, so the two differ by more than three times in how much light
+        they carry.
+        """
+        applied = []
+        watching = reflections.Reflections(ROAD, apply=applied.append)
+        for station in np.arange(first, last, step):
+            watching.update((0.0, 0.0, float(station)))
+        return applied
+
+    def test_the_light_never_changes_by_much_in_one_step(self) -> None:
+        applied = self._driven()
+        levels = [float(one.mean()) for one in applied]
+        steps = [abs(b - a) for a, b in zip(levels, levels[1:], strict=False)]
+        assert steps, 'nothing was ever handed over'
+        assert max(steps) < 0.2 * max(levels), (
+            'the environment jumped by %.0f%% of its own brightness in one'
+            % (100.0 * max(steps) / max(levels)))
+
+    def test_it_gets_all_the_way_to_the_place_it_is_going(self) -> None:
+        """A blend that never arrives is a bore lit like half a forest."""
+        applied = self._driven()
+        assert np.allclose(applied[-1], reflections.panorama(reflections.FOREST))
+
+    def test_and_all_the_way_into_it(self) -> None:
+        applied = self._driven(first=600.0, last=760.0)
+        assert np.allclose(applied[-1], reflections.panorama(reflections.VIADUCT))
+
+    def test_it_does_not_rebuild_the_probe_every_frame(self) -> None:
+        """The blend is spread over the road, not over the frames: a rebuild
+        costs milliseconds, and one per frame is one per frame wasted."""
+        applied = self._driven(step=0.5)
+        assert len(applied) < 60, '%d rebuilds crossing one portal' % len(applied)
 
 
 def _overhead(image):
