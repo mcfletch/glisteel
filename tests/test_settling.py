@@ -94,6 +94,6 @@ class TestItDoesNotSimulateAFallItCouldHaveAvoided:
     def test_a_world_that_cannot_say_where_its_ground_is_still_works(self) -> None:
         """Nothing under the grid: the car is dropped from the old height."""
         one = scenarios.straight().world()
-        one.ground_under = lambda at, reach=200.0: None
+        one.ground_under = lambda at, reach=200.0, skip=(): None
         session = Session(one)
         assert not session.car.upside_down()
