@@ -97,3 +97,38 @@ class TestAskingAboutALotOfGround:
         # A point-by-point matrix over this grid is 102400 x ~230 x 2 doubles,
         # which is hundreds of megabytes; the answer itself is 100 kB.
         assert peak < 64e6, 'peak was %.0f MB' % (peak / 1e6)
+
+
+class TestWhatHasAnEdgeToFallOff:
+    """A car that runs wide on a deck goes off it. The barrier the structure is
+    drawn with is what stops that, and the collider has to have one too."""
+
+    @staticmethod
+    def _course(*kinds):
+        from glisteel.world import Course, Structure
+        line = np.stack([np.zeros(9), np.zeros(9),
+                         -np.arange(9) * 10.0], axis=-1)
+        return Course(name='r', centreline=line, carriageway_width=7.2,
+                      total_width=12.6, closed=False, length=80.0,
+                      structures=tuple(
+                          Structure(kind=kind, start=10.0 * at,
+                                    end=10.0 * at + 20.0)
+                          for at, kind in enumerate(kinds)))
+
+    def test_a_deck_has_one(self) -> None:
+        assert self._course('bridge').edges() == ((0.0, 20.0),)
+
+    def test_a_causeway_has_one(self) -> None:
+        assert self._course('causeway').edges() == ((0.0, 20.0),)
+
+    def test_a_bore_does_not(self) -> None:
+        """What is beside a tunnel is the hillside it is driven through, and a
+        wall in there is a wall in the middle of the road."""
+        assert self._course('tunnel').edges() == ()
+
+    def test_plain_road_has_none(self) -> None:
+        assert self._course().edges() == ()
+
+    def test_each_carried_stretch_gets_its_own(self) -> None:
+        found = self._course('bridge', 'tunnel', 'causeway').edges()
+        assert found == ((0.0, 20.0), (20.0, 40.0))

@@ -27,9 +27,17 @@ from omi_physics.raycast import raycast
 from omi_physics.world import PhysicsWorld
 from OpenGLContext.loaders.tiles3d import fetch
 from OpenGLContext.loaders.tiles3d.frustum import view_projection as frustum_matrix
+from OpenGLContext.scenegraph.road import (
+    CAUTION,
+    advisory_speed,
+    corner_speed,
+    cornering_radius,
+    sight_distances,
+)
 from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
 
 from glisteel.geometry import yaw_to_face
+from glisteel.zone import LANES
 
 __all__ = ['Course', 'RaceWorld', 'courses_in', 'load_courses']
 
@@ -66,6 +74,40 @@ LOST_BELOW = 500.0
 #: How far past a road's own width a bore's opening in the ground reaches, in
 #: metres. Wide enough to clear the lining, and no wider: the opening is a hole
 #: in the ground with the bore's own tube inside it, and one wider than the tube
+#: How far up the road a driver is told about a bend: this much, plus this many
+#: seconds of it at the speed they are doing. The same shape as the distance a
+#: sign is placed at -- what a driver can still act on -- rather than a fixed
+#: reach, which is either useless at speed or a warning about somewhere else at
+#: a crawl.
+CAUTION_METRES = 40.0
+CAUTION_SECONDS = 3.5
+
+#: The fastest anything drives here, in m/s. What it settles is which bends are
+#: worth a caution: one nothing on the road could take too fast is a straight as
+#: far as a sign is concerned.
+TOP_SPEED = 55.0
+
+#: Over how much road a bend's radius is measured, in metres.
+#:
+#: The circle through a point and its two neighbours is exact for a circle and
+#: noisy for a road: an alignment written down every few metres carries its
+#: arcs as chords, and a point a hand's breadth off its arc reads as a corner
+#: half the radius of the one it is on. A driver reading that brakes for a
+#: corner nobody built. Long enough that the sampling washes out; short enough
+#: to resolve the corner it is about.
+CURVE_BASELINE = 20.0
+
+#: How far to the side the view is clear where nothing stands beside the road,
+#: in metres. A span has no wood beside it and nothing under the railing to see
+#: past, so what limits the view along one is how far a driver is planning
+#: rather than what is in the way; this is large enough to say so.
+OPEN_SIGHT = 400.0
+
+#: What stands beside the road on each sort of structure, in metres, where it
+#: is not the wood the road was cut through. A bore is the tight case: the wall
+#: is at the road's edge, so nothing outside the tube is seen at all.
+BESIDE = {'bridge': OPEN_SIGHT, 'causeway': OPEN_SIGHT, 'tunnel': 3.6}
+
 #: is a trench beside the carriageway.
 BORE_MARGIN = 2.0
 
@@ -80,6 +122,12 @@ BORE_APPROACH = 24.0
 #: not a world but an allocation, and a tileset is something a player may have
 #: been handed by somebody else.
 MOST_LUMINAIRES = 1_000_000
+
+
+#: The kinds of structure a road is carried on that have an **edge**: run wide
+#: on one and there is nothing beside it. A bore is carried too and has no edge,
+#: since what is beside it is the hill it is in.
+CARRIED_ON_AN_EDGE = frozenset(('bridge', 'causeway'))
 
 
 @dataclass(frozen=True)
@@ -134,6 +182,75 @@ class Course:
     #: The road's cross-section as the world wrote it, or empty for a world
     #: that only said how wide the road is.
     profile: dict[str, Any] = dataclasses.field(default_factory=dict)
+    #: What the road is posted at, in km/h; 0 for one that says nothing. What
+    #: the signs beside it say, as a number rather than as furniture.
+    posted: int = 0
+    #: How far the road leans at each point of the centreline, as a fraction and
+    #: signed the way
+    #: :func:`~OpenGLContext.scenegraph.road.plan_curvature` is -- positive
+    #: where the road turns right, which is where its right-hand side is the low
+    #: one. Empty for a world whose corners are flat, which is what a road laid
+    #: out without a design speed has.
+    bank: np.ndarray = dataclasses.field(
+        default_factory=lambda: np.zeros(0, dtype='d'))
+    #: How much more carriageway the road has at each point of the centreline,
+    #: in metres. Empty for a road of one width; a lane's worth on a stretch
+    #: built to be passed on, which is where getting by whatever is in front
+    #: does not depend on the driver in front allowing it.
+    widening: np.ndarray = dataclasses.field(
+        default_factory=lambda: np.zeros(0, dtype='d'))
+
+    @property
+    def lanes(self) -> int:
+        """How many lanes are marked across the carriageway.
+
+        Out of the section the world wrote, where it wrote one. A road that
+        only said how wide it is has one lane each way, which is what a road
+        with a crown and something coming the other way is
+        (:data:`glisteel.zone.LANES`).
+        """
+        found = self.profile.get('lanes')
+        return int(found) if found else LANES
+
+    def bank_at(self, index: int) -> float:
+        """How far the road leans at that point of the line, as a fraction.
+
+        Zero for a road that does not lean, which is every road a world wrote
+        no lean for: a course half described is a course driven flat, not one
+        that rears up on the first corner.
+        """
+        if not len(self.bank):
+            return 0.0
+        return float(self.bank[index % len(self.bank)])
+
+    def widening_at(self, index: int) -> float:
+        """How much wider the carriageway is there, in metres.
+
+        Zero for a road that never widens, which is every road a world wrote no
+        widening for.
+        """
+        if not len(self.widening):
+            return 0.0
+        return float(self.widening[index % len(self.widening)])
+
+    def width_at(self, index: int) -> float:
+        """How far across the carriageway is there, in metres.
+
+        What a driver has to work with: the road's own carriageway, plus
+        whatever a stretch built to be passed on adds to it.
+        """
+        return float(self.carriageway_width) + self.widening_at(index)
+
+    def edges(self) -> tuple:
+        """The stretches with an edge to fall off, as ``(from, to)`` metres.
+
+        A deck and a causeway: beside those there is nothing but whatever the
+        structure was built to cross. A **bore** is carried too and is not one
+        of these -- what is beside a tunnel is the hillside it is driven
+        through, and a wall inside it would be a wall in the middle of the road.
+        """
+        return tuple((one.start, one.end) for one in self.structures
+                     if one.kind in CARRIED_ON_AN_EDGE)
 
     def road_profile(self) -> Any:
         """The cut across the road, as the engine's own profile.
@@ -155,7 +272,8 @@ class Course:
                 crossfall=float(found['crossfall']),
                 texture_length=float(found['textureLength']))
         beside = max(self.total_width - self.carriageway_width, 0.0) / 2.0
-        return RoadProfile(lane_width=self.carriageway_width / 2.0, lanes=2,
+        return RoadProfile(lane_width=self.carriageway_width / self.lanes,
+                           lanes=self.lanes,
                            shoulder_width=beside * 0.4,
                            verge_width=beside * 0.6)
 
@@ -168,15 +286,20 @@ class Course:
         """
         return self.road_profile()
 
-    def surface_offset(self, across: Any) -> Any:
+    def surface_offset(self, across: Any, bank: Any = 0.0) -> Any:
         """How far below the crown the road's surface is, that far out.
 
         ``across`` is one distance from the centreline or an array of them, in
         metres. What puts anything placed by how far along and how far across
         the road it is -- a traffic car, a marker -- at the height the road
         actually is there, rather than at the height of its crown.
+
+        ``bank`` is how far the road leans there (:meth:`bank_at`). It is the
+        *camber* the lean accounts for and nothing else: the tilt itself is in
+        :meth:`across`, so something placed by ``lane_point`` and dropped by
+        this lands on the surface once rather than twice.
         """
-        return self._section.section_offset(across)
+        return self._section.section_offset(across, bank)
 
     @functools.cached_property
     def stations(self) -> np.ndarray:
@@ -223,15 +346,23 @@ class Course:
         What reads it is :meth:`glisteel.driver.Autopilot.target_speed`, which
         wants the tightest bend within braking distance and would otherwise work
         out sixty of these per driver per frame.
+
+        Measured over :data:`CURVE_BASELINE` of road rather than between
+        neighbouring samples. The three-point circle is exact for a circle and
+        noisy for a road: a line written down every few metres carries an arc
+        as chords, and one point a hand's breadth off its arc reads as a corner
+        half the radius of the one it is on -- which a driver brakes for. Over
+        a real length of road the sampling washes out and the corner does not.
         """
         line = self.ground_line
-        before = np.roll(line, 1, axis=0)
-        after = np.roll(line, -1, axis=0)
+        apart = max(int(round(CURVE_BASELINE / max(self._spacing, 1e-6))), 1)
+        before = np.roll(line, apart, axis=0)
+        after = np.roll(line, -apart, axis=0)
         if not self.closed:
             # An open road has no bend at its ends: hold the first and last to
             # their neighbours rather than wrapping onto the other end of the
             # world.
-            before[0], after[-1] = line[0], line[-1]
+            before[:apart], after[-apart:] = line[0], line[-1]
         first = np.linalg.norm(line - before, axis=1)
         second = np.linalg.norm(after - line, axis=1)
         third = np.linalg.norm(after - before, axis=1)
@@ -242,6 +373,129 @@ class Course:
 
     #: The last position :meth:`nearest` was asked about and what it answered.
     _last_nearest: tuple[tuple[float, float], tuple[int, float]] | None = None
+
+    def corner_speed(self, index: int) -> float:
+        """How fast the bend at that point of the road may be taken, in m/s.
+
+        The road's own radius there and the grip a tyre has on it
+        (:func:`~OpenGLContext.scenegraph.road.corner_speed`) -- the same rule
+        the world was signed by, so what the game says about a corner and what
+        the plate beside it says are the same number.
+        """
+        radii = self.radii
+        return float(corner_speed(float(radii[index % len(radii)]),
+                                  bank=self.bank_at(index)))
+
+    def caution_speed(self, index: int) -> int:
+        """What a sign before that bend says, in km/h; 0 where it is straight.
+
+        Well inside what the bend allows
+        (:func:`~OpenGLContext.scenegraph.road.advisory_speed`), because that is
+        what an advisory speed is: a number a careful driver beats rather than a
+        bound they must not cross. How far the bend leans counts towards what it
+        allows, so the plate on a superelevated corner reads the higher number
+        the road is actually holding the car to.
+        """
+        radii = self.radii
+        radius = float(radii[index % len(radii)])
+        if radius >= self.straight_radius:
+            return 0
+        return int(advisory_speed(radius, bank=self.bank_at(index)))
+
+    @functools.cached_property
+    def straight_radius(self) -> float:
+        """How wide a bend has to be before it is a straight, in metres.
+
+        The radius at which the caution speed reaches the fastest thing that
+        drives here: past that a sign would be advising a speed nothing on the
+        road can reach, which is a sign about nothing.
+        """
+        return float(cornering_radius(TOP_SPEED) / CAUTION / CAUTION)
+
+    @functools.cached_property
+    def _clear(self) -> np.ndarray:
+        """How far to the side of each point of the road the view is clear.
+
+        What a driver sees past on a bend, and it is not one figure for the
+        whole road. Through the wood it is the road's own width and no more:
+        beyond the verge stands what the road was cut through. On a span there
+        is nothing to see past -- the railing is see-through and the drop
+        beyond it holds nothing -- so a viaduct is looked along however it
+        curves. Inside a bore it is the carriageway alone, because the wall is
+        at the road's edge and what is not in the tube is not seen.
+        """
+        clear = np.full(len(self.centreline), self.total_width / 2.0)
+        stations = self.stations
+        for structure in self.structures or ():
+            clear[np.asarray(structure.holds(stations), dtype=bool)] = (
+                BESIDE.get(structure.kind, OPEN_SIGHT))
+        return clear
+
+    @functools.cached_property
+    def _sight(self) -> np.ndarray:
+        """How far down the road can be seen from each point of the line.
+
+        The road's own geometry against what stands beside it
+        (:attr:`_clear`,
+        :func:`~OpenGLContext.scenegraph.road.sight_distances`).
+
+        Worked out once, because the road does not move and a driver asks
+        about it every frame.
+        """
+        found: np.ndarray = sight_distances(
+            self.centreline, clear=self._clear, closed=self.closed)
+        return found
+
+    def sight_ahead(self, index: int) -> float:
+        """How far down the road a driver at that point can see, in metres.
+
+        The stretch in front that stays on the carriageway: a straight is seen
+        along to the limit of what is worth planning for, and a bend is seen
+        only as far as it holds the line the car is pointing down. What decides
+        whether there is room to get past something -- an empty look-ahead on
+        a bend is a road nobody has seen, not a road with nothing on it.
+        """
+        sight = self._sight
+        return float(sight[index % len(sight)])
+
+    def sight_over(self, index: int, metres: float) -> float:
+        """The least that can be seen anywhere in the next ``metres``.
+
+        What a driver deciding on a manoeuvre needs, rather than what they can
+        see from where they are standing: the road has to stay open for as long
+        as the manoeuvre takes, and a pass begun on the last of a straight is a
+        pass abandoned in the bend after it. Zero or less is the road underfoot,
+        which is :meth:`sight_ahead`.
+        """
+        sight = self._sight
+        points = int(round(max(float(metres), 0.0) / max(self._spacing, 1e-6)))
+        wanted = (index + np.arange(points + 1)) % len(sight)
+        return float(sight[wanted].min())
+
+    @functools.cached_property
+    def _spacing(self) -> float:
+        """How far apart the points of the line are, in metres."""
+        steps = np.linalg.norm(np.diff(self.centreline, axis=0), axis=1)
+        return float(np.mean(steps)) if len(steps) else 1.0
+
+    def caution_ahead(self, index: int, speed: float) -> int:
+        """The lowest caution speed within reach of that point, in km/h.
+
+        ``speed`` is how fast the car is going, and what it decides is how far
+        ahead to look: a driver at forty metres a second needs to know about a
+        corner a long way before a driver at ten does. Zero for a road with
+        nothing on it worth slowing for.
+
+        The *lowest* of what is coming, because a driver braking for a corner is
+        braking for the tightest part of it rather than for the gentle bit they
+        meet first.
+        """
+        reach = CAUTION_METRES + max(float(speed), 0.0) * CAUTION_SECONDS
+        spacing = self.length / max(1, len(self.centreline))
+        points = max(2, int(round(reach / max(spacing, 1e-6))))
+        found = [self.caution_speed(index + step) for step in range(points)]
+        wanted = [one for one in found if one]
+        return min(wanted) if wanted else 0
 
     def moved(self) -> None:
         """The line has been replaced: forget what was worked out from it.
@@ -376,6 +630,28 @@ class Course:
         off = np.linalg.norm(start + along[:, None] * delta - point, axis=1)
         return index, float(off.min())
 
+    def station_of(self, position: Any) -> float:
+        """How far along the road something is, in metres.
+
+        Between the samples rather than at the nearest one: a course is a line
+        written down every few metres, and anything watching a distance along
+        it -- what the car is driving through, how far off what is in front is
+        -- moves in those steps unless the answer is worked out between them.
+
+        The point is put on the *segment* it is beside rather than on the
+        sample it is nearest, which is the same distinction :meth:`nearest`
+        makes when it measures how far off the line something is.
+        """
+        at = np.asarray(position, dtype='d').reshape(-1)[:3][[0, 2]]
+        start, delta, length2 = self.segments
+        along = np.clip(np.einsum('ij,ij->i', at - start, delta) / length2,
+                        0.0, 1.0)
+        off = np.linalg.norm(start + along[:, None] * delta - at, axis=1)
+        index = int(off.argmin())
+        stations = self.stations
+        return float(stations[index]
+                     + along[index] * math.sqrt(float(length2[index])))
+
     def on_road(self, position: Any) -> bool:
         """Whether a point is on the carriageway rather than beside it."""
         return self.nearest(position)[1] <= self.carriageway_width / 2.0
@@ -406,13 +682,38 @@ class Course:
             right = np.cross(along, (0.0, 1.0, 0.0))
             length = float(np.linalg.norm(right))
             if length > 1e-9:
-                found: np.ndarray = right / length
-                return found
+                return self._leaning(right / length, along / max(
+                    float(np.linalg.norm(along)), 1e-9), index)
         return np.array([1.0, 0.0, 0.0])         # pragma: no cover - a point
 
+    def _leaning(self, right: np.ndarray, along: np.ndarray,
+                 index: int) -> np.ndarray:
+        """A level across vector rolled by however far the road leans there.
+
+        A banked corner turns the whole road about its own centreline, so the
+        way across it runs downhill on the inside. Anything that goes *out* from
+        the crown -- a driving line, a grid slot, a car keeping its own side --
+        follows the surface rather than the horizon, which is what this is.
+        """
+        lean = self.bank_at(index)
+        if not lean:
+            return right
+        angle = math.atan(lean)
+        found: np.ndarray = (math.cos(angle) * right
+                             - math.sin(angle) * np.cross(right, along))
+        return found
+
     def lane_point(self, index: int, offset: float = 0.0) -> np.ndarray:
-        """A point of the centreline, moved ``offset`` metres to its right."""
-        return self.point(index) + self.across(index) * float(offset)
+        """A point of the road's surface, ``offset`` metres to its right.
+
+        Out along the road as it leans (:meth:`across`) and then down by
+        whatever camber the lean has left (:meth:`surface_offset`), so the point
+        is on the carriageway and not above or below it.
+        """
+        found = self.point(index) + self.across(index) * float(offset)
+        found[1] += float(self.surface_offset(abs(float(offset)),
+                                              self.bank_at(index)))
+        return found
 
     @functools.cached_property
     def start_index(self) -> int:
@@ -473,13 +774,28 @@ def courses_in(document: Any) -> list[Course]:
             closed=bool(road.get('closed', False)),
             length=float(road.get('length', 0.0)),
             start=float(road.get('start', 0.0)),
+            posted=int(road.get('posted', 0)),
             profile=dict(road.get('profile') or {}),
+            bank=_along_of(road, 'bank', len(line)),
+            widening=_along_of(road, 'widening', len(line)),
             structures=tuple(
                 Structure(kind=str(one.get('kind', 'dirt')),
                           start=float(one.get('from', 0.0)),
                           end=float(one.get('to', 0.0)))
                 for one in road.get('structures') or ())))
     return out
+
+
+def _along_of(road: Any, name: str, points: int) -> np.ndarray:
+    """One of a road's per-point figures out of a tileset, or nothing.
+
+    A figure that does not match the line it belongs to is dropped rather than
+    stretched to fit: a world describing half a road is a road to drive as the
+    plain one, and guessing the rest of it puts the car on a corner nobody
+    built.
+    """
+    found = np.asarray(road.get(name) or (), dtype='d').reshape(-1)
+    return found if len(found) == points else np.zeros(0, dtype='d')
 
 
 def _baked_props(extras: Any) -> list:
@@ -619,7 +935,10 @@ class RaceWorld:
             from OpenGLContext.physics.road import RoadColliders
             self.roads.append(RoadColliders(
                 self.physics, road.centreline, road.road_profile(),
-                closed=road.closed))
+                closed=road.closed,
+                bank=road.bank if len(road.bank) else None,
+                widening=road.widening if len(road.widening) else None,
+                barriers=road.edges()))
         #: The obstacles: boulders and whatever else a world puts in the way.
         #: The ones near the car are in the physics world; the rest are not.
         from OpenGLContext.physics.props import PropColliders

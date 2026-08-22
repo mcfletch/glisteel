@@ -468,3 +468,242 @@ class TestDrivingBehindSomething:
         car = _Car(position=course.point(10), forward=(0, 0, -1), speed=30.0)
         _throttle, brake, _steer = driver.update(car)
         assert brake > 0.5
+
+
+class TestHowFarBackItSits:
+    """A following distance is a *time*, not a length of road.
+
+    Seven metres off a bumper is comfortable at a crawl and a third of a second
+    at speed -- too close to do anything about the car in front braking, and too
+    close to see past it. So the gap the autopilot keeps grows with the speed it
+    is doing, which is the rule :class:`~glisteel.driver.StandIn` already drove
+    by and the rule the traffic keeps on itself.
+    """
+
+    def _settled(self, lead_speed, seconds=70.0):
+        """How far back it settles behind a car going at a steady speed."""
+        course = _straight(points=1200, spacing=5.0)
+        world = PhysicsWorld()
+        static_ground(world, size=8000.0)
+        start, heading = course.grid_position(height=1.0)
+        car = Car(world, position=start, heading=heading)
+        pilot = Autopilot(course)
+        gap = 260.0
+        for _ in range(int(seconds / STEP)):
+            gap = gap + (lead_speed - car.speed()) * STEP
+            pilot.following(gap, lead_speed)
+            car.control(*pilot.update(car))
+            car.update(STEP)
+            world.step(STEP)
+        return gap, car.speed()
+
+    def test_at_speed_it_sits_a_couple_of_seconds_back(self) -> None:
+        from glisteel.driver import FOLLOWING_SECONDS
+        gap, speed = self._settled(28.0)
+        assert speed == pytest.approx(28.0, abs=3.0)
+        assert gap > FOLLOWING_SECONDS * speed * 0.7
+
+    def test_which_is_much_further_than_a_car_length(self) -> None:
+        gap, _speed = self._settled(28.0)
+        assert gap > 25.0, "sat %.1f m off a bumper at a hundred km/h" % gap
+
+    def test_behind_something_slow_it_closes_up(self) -> None:
+        """A time gap at a crawl is a couple of car lengths, not a hundred
+        metres: a driver in a queue does not leave the road open."""
+        from glisteel.driver import FOLLOWING_LEAST
+        gap, _speed = self._settled(4.0)
+        assert gap < FOLLOWING_LEAST * 1.6
+
+    def test_it_is_never_closer_than_a_standing_gap(self) -> None:
+        gap, _speed = self._settled(0.0)
+        assert gap > DriverStyle().standing_gap * 0.8
+
+
+class _Ahead:
+    """A car in front, as a session tells a driver about one."""
+
+    def __init__(self, gap, speed, clear=True):
+        self.gap = float(gap)
+        self.speed = float(speed)
+        self.clear = clear
+
+
+class _Road:
+    """The bit of a session a driver asks about traffic and lanes."""
+
+    def __init__(self, car, ahead=None, clear=True, lane=1.8):
+        self.car = car
+        self._ahead = ahead
+        self._clear = clear
+        self.lane = lane
+        self.asked: list = []
+
+    def _within(self, reach):
+        """What a session answers: nothing beyond the reach asked for."""
+        if self._ahead is None or self._ahead.gap > float(reach):
+            return None
+        return self._ahead
+
+    def traffic_ahead(self, reach=140.0):
+        found = self._within(reach)
+        return None if found is None else (found.gap, found.speed)
+
+    def car_ahead(self, reach=140.0):
+        return self._within(reach)
+
+    def lane_clear(self, across, ahead=24.0, behind=14.0):
+        self.asked.append(across)
+        return self._clear
+
+    def along(self, other):
+        return other.gap
+
+
+class TestGettingPastSomethingSlower:
+    """A driver that only ever follows spends the lap behind the first slow
+    thing it meets. What decides a pass is the driver's -- whether the road
+    ahead is worth having and whether there is room -- and it is the same
+    decision whichever way the car is being steered.
+    """
+
+    def _pilot(self, lane=1.8):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=lane)
+
+    def _car(self, speed=40.0):
+        return _Car(position=(1.8, 0.0, -100.0), speed=speed)
+
+    def test_it_pulls_out_for_something_much_slower(self) -> None:
+        pilot = self._pilot()
+        road = _Road(self._car(40.0), ahead=_Ahead(40.0, 18.0))
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8)
+        assert pilot.passing is not None
+
+    def test_it_asks_whether_the_other_lane_is_clear_first(self) -> None:
+        pilot = self._pilot()
+        road = _Road(self._car(40.0), ahead=_Ahead(40.0, 18.0), clear=False)
+        pilot.controls(road, 1 / 60)
+        assert road.asked == [-1.8]
+        assert pilot.lane == pytest.approx(1.8), 'pulled out into a busy lane'
+
+    def test_it_stays_in_for_something_going_the_speed_the_road_allows(self) -> None:
+        """Nothing to gain: what a pass is worth is measured against the speed
+        the road would let this car do, not against what it is doing now."""
+        pilot = self._pilot()
+        road = _Road(self._car(40.0),
+                     ahead=_Ahead(40.0, DriverStyle().maximum_speed - 1.0))
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8)
+
+    def test_the_room_it_asks_for_is_the_speed_it_will_be_doing(self) -> None:
+        """Crawling behind a stopped queue, a pass sized on the current speed
+        asks for forty metres and then takes four hundred."""
+        pilot = self._pilot()
+        crawling = _Road(_Car(position=(1.8, 0.0, -100.0), speed=3.0),
+                         ahead=_Ahead(9.0, 0.0))
+        pilot.controls(crawling, 1 / 60)
+        assert crawling.asked, 'never considered the other lane'
+        asked = crawling.asked[0]
+        assert pilot.lane == pytest.approx(-1.8)
+        # Sized on the road's speed, not on three metres a second.
+        assert pilot._pass_room(crawling, 3.0,
+                                DriverStyle().maximum_speed,
+                                crawling._ahead) > 300.0
+        assert asked == pytest.approx(-1.8)
+
+    def test_it_comes_back_in_if_the_way_through_closes(self) -> None:
+        """Being on the wrong side of a road is the one place not to wait and
+        see."""
+        pilot = self._pilot()
+        slow = _Ahead(40.0, 18.0)
+        road = _Road(self._car(40.0), ahead=slow)
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8)
+        road._clear = False
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8)
+        assert pilot.passing is None
+
+    def test_it_stays_in_for_something_a_long_way_off(self) -> None:
+        pilot = self._pilot()
+        road = _Road(self._car(40.0), ahead=_Ahead(300.0, 10.0))
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8)
+
+    def test_it_comes_back_in_once_it_is_past(self) -> None:
+        pilot = self._pilot()
+        slow = _Ahead(40.0, 18.0)
+        road = _Road(self._car(40.0), ahead=slow)
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8)
+        slow.gap = -30.0                         # it is behind now
+        road._ahead = None
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8)
+        assert pilot.passing is None
+
+    def test_it_stays_out_until_it_actually_is_past(self) -> None:
+        pilot = self._pilot()
+        slow = _Ahead(40.0, 18.0)
+        road = _Road(self._car(40.0), ahead=slow)
+        pilot.controls(road, 1 / 60)
+        slow.gap = 3.0                           # alongside, not past
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8)
+
+    def test_a_driver_on_the_racing_line_has_no_lane_to_leave(self) -> None:
+        """An empty circuit is driven on the crown, and there is no other side
+        of the road to pull out into."""
+        pilot = self._pilot(lane=0.0)
+        road = _Road(self._car(40.0), ahead=_Ahead(40.0, 18.0), lane=0.0)
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(0.0)
+        assert road.asked == []
+
+
+class TestGettingBackOnTheRoad:
+    """A driver with a wheel off the carriageway slows down and comes back.
+
+    Nothing in pure pursuit says so: it steers at a point up the road and holds
+    whatever speed the road allows, so a car knocked off its line drives on at
+    road speed in whatever direction it is pointing -- which off a carriageway
+    is into the trees, and what it ends as is a car nobody can recover.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0))
+
+    def _target(self, across):
+        pilot = self._pilot()
+        course = pilot.course
+        at = course.lane_point(20, across)
+        car = _Car(position=at, forward=(0, 0, -1), speed=30.0)
+        return pilot.update(car), course.nearest(at)[1]
+
+    def test_on_the_carriageway_it_drives_the_road(self) -> None:
+        (throttle, brake, _steer), off = self._target(1.5)
+        assert off < 4.5
+        assert throttle > 0.0 and brake == 0.0
+
+    def test_off_the_carriageway_it_lifts(self) -> None:
+        """Off the tarmac at thirty metres a second: the pedal it wants is the
+        brake, whatever the road ahead would have allowed."""
+        (throttle, brake, _steer), off = self._target(6.5)
+        assert off > 4.5
+        assert brake > 0.0 and throttle == 0.0
+
+    def test_it_still_steers_back_towards_the_line(self) -> None:
+        pilot = self._pilot()
+        at = pilot.course.lane_point(20, 6.5)
+        car = _Car(position=at, forward=(0, 0, -1), speed=30.0)
+        _throttle, _brake, steer = pilot.update(car)
+        # A car to the right of the line steers left, which is positive here.
+        assert steer > 0.02, 'off to the right and not steering back'
+
+    def test_a_crawl_off_the_road_is_left_to_crawl_back_on(self) -> None:
+        """Slow enough already: what it needs is the steering, not the brake."""
+        pilot = self._pilot()
+        at = pilot.course.lane_point(20, 6.5)
+        car = _Car(position=at, forward=(0, 0, -1), speed=2.0)
+        throttle, brake, _steer = pilot.update(car)
+        assert brake == 0.0 and throttle > 0.0

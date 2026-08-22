@@ -39,7 +39,7 @@ from glisteel.traffic import IN_THE_WAY
 log = logging.getLogger(__name__)
 
 __all__ = ['Controller', 'Readings', 'Result', 'Session', 'AHEAD_REACH',
-           'MAXIMUM_CATCHUP',
+           'CONTACT_REACH', 'CONTACT_WIDTH', 'MAXIMUM_CATCHUP',
            'PHYSICS_STEP', 'RACE_LAPS', 'STUCK_SECONDS', 'STUCK_SPEED']
 
 #: The physics step. Fixed, and finer than a frame: a vehicle held up by
@@ -79,6 +79,19 @@ STUCK_SPEED = 1.0
 #: How far a crash is looked for around the car, in metres: touching distance
 #: and no more. What decides the severity is the closing speed, not the range.
 CONTACT_REACH = 6.0
+
+#: How far **across** the road a crash is looked for, in metres -- two cars'
+#: worth of half-width, which is the distance at which they are in the same
+#: piece of road.
+#:
+#: Narrower than :data:`~glisteel.traffic.IN_THE_WAY`, and deliberately: what a
+#: driver *looks at* ahead of them is a wide window, because a car in the next
+#: lane is worth knowing about, and what *ends a run* is a narrow one, because a
+#: run ends on contact. Asked at the driver's width instead, a car passed
+#: safely in its own lane on a two-way road is a crash the moment the player
+#: drifts a foot off their own line -- which ends every run at the first thing
+#: coming the other way.
+CONTACT_WIDTH = 2.0
 
 #: How high over the grid a car is put before it is dropped onto it, in metres,
 #: and the longest it is left to settle. The player is handed a car that is
@@ -636,10 +649,15 @@ class Session:
         The closing speed against the nearest car in front, which is what the
         severity of a crash is: a car alongside at the same speed is an
         overtake, and the back of one at forty metres a second is not.
+
+        Looked for at **contact width** rather than at the width a driver reads
+        the road ahead at (:data:`CONTACT_WIDTH`): a car going the other way in
+        its own lane is a car being passed, not a car being hit.
         """
         ahead = self.world.traffic.ahead_of(self.car.position,
                                             self.car.forward(),
-                                            reach=CONTACT_REACH)
+                                            reach=CONTACT_REACH,
+                                            width=CONTACT_WIDTH)
         if not ahead:
             return
         other = ahead[0]

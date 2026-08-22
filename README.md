@@ -109,6 +109,16 @@ makes a lap driven by the machine worth watching: what it shows is the way of
 driving, not the road. Where the steering *is* the wheel (`wheel`, `loose`)
 there is nothing to show in pressing a key to wind one, and it steers directly.
 
+Either way the driver knows about the traffic it is in. It sits a **time** back
+from whatever is in front rather than a fixed length of road — a gap that is
+comfortable at a crawl is a third of a second at speed, and a driver keeping it
+spends the lap surging up to the car in front and braking off it again. It
+**pulls out** for something slower where there is room, sized by how long the
+pass will take and by the speed things close on the other side of a two-way road
+at, and comes back in as soon as it is past or the way through closes. And with
+a wheel off the carriageway it **lifts and rejoins** rather than driving on at
+road speed in whatever direction it happens to be pointing.
+
 ```bash
 glisteel /tmp/world/tileset.json --autopilot --control lanes \
     --record lap.mp4 --record-seconds 130
@@ -321,11 +331,39 @@ environment changed and rebuilds, which happens at a portal rather than at a
 frame.
 
 **The road comes with the world.** A pile of triangles does not say where a
-track goes, so the baker writes the centreline, the cross-section and the
-structures into the tileset's `extras` and the game reads them back. That is what
-puts the car on the grid, points it the right way, times the lap, steers the
-autopilot, and — because it is a road and not a pile of triangles — decides what
-is under the wheels.
+track goes, so the baker writes the centreline, the cross-section, the lean of
+each corner, how much wider it is where there is room to pass, and the
+structures into the tileset's `extras` and the game reads them back. That is what puts the car on the grid, points it the right way, times
+the lap, steers the autopilot, and — because it is a road and not a pile of
+triangles — decides what is under the wheels.
+
+**The lap is not the same road all the way round.** Its corners are drawn from
+a mix, so there is a hairpin to brake hard for and a sweeper to carry flat as
+well as a good many corners of the road's own kind — and everything else about
+each stretch follows from the corner it is on and the land it crosses. A slow
+stretch keeps the ground's own shape underneath it, where a fast one is ironed
+flat; a hillside is climbed rather than stood off on an embankment; the bends a
+driver most needs to see the exit of are the ones the trees are cut back from;
+and the long climbs are built wide enough to get past whatever is labouring up
+them. A lap laid out to one figure for everything is a lap you learn once.
+
+**Corners are banked, and the car feels it.** A superelevated corner leans into
+the turn, so part of the car's weight does the work of holding it on the line
+and the tyres have that much less to find; the same corner is worth appreciably
+more speed than it would be flat. It is road banking rather than an oval's —
+one in ten at the steepest, taken up over the approach — and it is in the
+collider as well as in what is drawn, because a flat surface under a leaning
+road is a road the car falls through on the inside of every corner. Where a car
+sits across the carriageway, which side of the crown it keeps and what its sign
+says all follow the lean.
+
+**A deck has an edge, and the edge holds.** Beside a bridge or a causeway there
+is nothing but whatever it was built to cross, so the barrier those are drawn
+with is in the collider as well — a solid wall along both edges, the drawn
+barrier's own footprint taken to its full height. Drawn and not collided with,
+it keeps nothing on anything: a car that runs wide goes through the railing and
+off into the valley. A bore gets none, since what is beside a tunnel is the
+hillside it is driven through.
 
 **What the car drives on is built here, not read off the tiles.** Tile geometry
 is level-of-detail geometry: two resolutions of one curve are the better part of
@@ -341,7 +379,8 @@ the design speed allows, a dip, a crest, a bore ahead. Each is a black symbol on
 a yellow diamond and stands a stopping distance before what it is about.
 
 **A bend's sign says how fast it is worth.** The road works out what its own
-radius will hold — `sqrt(grip · g · r)` — and the tab under the diamond carries
+radius and lean will hold — `sqrt(g · r · (grip + bank) / (1 − grip · bank))` —
+and the tab under the diamond carries
 60% of it, rounded down to 10 km/h, because a plate carrying the limit is a
 plate that is wrong for a wet road or a cold tyre. **And the road is posted**:
 `MAXIMUM 80 km/h` on a white plate, repeated every 1500 m, skipping anywhere a
@@ -398,9 +437,9 @@ the reach, and drive in from there. A car placed any nearer is a car that was
 not there a moment ago, which is a pop-in to look at and a lie to anyone
 deciding whether the road ahead is clear.
 
-**They ride the road's own surface**, at the height its centreline runs at and
-dropped by the camber at the distance across they keep -- through a bore, over a
-deck and on the ground alike. One pulled off stands on the verge, 1.6 m past the
+**They ride the road's own surface**, at the height its centreline runs at,
+leaning with it and dropped by whatever camber the lean leaves at the distance
+across they keep -- through a bore, over a deck and on the ground alike. One pulled off stands on the verge, 1.6 m past the
 carriageway's edge, which leaves half a car between it and the treeline.
 
 **The steering keys wind a wheel on and off.** Left and right are a key each, so

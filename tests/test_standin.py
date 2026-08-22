@@ -178,15 +178,34 @@ class TestKeepingBack:
 
     def test_the_gap_it_wants_is_a_time_rather_than_a_distance(self) -> None:
         """A gap that is comfortable at a crawl is a second and a half at two
-        hundred, which is no gap at all."""
+        hundred, which is no gap at all.
+
+        Asked of the driver rather than of one field: how far back to sit is
+        every driver's rule now
+        (:meth:`~glisteel.driver.Autopilot.following_gap`), and what a stand-in
+        adds to it is that a *pass* is not a follow.
+        """
         session = _open_road(traffic=0)
         stand_in = StandIn(schemes.named('lanes'))
         session.driver = stand_in
         for _ in range(int(round(8.0 / STEP))):
             session.advance(STEP)
-        assert stand_in.pilot.style.standing_gap == pytest.approx(
-            max(FOLLOWING_SECONDS * session.car.speed(), FOLLOWING_LEAST),
-            abs=1.0)
+        speed = session.car.speed()
+        assert speed > 20.0, 'never got up to a speed worth a time gap'
+        assert stand_in.pilot.following_gap(speed) == pytest.approx(
+            max(FOLLOWING_SECONDS * speed, FOLLOWING_LEAST), abs=1.0)
+
+    def test_and_a_pass_is_not_a_follow(self) -> None:
+        """Out getting by something, the gap is the racing one: held to a
+        following distance all the way past, the car never draws alongside."""
+        from glisteel.driver import PASSING_GAP
+        session = _open_road(traffic=0)
+        stand_in = StandIn(schemes.named('lanes'))
+        session.driver = stand_in
+        session.advance(STEP)
+        stand_in.overtaking = True
+        stand_in.pedals(session, STEP)
+        assert stand_in.pilot.following_gap(60.0) == pytest.approx(PASSING_GAP)
 
     def test_at_its_own_distance_it_asks_for_nothing(self) -> None:
         """Matching the car in front at the gap it wants is already the racing

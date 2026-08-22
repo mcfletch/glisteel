@@ -40,6 +40,8 @@ __all__ = ['Autopilot', 'DriverStyle', 'StandIn', 'PASSING_REACH',
            'PASS_AGAIN',
            'PASSED_BY', 'PASS_LONGEST', 'PACE', 'SETTLED', 'ALONGSIDE',
            'FOLLOWING_SECONDS', 'FOLLOWING_LEAST', 'RACING_KPH',
+           'PASS_SLOWER_BY', 'PASS_WITHIN', 'PASSED_BY',
+           'PASS_SECONDS', 'REJOIN_SPEED',
            'PASSING_GAP', 'THINKING', 'CROSSING_MARGIN', 'LANE_WIDTH',
            'STILL_ON', 'REASON_HOLDS']
 
@@ -53,6 +55,56 @@ LOOK_AHEAD_SECONDS = 0.6
 #: needs about 80 m to lose 20 of them, so it has to be looking that far.
 BRAKING_SECONDS = 2.4
 BRAKING_METRES = 30.0
+
+#: How far a driver sits behind whatever it is following, in **seconds**,
+#: and the least that is worth in metres.
+#:
+#: A time rather than a distance, because what a following distance is for is
+#: the moment between the car in front braking and this one doing something
+#: about it -- and at two hundred against a road doing eighty, a gap that is
+#: comfortable at a crawl is a second and a half. It is also what a driver
+#: deciding whether to pass needs: room to see past the car in front and room to
+#: pull out into, neither of which exists from seven metres off its bumper.
+FOLLOWING_SECONDS = 2.0
+FOLLOWING_LEAST = 14.0
+
+#: What a driver pulling out to pass wants of the car in front: how much
+#: slower than itself it has to be for the pass to be worth having, in metres
+#: per second, and how far ahead it has to be within before it is this driver's
+#: problem at all.
+#:
+#: Slower by *something*, because a pass that gains nothing is a pass spent on
+#: the wrong side of the road for no time at all. Within *something*, because a
+#: car two hundred metres up the road is a car the road may take away before it
+#: is ever caught.
+PASS_SLOWER_BY = 4.0
+PASS_WITHIN = 70.0
+
+#: How far in front of what it passed a driver has to be before it comes back
+#: in, in metres -- the whole of the other car and a length of road besides. A
+#: driver that came back in the moment its own nose was ahead would come back
+#: in across the other car's bonnet.
+PASSED_BY = 12.0
+
+#: The longest a pass may take before it is not worth starting, in seconds.
+#:
+#: A pass on a two-way road is time spent on the **wrong side of it**, and what
+#: has to be clear is not the gap in front of the car being passed but the whole
+#: of the road the pass will cross -- at the speed of whatever might be coming
+#: the other way as well as at this car's own. Past this many seconds the room
+#: that has to be clear is further than a driver can see or a road can promise,
+#: and the answer is to stay in and wait.
+PASS_SECONDS = 9.0
+
+#: How fast a driver with a wheel off the carriageway aims to be going, in
+#: metres per second.
+#:
+#: Pure pursuit steers at a point up the road and holds whatever speed the road
+#: allows, and neither of those knows the car is off the road. A car knocked off
+#: its line then drives on at road speed in whatever direction it is pointing --
+#: which off a carriageway is into the trees. A driver who has put a wheel on
+#: the grass lifts off and comes back on; this is the speed that is.
+REJOIN_SPEED = 8.0
 
 #: What to assume about a car that will not say: an ordinary saloon's wheelbase
 #: in metres, and a front-wheel angle at full lock in radians. Only reached for
@@ -92,6 +144,11 @@ class DriverStyle:
     #: together are the following rule: the speed it could still stop from in
     #: the room it has.
     standing_gap: float = 7.0
+    #: How many seconds behind whatever is in front the driver sits, which with
+    #: ``standing_gap`` is the whole of how far back that is
+    #: (:meth:`Autopilot.following_gap`). Zero follows at ``standing_gap``
+    #: whatever the speed, which is what getting *past* something asks for.
+    following_seconds: float = FOLLOWING_SECONDS
     braking: float = 6.0
     #: How hard it believes it accelerates, in metres per second squared.
     #: What decides how long getting by something takes, since a pass is
@@ -128,6 +185,12 @@ class Autopilot:
         #: None for an open road. A driver who knows the corners and not the
         #: traffic drives into the back of the first car it catches.
         self.ahead: tuple[float, float] | None = None
+        #: Which side of the crown this driver keeps when it is not getting
+        #: past something. :attr:`lane` is where it is *now*, which is the
+        #: other side while a pass is on.
+        self.own_side = float(lane)
+        #: What it pulled out for, while it is getting by it, or None.
+        self.passing: Any = None
 
     def following(self, gap: float | None, speed: float = 0.0) -> None:
         """Say what is in front: how far, and how fast it is going."""
@@ -147,9 +210,104 @@ class Autopilot:
         who knows the corners and not the traffic drives into the back of the
         first car it catches.
         """
+        speed = float(session.car.speed())
+        index, _distance = self.course.nearest(session.car.position)
+        self.choose_lane(session, speed, self.road_speed(index, speed))
         found = session.traffic_ahead()
         self.following(*(found if found is not None else (None, 0.0)))
         return self.update(session.car)
+
+    def choose_lane(self, session: SessionLike, speed: float,
+                    allowed: float) -> None:
+        """Pull out for something slower, and come back in once past it.
+
+        A driver that only ever follows spends the lap behind the first slow
+        thing it meets, and the road behind it fills up with everything that
+        would have gone quicker. So this is the other half of knowing about
+        traffic: not just how fast to go for what is in front, but whether to be
+        behind it at all.
+
+        The decision is the driver's and the *room* is the road's -- the lane is
+        only taken where :meth:`~glisteel.session.Session.lane_clear` says there
+        is somewhere to go, both in front and behind, since a lane taken into
+        something already in it is a pass nobody survives.
+
+        **How much room** is worked out from how long the pass will take. A
+        pass is not a gap in front of the car being passed: it is a stretch of
+        the *other side of the road*, and on a two-way road whatever is coming
+        the other way is closing on it at both cars' speeds at once. So the
+        length that has to be clear is the closing speed times the time the pass
+        needs -- and a pass that would take longer than :data:`PASS_SECONDS` is
+        one to stay in and wait for.
+
+        The room is measured at the speed the pass will be **made** at, which
+        is the speed the road allows rather than whatever the car happens to be
+        doing now. Sized from a crawl behind a stopped queue, a pass asks for
+        forty metres and then takes four hundred.
+
+        A driver on the racing line has no lane to leave: an empty circuit is
+        driven on the crown, and there is no other side of the road to use.
+        """
+        if not self.own_side:
+            return
+        other = -self.own_side
+        making = max(float(speed), float(allowed))
+        if self.passing is not None:
+            if session.along(self.passing) < -PASSED_BY:
+                # Past it. Back in as soon as there is room to, and out here
+                # until there is: coming back across the car just passed is the
+                # one way a pass ends worse than not taking it.
+                if session.lane_clear(self.own_side):
+                    self.lane, self.passing = self.own_side, None
+                return
+            room = self._pass_room(session, speed, making, self.passing)
+            if room is None or not session.lane_clear(other, ahead=room):
+                # The way through has closed, or the pass has stopped being one
+                # that finishes. Being on the wrong side of a road is the one
+                # place not to wait and see: back to our own side, and follow
+                # whatever we came up behind.
+                self.lane, self.passing = self.own_side, None
+            return
+        first = session.car_ahead(PASS_WITHIN)
+        if first is None or making - float(first.speed) <= PASS_SLOWER_BY:
+            return
+        if speed - float(first.speed) <= 0.0:
+            # Not gaining on it yet: there is nothing to be past, and a pass
+            # that has not started cannot be sized.
+            return
+        room = self._pass_room(session, speed, making, first)
+        if room is None:
+            return
+        if session.lane_clear(other, ahead=room):
+            self.lane, self.passing = other, first
+
+    @staticmethod
+    def _pass_room(session: SessionLike, speed: float, making: float,
+                   other: Any) -> Any:
+        """How much of the other side of the road a pass needs, in metres.
+
+        Two different speeds go into it, and using one for both is what makes a
+        pass look cheap and turn out expensive:
+
+        **How long it takes** is the speed this car has *now* against the car in
+        front. A driver crawling behind a stopped queue cannot conjure the
+        speed to be past in half a second, and sizing the pass as though it
+        could asks for forty metres of road and then uses four hundred.
+
+        **How much road that consumes** is the speed things close on that
+        stretch at, which on a two-way road is this car at the speed the road
+        allows and whatever is coming down it at the same.
+
+        None for a pass that would take longer than :data:`PASS_SECONDS`, which
+        is a pass to stay in and wait for.
+        """
+        gain = float(speed) - float(other.speed)
+        if gain <= 0.0:
+            return None
+        taking = (max(float(session.along(other)), 0.0) + PASSED_BY) / gain
+        if taking > PASS_SECONDS:
+            return None
+        return 2.0 * float(making) * taking
 
     def update(self, car: CarLike) -> tuple[float, float, float]:
         """The throttle, brake and steer this driver would use right now.
@@ -164,9 +322,24 @@ class Autopilot:
         """
         speed = float(car.speed())
         position = np.asarray(car.position, dtype='d')
-        index, _ = self.course.nearest(position)
-        return (*self._pedals(speed, self.target_speed(index, speed)),
+        index, off = self.course.nearest(position)
+        return (*self._pedals(speed, self.rejoining(off,
+                                                    self.target_speed(index, speed))),
                 self.steering(car, index=index, position=position, speed=speed))
+
+    def rejoining(self, off: float, wanted: float) -> float:
+        """The speed to aim for, given how far off the carriageway the car is.
+
+        :data:`REJOIN_SPEED` once a wheel is off it, which is a lift rather than
+        a stop: the steering is already pointed back at the line, and what a
+        driver adds to that is time for it to work. Held at road speed instead,
+        a car that has run wide carries on at road speed in whatever direction
+        it is pointing, and a driver who would have rejoined ends up in the
+        trees.
+        """
+        if float(off) <= self.course.carriageway_width / 2.0:
+            return float(wanted)
+        return min(float(wanted), REJOIN_SPEED)
 
     def steering(self, car: CarLike, index: int | None = None,
                  position: Any = None, speed: float | None = None) -> float:
@@ -329,9 +502,9 @@ class Autopilot:
         Whatever is in front of the car holds it back as well as the corners do
         -- see :meth:`following`.
         """
-        return min(self.road_speed(index, speed), self._room())
+        return min(self.road_speed(index, speed), self._room(speed))
 
-    def _room(self) -> float:
+    def _room(self, speed: float = 0.0) -> float:
         """The fastest this driver may go for whatever is in front of it.
 
         ``v = sqrt(2 a s)`` in the room it has, plus whatever the car ahead is
@@ -340,10 +513,27 @@ class Autopilot:
         """
         if self.ahead is None:
             return self.style.maximum_speed
-        gap, speed = self.ahead
-        room = max(gap - self.style.standing_gap, 0.0)
-        return float(max(speed, 0.0)
+        gap, ahead = self.ahead
+        room = max(gap - self.following_gap(speed), 0.0)
+        return float(max(ahead, 0.0)
                      + math.sqrt(2.0 * self.style.braking * room))
+
+    def following_gap(self, speed: float) -> float:
+        """How far back to sit from whatever is in front, in metres.
+
+        A **time** (``style.following_seconds``), never closer than the gap it
+        keeps standing still (``style.standing_gap``). What a following distance
+        is for is the moment between the car in front braking and this one doing
+        something about it, and that moment is a fixed number of seconds however
+        fast the two are going: held to a length instead, a gap comfortable at a
+        crawl is a third of a second at speed, and a driver keeping it spends the
+        road surging up to the car in front and braking off it again.
+
+        A driver getting *past* something is not following it, and says so by
+        asking for no seconds at all (:class:`StandIn`).
+        """
+        return max(float(self.style.standing_gap),
+                   float(self.style.following_seconds) * max(float(speed), 0.0))
 
     def _corner_speed(self, index: int) -> float:
         """The speed a bend of the road's own radius allows."""
@@ -423,17 +613,6 @@ PACE = 0.88
 #: hundred times a second rather than a driver.
 SETTLED = 1.0
 
-#: How far a stand-in sits behind whatever it is following, in **seconds**, and
-#: the least that is worth in metres.
-#:
-#: A time rather than a distance, because what a following distance is for is
-#: the moment between the car in front braking and this one doing something
-#: about it -- and at two hundred against a road doing eighty, a gap that is
-#: comfortable at a crawl is a second and a half. It is also what a driver
-#: deciding whether to pass needs: room to see past the car in front and room to
-#: pull out into, neither of which exists from seven metres off its bumper.
-FOLLOWING_SECONDS = 2.0
-FOLLOWING_LEAST = 14.0
 
 #: How fast a stand-in means to be going, in km/h. It is *racing*: everything
 #: else on the road is doing the posted limit, and a driver who joins them at it
@@ -649,9 +828,13 @@ class StandIn:
         # How far back to sit. Behind something it means to stay behind, that
         # is a time gap (:data:`FOLLOWING_SECONDS`); behind something it is
         # getting past, it is :data:`PASSING_GAP` -- a pass is not a follow.
-        self.pilot.style.standing_gap = (
-            PASSING_GAP if self.overtaking
-            else max(FOLLOWING_SECONDS * speed, FOLLOWING_LEAST))
+        if self.overtaking:
+            # A pass is not a follow: no seconds, and the racing gap.
+            self.pilot.style.following_seconds = 0.0
+            self.pilot.style.standing_gap = PASSING_GAP
+        else:
+            self.pilot.style.following_seconds = FOLLOWING_SECONDS
+            self.pilot.style.standing_gap = FOLLOWING_LEAST
         index, _distance = self.pilot.course.nearest(car.position)
         reach = self.looking(speed)
         # Whatever is in front, whether or not a pass is under way: the car
