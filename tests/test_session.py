@@ -495,3 +495,61 @@ class TestWritingDownACrash:
         for _ in range(5):
             session._watch_for_a_crash()
         assert [name for name, _ in kept] == ['crash']
+
+
+class TestWhereARestartStandsTheCar:
+    """A restart puts the car back on the grid, on the ground that is there now.
+
+    A streamed world's ground arrives and leaves as the car moves, so what is
+    under the start line when a race restarts is not necessarily what was under
+    it when the session was built. A height remembered from then is a height
+    the road may no longer be at -- and the car is put through it, or dropped
+    from over it.
+    """
+
+    def _grid_height(self, session):
+        """Where the road's own surface is under the grid."""
+        standing, _ = session.course.grid_position(
+            session.grid, height=1.0, lane=session.lane)
+        return session.world.ground_under(standing, skip=(session.car.body,))
+
+    def _slab_over_the_grid(self, session, rise):
+        """Ground arriving over what was there, as a finer tile does."""
+        from omi_physics import model
+        standing, _ = session.course.grid_position(
+            session.grid, height=0.0, lane=session.lane)
+        top = self._grid_height(session) + rise
+        physics = session.world.physics
+        shape = physics.add_shape(model.Shape.box((40.0, 2.0, 40.0)))
+        physics.add_body(
+            model.Motion(type=model.STATIC),
+            collider=model.Collider(shape=shape),
+            position=(float(standing[0]), top - 1.0, float(standing[2])))
+        physics.refit_aabbs()
+
+    def test_the_grid_is_measured_again_on_a_restart(self) -> None:
+        session = _grid()
+        was = float(session.car.position[1])
+        self._slab_over_the_grid(session, 0.5)
+        session.restart()
+        assert float(session.car.position[1]) == pytest.approx(was + 0.5,
+                                                               abs=0.1)
+
+    def test_the_car_does_not_stand_on_itself(self) -> None:
+        """The reason the height used to be remembered: a ray cast down the
+        grid finds the car that is already parked on it."""
+        session = _grid()
+        first = float(session.car.position[1])
+        for _ in range(5):
+            session.restart()
+        assert float(session.car.position[1]) == pytest.approx(first, abs=0.02)
+
+    def test_the_ground_under_a_point_can_ignore_a_body(self) -> None:
+        session = _grid()
+        standing, _ = session.course.grid_position(
+            session.grid, height=1.0, lane=session.lane)
+        on_the_car = session.world.ground_under(standing)
+        on_the_road = session.world.ground_under(standing,
+                                                 skip=(session.car.body,))
+        assert on_the_car is not None and on_the_road is not None
+        assert on_the_car > on_the_road

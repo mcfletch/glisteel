@@ -354,6 +354,19 @@ is a wall in the middle of an open road. So the carriageway is swept from the
 centreline and the ground is cut from the landscape's own height field, each in
 chunks held near the car. Nothing streams underneath it.
 
+A chunk is cut out of the one road rather than built as a road of its own: the
+frame a cross-section is swept along at a point comes from the points either
+side of it, so the frames are worked out once for the whole centreline and each
+chunk takes its slice. Two chunks meet exactly, and a circuit's seam — where the
+start line is — is no different from anywhere else on it.
+
+**The grid is measured, not remembered.** Where the car is stood at the start of
+a race is a ray cast at the road under the start line, asked again for every
+race rather than kept from when the world was opened: the world streams, so what
+is under the line on the third race need not be what was under it on the first.
+The ray looks past the car itself, so a car already parked there is not what the
+next one is stood on top of.
+
 **The road warns you, in Ontario's language.** A generated road knows its own
 curvature, its own grade and where its tunnels are, so the signs beside it are
 worked out from the alignment rather than placed by hand: a bend tighter than

@@ -201,18 +201,10 @@ class Session:
         self.camera = ChaseCamera(view)
         self.lane = course.driving_lane if world.traffic is not None else 0.0
         self.grid = course.start_index
-        # Asked about the road's own surface rather than about the slot six
-        # metres over it: what a settled world means is that there is ground
-        # where the car is going to land.
-        standing, _ = course.grid_position(self.grid, height=1.0, lane=self.lane)
-        if not world.settled(tuple(float(v) for v in standing)):
-            log.warning("the ground under the grid has not loaded; "
-                        "the car may fall")
-        # Where the grid's own ground is, asked once and before the car exists:
-        # a raycast does not exclude the car's own bodies, and the answer is
-        # what a restart needs as much as a start. None where the world cannot
-        # say, and then the car is dropped from a height as it always was.
-        self._grid_ground = world.ground_under(standing)
+        #: The car, once there is one. Named before it is built because the
+        #: grid is measured first and has to be able to say there is no car to
+        #: look past yet.
+        self.car: Any = None
         position, heading = self._grid_placement()
         self.car = Car(world.physics, spec or CarSpec(), position=position,
                        heading=heading)
@@ -566,10 +558,39 @@ class Session:
         """
         position, heading = self.course.grid_position(
             self.grid, height=GRID_HEIGHT, lane=self.lane)
-        if self._grid_ground is not None:
+        ground = self._grid_ground()
+        if ground is not None:
             position = np.asarray(position, dtype='d').copy()
-            position[1] = float(self._grid_ground) + GRID_DROP
+            position[1] = float(ground) + GRID_DROP
         return position, heading
+
+    def _grid_ground(self) -> float | None:
+        """Where the grid's own surface is, or None where nothing is under it.
+
+        Asked again every time the car is put back rather than remembered from
+        when the session was built: a world streams, so what is under the start
+        line on the third race is not necessarily what was under it on the
+        first, and a height remembered from then is one the road may no longer
+        be at. None where the world cannot say, and the car is then dropped
+        from a height as it always was.
+
+        About the road's own surface rather than the slot six metres over it,
+        because what a settled world means is that there is ground where the
+        car is going to land -- and past the car standing there, since the
+        answer is where the *road* is and a ray stopped on a roof would stand
+        the next race on top of the last one.
+        """
+        standing, _ = self.course.grid_position(self.grid, height=1.0,
+                                                lane=self.lane)
+        if not self.world.settled(tuple(float(v) for v in standing)):
+            log.warning("the ground under the grid has not loaded; "
+                        "the car may fall")
+        found = self.world.ground_under(standing, skip=self._car_bodies())
+        return None if found is None else float(found)
+
+    def _car_bodies(self) -> tuple[int, ...]:
+        """The bodies the car occupies, for a ray that must not stop on it."""
+        return () if self.car is None else (int(self.car.body),)
 
     def _replace(self) -> None:
         """Stand the car on the road nearest where it got to, stopped."""

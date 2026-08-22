@@ -1046,15 +1046,18 @@ class RaceWorld:
             return False
         return bool(float(np.asarray(camera, dtype='d')[1]) - found <= drop)
 
-    def ground_under(self, position: Any, reach: float = 200.0) -> float | None:
+    def ground_under(self, position: Any, reach: float = 200.0,
+                     skip: Any = ()) -> float | None:
         """The height of the ground below a point, or None if nothing is there.
 
-        The car's own bodies are not excluded, so ask before adding them or
-        about a point that is not inside one.
+        ``skip`` names bodies the ray passes through. **A car parked on the
+        spot being asked about is one of them**: without it the answer is the
+        roof of whatever is standing there, so a question asked twice about the
+        same grid slot walks up the car each time it is asked.
         """
         point = np.asarray(position, dtype='d')
         hit = raycast(self.physics, point + np.array([0.0, 1.0, 0.0]),
-                      (0.0, -1.0, 0.0), max_distance=reach)
+                      (0.0, -1.0, 0.0), max_distance=reach, skip=skip)
         return None if hit is None else float(hit.point[1])
 
     def shutdown(self) -> None:
