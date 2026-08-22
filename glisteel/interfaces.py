@@ -51,6 +51,10 @@ class VehicleLike(Protocol):
     def wheelbase(self) -> float:
         ...                                      # pragma: no cover - a protocol
 
+    def turning_radius(self, speed: float = 0.0) -> float:
+        """The tightest circle it will hold at that speed, in metres."""
+        ...                                      # pragma: no cover - a protocol
+
 
 @runtime_checkable
 class CarLike(Protocol):
@@ -108,6 +112,11 @@ class CourseLike(Protocol):
 
     @property
     def total_width(self) -> float:
+        ...                                      # pragma: no cover - a protocol
+
+    @property
+    def lanes(self) -> int:
+        """How many lanes are marked across the carriageway."""
         ...                                      # pragma: no cover - a protocol
 
     @property
@@ -190,6 +199,38 @@ class SessionLike(Protocol):
     def course(self) -> CourseLike:
         ...                                      # pragma: no cover - a protocol
 
-    def traffic_ahead(self, reach: float = ...) -> tuple[float, float] | None:
+    def traffic_ahead(self, reach: float = ...
+                      ) -> tuple[float, float] | None:
         """What is in front in this lane: how far, and how fast."""
+        ...                                      # pragma: no cover - a protocol
+
+    def oncoming(self, reach: float = ...) -> tuple[float, float] | None:
+        """What is coming the other way: how far off, and how fast it closes."""
+        ...                                      # pragma: no cover - a protocol
+
+    def lane_ahead(self, across: float, reach: float = ...
+                   ) -> tuple[float, float] | None:
+        """What is up the lane at that offset: how far, and how fast."""
+        ...                                      # pragma: no cover - a protocol
+
+    def lane_clear(self, across: float, ahead: float = ...,
+                   behind: float = ...) -> bool:
+        """Whether the lane at that offset is clear to move into."""
+        ...                                      # pragma: no cover - a protocol
+
+    def car_ahead(self, reach: float = ...) -> Any:
+        """The nearest car in front in this lane, or None."""
+        ...                                      # pragma: no cover - a protocol
+
+    @property
+    def two_way(self) -> bool:
+        """Whether anything on this road comes the other way."""
+        ...                                      # pragma: no cover - a protocol
+
+    def sight(self, over: float = ...) -> float:
+        """How far down the road the car can see, in metres."""
+        ...                                      # pragma: no cover - a protocol
+
+    def along(self, other: Any) -> float:
+        """How far up the road something is from the car, in metres."""
         ...                                      # pragma: no cover - a protocol

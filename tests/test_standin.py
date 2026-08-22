@@ -6,23 +6,26 @@ a person would and see what the car does about it. That is what a stand-in is:
 it decides what a driver decides -- how fast, and when to pull out -- and then
 asks for it through the controls rather than reaching past them.
 """
+import dataclasses
+from typing import Any
+
 import numpy as np
 import pytest
 
 from glisteel import scenarios, schemes
-from glisteel.schemes import CROSSING
 from glisteel.driver import (
     ALONGSIDE,
     CROSSING_MARGIN,
-    SLIP_LONGEST,
-    STILL_ON,
     FOLLOWING_LEAST,
     FOLLOWING_SECONDS,
     PASSING_GAP,
     PASSING_REACH,
+    SLIP_LONGEST,
+    STILL_ON,
     DriverStyle,
     StandIn,
 )
+from glisteel.schemes import CROSSING
 from glisteel.session import Session
 
 STEP = 1.0 / 120.0
@@ -79,6 +82,72 @@ def _driving(session, seconds, driver=None):
     return session
 
 
+#: Where along the watched lap the questions below are asked, in seconds.
+MARKS = (30.0, 40.0, 45.0, 60.0)
+
+
+@dataclasses.dataclass
+class _Lap:
+    """A minute of an open road, and what the stand-in was seen to do with it.
+
+    Written down as it happened, because most of it cannot be read afterwards:
+    how long the car spent on the other side of the road, and what was true at
+    the moment it first got by something, are gone by the time the lap ends.
+    """
+
+    session: Any
+    stand_in: Any
+    #: Seconds spent on the other side of the road.
+    across_seconds: float = 0.0
+    #: The throttle, sampled every step spent out in the other lane.
+    throttle_out: list = dataclasses.field(default_factory=list)
+    #: What was true the first time a car was got by, or empty for a lap in
+    #: which none was.
+    first_pass: dict = dataclasses.field(default_factory=dict)
+    #: What the drive looked like at each of :data:`MARKS`.
+    at: dict = dataclasses.field(default_factory=dict)
+
+
+def _reading(session, stand_in):
+    """The state of the drive, as of now."""
+    index, _distance = session.course.nearest(session.car.position)
+    return {'passes': stand_in.passes,
+            'speed': session.car.speed(),
+            'corner_speed': session.course.corner_speed(index),
+            'ahead': session.traffic_ahead(PASSING_REACH)}
+
+
+@pytest.fixture(scope='module')
+def open_road_lap():
+    """One minute of an open road, driven once and watched all the way.
+
+    Several of the questions below are about the same drive -- how long the car
+    spent in the other lane, how many cars it got by, what the throttle was
+    doing while it was out there, and what the road allowed at the moment it
+    was asked. A lap is a minute of physics whatever is asked about it, so it
+    is driven once and written down; the marks are far enough apart that each
+    is the drive a test used to make for itself.
+    """
+    session = _open_road()
+    stand_in = StandIn(schemes.named('lanes'))
+    session.driver = stand_in
+    lap = _Lap(session=session, stand_in=stand_in)
+    marks = list(MARKS)
+    for step in range(int(round(max(MARKS) / STEP))):
+        session.advance(STEP)
+        if stand_in.across(session) * session.lane < 0.0:
+            lap.across_seconds += STEP
+        if stand_in.overtaking:
+            lap.throttle_out.append(bool(stand_in.source.holding('throttle')))
+        if stand_in.passes and not lap.first_pass:
+            lap.first_pass = {
+                'overtaking': stand_in.overtaking,
+                'holding_right': stand_in.source.holding('right')}
+        if marks and (step + 1) * STEP >= marks[0] - 1e-9:
+            lap.at[marks.pop(0)] = _reading(session, stand_in)
+    return lap
+
+
 class TestItDrivesThroughTheControls:
     def test_it_is_somebody_a_run_can_be_handed_to(self) -> None:
         session = _session()
@@ -102,15 +171,19 @@ class TestItDrivesThroughTheControls:
         _driving(session, 2.0, stand_in)
         assert not stand_in.source.holding('throttle')
 
-    def test_it_gets_a_car_round_a_circuit(self) -> None:
-        session = _session()
-        _driving(session, 40.0, StandIn(schemes.named('lanes')))
-        assert session.ended is None
-        assert session.timing.laps
+    @staticmethod
+    @pytest.fixture(scope='class')
+    def round_a_circuit():
+        """Forty seconds of a circuit, driven once: whether the run survived
+        it and where on the road it ended up are two readings of one lap."""
+        return _driving(_session(), 40.0, StandIn(schemes.named('lanes')))
 
-    def test_and_stays_on_the_road_while_it_does(self) -> None:
-        session = _session()
-        _driving(session, 40.0, StandIn(schemes.named('lanes')))
+    def test_it_gets_a_car_round_a_circuit(self, round_a_circuit) -> None:
+        assert round_a_circuit.ended is None
+        assert round_a_circuit.timing.laps
+
+    def test_and_stays_on_the_road_while_it_does(self, round_a_circuit) -> None:
+        session = round_a_circuit
         _index, off = session.course.nearest(session.car.position)
         assert off < session.course.carriageway_width / 2.0
 
@@ -147,14 +220,11 @@ class TestHowFastItMeansToGo:
         stand_in.controls(session, STEP)
         assert stand_in.pilot.style.maximum_speed > SPEED_LIMIT * 2.0
 
-    def test_the_corners_still_decide_what_it_actually_does(self) -> None:
+    def test_the_corners_still_decide_what_it_actually_does(
+            self, open_road_lap) -> None:
         """Two hundred is what it *aims* for; a bend is still a bend."""
-        session = _open_road()
-        stand_in = StandIn(schemes.named('lanes'))
-        _driving(session, 30.0, stand_in)
-        index, _ = session.course.nearest(session.car.position)
-        assert (session.car.speed()
-                <= session.course.corner_speed(index) * 1.05)
+        found = open_road_lap.at[30.0]
+        assert found['speed'] <= found['corner_speed'] * 1.05
 
 
 class TestKeepingBack:
@@ -212,13 +282,10 @@ class TestKeepingBack:
         stand_in = StandIn(schemes.named('lanes'))
         assert stand_in.keeping_back(40.0, 0.0, 25.0) >= 0.0
 
-    def test_it_opens_a_gap_it_has_closed_up(self) -> None:
+    def test_it_opens_a_gap_it_has_closed_up(self, open_road_lap) -> None:
         """Which is the whole point: a lap spent six metres off somebody's
         bumper is a lap one touch of their brakes ends."""
-        session = _open_road()
-        stand_in = StandIn(schemes.named('lanes'))
-        _driving(session, 40.0, stand_in)
-        found = session.traffic_ahead(PASSING_REACH)
+        found = open_road_lap.at[40.0]['ahead']
         assert found is None or found[0] > 10.0
 
 
@@ -252,24 +319,15 @@ class TestDecidingToPass:
         _driving(session, 6.0, stand_in)
         assert stand_in.worth_passing(_Ahead(session, gap=60.0, speed=0.0))
 
-    def test_a_pass_puts_the_car_on_the_other_side_of_the_road(self) -> None:
+    def test_a_pass_puts_the_car_on_the_other_side_of_the_road(
+            self, open_road_lap) -> None:
         """The thing the counter cannot say: a pass is the car *being* in the
         other lane, not a decision that one was called for."""
-        session = _open_road()
-        stand_in = StandIn(schemes.named('lanes'))
-        session.driver = stand_in
-        crossed = 0
-        for _ in range(int(round(60.0 / STEP))):
-            session.advance(STEP)
-            crossed += stand_in.across(session) * session.lane < 0.0
-        assert crossed * STEP > 1.0
+        assert open_road_lap.across_seconds > 1.0
 
-    def test_and_it_gets_by_what_it_pulled_out_for(self) -> None:
+    def test_and_it_gets_by_what_it_pulled_out_for(self, open_road_lap) -> None:
         """Counted only where the car it pulled out for ends up behind it."""
-        session = _open_road()
-        stand_in = StandIn(schemes.named('lanes'))
-        _driving(session, 60.0, stand_in)
-        assert stand_in.passes > 0
+        assert open_road_lap.at[60.0]['passes'] > 0
 
     def test_it_does_not_count_a_pass_it_never_made(self) -> None:
         """An empty road offers nothing to get by, so nothing is got by."""
@@ -278,27 +336,18 @@ class TestDecidingToPass:
         _driving(session, 30.0, stand_in)
         assert stand_in.passes == 0
 
-    def test_something_slower_in_front_is(self) -> None:
-        session = _open_road()
-        stand_in = StandIn(schemes.named('lanes'))
-        _driving(session, 45.0, stand_in)
-        assert stand_in.passes > 0
+    def test_something_slower_in_front_is(self, open_road_lap) -> None:
+        assert open_road_lap.at[45.0]['passes'] > 0
 
-    def test_and_it_comes_back_to_its_own_side_afterwards(self) -> None:
+    def test_and_it_comes_back_to_its_own_side_afterwards(
+            self, open_road_lap) -> None:
         """Read the moment a pass is counted rather than at some later clock
         time: on a road there is passing to be done on, a driver a minute in
         is usually part-way through the next one, and that says nothing about
         what it did with the one before."""
-        session = _open_road()
-        stand_in = StandIn(schemes.named('lanes'))
-        session.driver = stand_in
-        for _ in range(int(round(60.0 / STEP))):
-            session.advance(STEP)
-            if stand_in.passes:
-                break
-        assert stand_in.passes > 0, 'it never got by anything'
-        assert not stand_in.overtaking
-        assert stand_in.source.holding('right')
+        assert open_road_lap.first_pass, 'it never got by anything'
+        assert not open_road_lap.first_pass['overtaking']
+        assert open_road_lap.first_pass['holding_right']
 
     def test_a_quick_pass_needs_less_room_than_a_slow_one(self) -> None:
         """How long a pass takes is what decides whether there is room for it:
@@ -358,15 +407,9 @@ class TestGettingOnWithThePass:
     then sits at the speed of what it is passing is a driver whose pass takes
     for ever and who is beside the other car when the road runs out."""
 
-    def test_it_does_not_slow_for_the_car_it_is_passing(self) -> None:
-        session = _open_road()
-        stand_in = StandIn(schemes.named('lanes'))
-        session.driver = stand_in
-        out = []
-        for _ in range(int(round(60.0 / STEP))):
-            session.advance(STEP)
-            if stand_in.overtaking:
-                out.append(stand_in.source.holding('throttle'))
+    def test_it_does_not_slow_for_the_car_it_is_passing(
+            self, open_road_lap) -> None:
+        out = open_road_lap.throttle_out
         assert out, 'it never pulled out'
         assert sum(out) / len(out) > 0.5, (
             'the throttle was down for %.0f%% of the time it spent passing'
@@ -495,76 +538,83 @@ class TestAPassIsABetYouCanGetOutOf:
     committed, and :data:`~glisteel.driver.PASS_MARGIN` is the appetite.
     """
 
-    def _driving(self, session):
-        stand_in = StandIn(schemes.named('lanes'))
-        _driving(session, 8.0, stand_in)
-        return stand_in
+    @staticmethod
+    @pytest.fixture(scope='class')
+    def rolling():
+        """A car eight seconds into an open road, with nobody else on it.
 
-    def test_a_road_that_lasts_the_whole_pass_is_enough(self) -> None:
+        Every test in this class asks the *rule* a question -- how long a pass
+        would take, and whether the road holds it -- of a car that is up to
+        speed on a road with some. The eight seconds are what gets it there,
+        they are the same eight seconds every time, and none of these tests
+        moves the car.
+        """
         session = _open_road(traffic=0)
-        stand_in = self._driving(session)
-        road = _Coming(session, oncoming=None, sight=800.0)
+        _driving(session, 8.0, StandIn(schemes.named('lanes')))
+        return session
+
+    @staticmethod
+    @pytest.fixture
+    def stand_in(rolling):
+        """A stand-in of this test's own, looking at that car.
+
+        Its own, because several of these tests set what it is in the middle
+        of doing; one step in, because the rules asked about below read the
+        pilot it makes on its first (:meth:`~glisteel.driver.StandIn.pilot`).
+        """
+        mine = StandIn(schemes.named('lanes'))
+        mine.controls(rolling, STEP)
+        return mine
+
+    def test_a_road_that_lasts_the_whole_pass_is_enough(self, rolling, stand_in) -> None:
+        road = _Coming(rolling, oncoming=None, sight=800.0)
         assert stand_in.room_to_finish(road, stand_in.planning(road, 40.0, 22.0)[0])
 
-    def test_and_one_that_only_lasts_long_enough_to_get_back_is_not(self) -> None:
+    def test_and_one_that_only_lasts_long_enough_to_get_back_is_not(self, rolling, stand_in) -> None:
         """The distinction the mechanic lives on: 260 m is room to pull out,
         look and drop in behind again, and it is not room to get by an 80 km/h
         car at racing speed -- so it is not a pass."""
-        session = _open_road(traffic=0)
-        stand_in = self._driving(session)
-        road = _Coming(session, oncoming=None, sight=260.0)
+        road = _Coming(rolling, oncoming=None, sight=260.0)
         seconds, _quick = stand_in.planning(road, 40.0, 22.0)
         assert seconds > stand_in.getting_back()
         assert not stand_in.room_to_finish(road, seconds)
 
-    def test_but_a_blind_bend_is_not_even_that(self) -> None:
-        session = _open_road(traffic=0)
-        stand_in = self._driving(session)
-        road = _Coming(session, oncoming=None, sight=40.0)
+    def test_but_a_blind_bend_is_not_even_that(self, rolling, stand_in) -> None:
+        road = _Coming(rolling, oncoming=None, sight=40.0)
         assert not stand_in.room_to_finish(road, stand_in.planning(road, 40.0, 22.0)[0])
 
-    def test_nor_is_a_car_already_coming_the_other_way(self) -> None:
-        session = _open_road(traffic=0)
-        stand_in = self._driving(session)
-        road = _Coming(session, gap=90.0, closing=60.0)
+    def test_nor_is_a_car_already_coming_the_other_way(self, rolling, stand_in) -> None:
+        road = _Coming(rolling, gap=90.0, closing=60.0)
         assert not stand_in.room_to_finish(road, stand_in.planning(road, 40.0, 22.0)[0])
 
-    def test_a_pass_that_would_be_over_at_once_still_needs_getting_back(self):
+    def test_a_pass_that_would_be_over_at_once_still_needs_getting_back(self, rolling, stand_in):
         """Whatever the sums say the manoeuvre costs, the road has to hold the
         way out of it as well."""
-        session = _open_road(traffic=0)
-        stand_in = self._driving(session)
         assert not stand_in.room_to_finish(
-            _Coming(session, oncoming=None, sight=20.0), 0.0)
+            _Coming(rolling, oncoming=None, sight=20.0), 0.0)
 
-    def test_the_bet_is_off_the_moment_it_stops_being_a_bet(self) -> None:
+    def test_the_bet_is_off_the_moment_it_stops_being_a_bet(self, rolling, stand_in) -> None:
         """Something appears: the pass is given up while there is still room
         to drop in behind."""
-        session = _open_road(traffic=0)
-        stand_in = self._driving(session)
         stand_in.overtaking = True
         stand_in.passing = _Car(40.0)
-        assert stand_in.abandoning(_Coming(session, gap=90.0, closing=60.0))
+        assert stand_in.abandoning(_Coming(rolling, gap=90.0, closing=60.0))
 
-    def test_and_it_is_judged_on_what_is_left_of_the_pass(self) -> None:
+    def test_and_it_is_judged_on_what_is_left_of_the_pass(self, rolling, stand_in) -> None:
         """Half-way past, the road a driver still needs is a fraction of the
         road they needed to start: a pass nearly done is not given up on the
         length it would have taken from the beginning."""
-        session = _open_road(traffic=0)
-        stand_in = self._driving(session)
         stand_in.overtaking = True
-        road = _Coming(session, oncoming=None, sight=300.0)
+        road = _Coming(rolling, oncoming=None, sight=300.0)
         stand_in.passing = _Car(200.0, speed=22.0)
         assert stand_in.abandoning(road)
         stand_in.passing = _Car(ALONGSIDE + 1.0, speed=22.0)
         assert not stand_in.abandoning(road)
 
-    def test_once_alongside_there_is_nowhere_left_to_go_but_past(self) -> None:
-        session = _open_road(traffic=0)
-        stand_in = self._driving(session)
+    def test_once_alongside_there_is_nowhere_left_to_go_but_past(self, rolling, stand_in) -> None:
         stand_in.overtaking = True
         stand_in.passing = _Car(ALONGSIDE - 1.0, speed=22.0)
-        assert not stand_in.abandoning(_Coming(session, gap=30.0, closing=60.0))
+        assert not stand_in.abandoning(_Coming(rolling, gap=30.0, closing=60.0))
 
 
 class _Ahead:
@@ -621,35 +671,43 @@ class _Coming:
 
 
 class TestWhatIsComingTheOtherWay:
+    """A road with eight cars on it has something coming the other way, and
+    ten seconds of driving is enough to meet one -- so the questions below are
+    asked outright rather than under an ``if``: a road that turns out to be
+    empty is a failure of the scenario, not a test with nothing to say.
+    """
+
+    #: How far down the road the driver is looking, in metres.
+    REACH = 400.0
+
+    @staticmethod
+    @pytest.fixture(scope='class')
+    def two_way():
+        """Ten seconds of a road with traffic both ways, driven once."""
+        return _driving(_session(traffic=8), 10.0,
+                        StandIn(schemes.named('lanes')))
+
     def test_an_empty_road_has_nothing_on_it(self) -> None:
         assert _session().oncoming() is None
 
-    def test_a_car_the_other_way_is_seen(self) -> None:
-        session = _session(traffic=8)
-        _driving(session, 8.0, StandIn(schemes.named('lanes')))
-        seen = [session.oncoming(reach=400.0) for _ in range(1)]
-        assert seen[0] is None or seen[0][0] > 0.0
+    def test_a_car_the_other_way_is_seen(self, two_way) -> None:
+        found = two_way.oncoming(reach=self.REACH)
+        assert found is not None, 'nothing came the other way'
+        assert found[0] > 0.0
 
-    def test_and_it_is_closing_faster_than_anything_alongside(self) -> None:
+    def test_and_it_is_closing_faster_than_anything_alongside(self, two_way):
         """Two cars going opposite ways close at the sum of their speeds, which
         is what decides whether there is room to pass."""
-        session = _session(traffic=8)
-        _driving(session, 10.0, StandIn(schemes.named('lanes')))
-        found = session.oncoming(reach=400.0)
-        if found is not None:
-            assert found[1] >= session.car.speed()
+        found = two_way.oncoming(reach=self.REACH)
+        assert found is not None, 'nothing came the other way'
+        assert found[1] >= two_way.car.speed()
 
-    def test_nothing_in_my_own_lane_counts_as_oncoming(self) -> None:
-        session = _session(traffic=8)
-        _driving(session, 10.0, StandIn(schemes.named('lanes')))
-        ahead = session.traffic_ahead()
-        found = session.oncoming(reach=400.0)
-        if ahead is not None and found is not None:
-            assert not np.isclose(ahead[0], found[0])
-
-
-if __name__ == '__main__':
-    raise SystemExit(pytest.main([__file__, '-v']))
+    def test_nothing_in_my_own_lane_counts_as_oncoming(self, two_way) -> None:
+        ahead = two_way.traffic_ahead()
+        found = two_way.oncoming(reach=self.REACH)
+        assert ahead is not None and found is not None, (
+            'the road had nothing in one of its lanes')
+        assert not np.isclose(ahead[0], found[0])
 
 
 class TestWhatCountsAsAPass:
@@ -1320,3 +1378,7 @@ class TestTheRightFootFinishesThePass:
         stand_in.controls(session, STEP)
         stand_in.come_back(_Coming(session))
         assert stand_in.slipping is None
+
+
+if __name__ == '__main__':
+    raise SystemExit(pytest.main([__file__, '-v']))

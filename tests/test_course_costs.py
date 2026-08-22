@@ -12,16 +12,16 @@ numbers behind it are in ``plans/2026-08-19-CODE-REVIEW.md`` section 3.
 """
 import numpy as np
 import pytest
+import support
 
 from glisteel.world import Course
 
 
 def _course(points=400, closed=True):
-    angle = np.linspace(0.0, 2.0 * np.pi, points, endpoint=False)
-    line = np.stack([np.cos(angle) * 500.0, np.zeros(points),
-                     np.sin(angle) * 300.0], axis=-1)
-    return Course(name='circuit', centreline=line, carriageway_width=7.0,
-                  total_width=12.0, closed=closed, length=2500.0)
+    return Course(name='circuit',
+                  centreline=support.ring(points, radius=500.0, radius_z=300.0),
+                  carriageway_width=7.0, total_width=12.0, closed=closed,
+                  length=2500.0)
 
 
 class TestWhatIsWorkedOutOnce:
@@ -91,6 +91,20 @@ class TestARoadThatIsMovedSaysSo:
         course.moved()
         assert course.segments is not was
 
+    def test_everything_worked_out_from_the_line_is_forgotten(self) -> None:
+        """Every cache the line feeds, not the handful that were there when the
+        method was written: one left behind is a road answering about the shape
+        it used to be, which is worse than no cache at all."""
+        course = _course()
+        derived = ('stations', 'segments', 'ground_line', 'radii', '_section',
+                   'start_index', '_spacing', '_clear', '_sight',
+                   'caution_speeds')
+        for name in derived:
+            getattr(course, name)
+        course.moved()
+        held = [name for name in derived if name in course.__dict__]
+        assert not held, 'kept %s across a moved line' % ', '.join(held)
+
 
 class TestAskingTwiceAboutTheSamePlace:
     """Several things ask where the same car is, in the same step.
@@ -105,13 +119,8 @@ class TestAskingTwiceAboutTheSamePlace:
         course = _course()
         at = course.centreline[13] + np.array([0.0, 1.0, 2.0])
         first = course.nearest(at)
-        worked = []
-        real = np.linalg.norm
-        np.linalg.norm = lambda *a, **k: (worked.append(1), real(*a, **k))[1]
-        try:
+        with support.counting(np.linalg, 'norm') as worked:
             again = course.nearest(at)
-        finally:
-            np.linalg.norm = real
         assert again == first
         assert not worked, 'worked it out again for a position already asked'
 

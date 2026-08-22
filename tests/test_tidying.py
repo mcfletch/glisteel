@@ -35,7 +35,7 @@ class TestTheSpeedARoadIsDrivenAt:
     """A number nobody typed, with a name and a unit."""
 
     def test_it_is_the_open_road_limit(self) -> None:
-        assert SPEED_LIMIT * 3.6 == pytest.approx(100.0, abs=0.5)
+        assert SPEED_LIMIT * 3.6 == pytest.approx(80.0, abs=0.5)
 
     def test_a_car_with_nothing_said_drives_it(self) -> None:
         from glisteel.traffic import Traffic

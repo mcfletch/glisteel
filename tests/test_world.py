@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 import pytest
+from OpenGLContext.scenegraph.road import SIGHT_REACH
 
 
 class TestWhereALapBegins:
@@ -414,3 +415,232 @@ class TestAskingForAWorldThatIsNotThere:
         except Exception as error:  # noqa: BLE001 -- what a caller writes
             said.append(str(error))
         assert said and 'nowhere' in said[0]
+
+
+class TestHowFarDownTheRoadADriverCanSee:
+    """What decides whether there is room to pass: a straight can be looked
+    along, and a bend cannot be looked round."""
+
+    def _ring(self, radius=200.0, points=256):
+        from glisteel.world import Course
+        angle = np.linspace(0.0, 2 * math.pi, points, endpoint=False)
+        line = np.stack([radius * np.cos(angle), np.zeros(points),
+                         radius * np.sin(angle)], axis=-1)
+        return Course(name='ring', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True,
+                      length=float(2 * math.pi * radius))
+
+    def _straight(self, points=200, spacing=8.0):
+        from glisteel.world import Course
+        line = np.stack([np.arange(points) * spacing, np.zeros(points),
+                         np.zeros(points)], axis=-1)
+        return Course(name='straight', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=False,
+                      length=float((points - 1) * spacing))
+
+    def test_a_straight_is_seen_as_far_as_a_driver_plans(self) -> None:
+        course = self._straight()
+        assert course.sight_ahead(0) == pytest.approx(SIGHT_REACH)
+
+    def test_a_bend_is_seen_only_as_far_as_the_view_stays_clear(self) -> None:
+        """The chord between two cars, bowing out of the road by the width
+        cleared beside it: `sqrt(8 * r * clear)`, which for a 200 m bend and a
+        road 10.6 m across is a little over ninety metres."""
+        course = self._ring()
+        assert course.sight_ahead(0) == pytest.approx(
+            math.sqrt(8.0 * 200.0 * 10.6 / 2.0), rel=0.15)
+
+    def test_it_is_the_same_answer_wherever_a_ring_is_asked_about(self) -> None:
+        course = self._ring()
+        found = [course.sight_ahead(index) for index in (0, 40, 90, 200)]
+        assert max(found) - min(found) < 1.0
+
+    def test_a_point_past_the_end_of_the_line_wraps_like_every_other(self) -> None:
+        course = self._ring(points=64)
+        assert course.sight_ahead(70) == pytest.approx(course.sight_ahead(6))
+
+
+class TestHowFarAlongTheRoadSomethingIs:
+    """Between the points, not at the nearest one. A course is a line sampled
+    every few metres, and anything that watches a distance along it -- what the
+    car is driving through, how far off the car in front is -- moves in those
+    steps unless the answer is worked out between them."""
+
+    def _straight(self, spacing=10.0, points=41):
+        from glisteel.world import Course
+        line = np.stack([np.arange(points) * spacing, np.zeros(points),
+                         np.zeros(points)], axis=-1)
+        return Course(name='straight', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=False,
+                      length=float((points - 1) * spacing))
+
+    def test_a_point_on_a_sample_is_that_sample(self) -> None:
+        course = self._straight()
+        assert course.station_of((30.0, 0.0, 0.0)) == pytest.approx(30.0)
+
+    def test_and_one_between_two_is_between_them(self) -> None:
+        course = self._straight()
+        assert course.station_of((34.0, 0.0, 0.0)) == pytest.approx(34.0, abs=0.1)
+
+    def test_it_moves_as_smoothly_as_the_thing_it_is_asked_about(self) -> None:
+        course = self._straight()
+        found = [course.station_of((along, 0.0, 0.0))
+                 for along in np.arange(20.0, 60.0, 1.0)]
+        steps = np.diff(found)
+        assert steps.max() < 1.5, 'the answer jumps by %.1f m' % steps.max()
+
+    def test_being_off_to_one_side_does_not_move_it_along(self) -> None:
+        course = self._straight()
+        assert course.station_of((34.0, 0.0, 3.0)) == pytest.approx(34.0, abs=0.1)
+
+    def test_a_closed_course_measures_across_its_join(self) -> None:
+        from glisteel.world import Course
+        angle = np.linspace(0.0, 2 * math.pi, 64, endpoint=False)
+        line = np.stack([100.0 * np.cos(angle), np.zeros(64),
+                         100.0 * np.sin(angle)], axis=-1)
+        course = Course(name='ring', centreline=line, carriageway_width=7.2,
+                        total_width=10.6, closed=True, length=628.3)
+        found = course.station_of(line[-1] * 1.0)
+        assert 0.0 <= found <= course.length
+
+
+class TestHowFarItStaysSeeable:
+    """A driver deciding to pass needs the road to stay open for as long as
+    getting back out of it takes -- not to be open at the instant they look.
+    A pass begun on the last of a straight is a pass abandoned in the bend
+    after it."""
+
+    def _road(self, points=200, spacing=8.0, bend_from=100):
+        """Straight, then a bend tight enough to shut the view down."""
+        from glisteel.world import Course
+        along, across = [], []
+        angle = 0.0
+        x = z = 0.0
+        for step in range(points):
+            along.append(x)
+            across.append(z)
+            if step >= bend_from:
+                angle += spacing / 60.0
+            x += spacing * math.cos(angle)
+            z += spacing * math.sin(angle)
+        line = np.stack([np.array(along), np.zeros(points),
+                         np.array(across)], axis=-1)
+        return Course(name='into a bend', centreline=line,
+                      carriageway_width=7.2, total_width=10.6, closed=False,
+                      length=float((points - 1) * spacing))
+
+    def test_on_the_straight_it_is_what_can_be_seen_from_there(self) -> None:
+        course = self._road()
+        assert course.sight_over(0, 0.0) == pytest.approx(course.sight_ahead(0))
+
+    def test_but_near_the_bend_it_is_what_will_be_seen_in_it(self) -> None:
+        course = self._road()
+        near = 95                                # a few points short of the bend
+        assert course.sight_over(near, 200.0) < course.sight_ahead(near)
+
+    def test_and_it_is_never_more_than_the_road_offers_anywhere_in_it(self):
+        course = self._road()
+        for index in (0, 40, 90, 99, 120):
+            over = course.sight_over(index, 160.0)
+            assert over <= min(course.sight_ahead(index + step)
+                               for step in range(0, 20))
+
+    def test_a_stretch_of_nothing_is_the_road_underfoot(self) -> None:
+        course = self._road()
+        assert course.sight_over(50, -5.0) == pytest.approx(
+            course.sight_ahead(50))
+
+
+class TestWhatStandsBesideEachStretch:
+    """The wood that stops a driver seeing round a bend is not there on a
+    viaduct: the railing is see-through and the drop beyond it holds nothing,
+    so a span is seen along however it curves. Inside a bore the opposite --
+    the wall is at the road's edge, and what is not in the tube is not seen.
+    """
+
+    def _course(self, structures=()):
+        from glisteel.world import Course
+        angle = np.linspace(0.0, 2 * math.pi, 400, endpoint=False)
+        line = np.stack([250.0 * np.cos(angle), np.zeros(400),
+                         250.0 * np.sin(angle)], axis=-1)
+        steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
+        return Course(name='ring', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True,
+                      length=float(steps.sum() * 400 / 399),
+                      structures=tuple(structures))
+
+    def test_a_wood_is_what_the_road_runs_through_by_default(self) -> None:
+        course = self._course()
+        assert np.allclose(course._clear, course.total_width / 2.0)
+
+    def test_a_span_has_nothing_beside_it_to_see_past(self) -> None:
+        from glisteel.world import Structure
+        course = self._course([Structure('bridge', 300.0, 700.0)])
+        on_it = course.station_of(course.lane_point(
+            int(500.0 / course._spacing), 0.0))
+        assert 300.0 < on_it < 700.0
+        assert course._clear[int(500.0 / course._spacing)] > 10.0 * (
+            course.total_width / 2.0)
+
+    def test_and_a_bore_has_its_own_wall(self) -> None:
+        from glisteel.world import Structure
+        course = self._course([Structure('tunnel', 300.0, 700.0)])
+        inside = int(500.0 / course._spacing)
+        assert course._clear[inside] < course.total_width / 2.0
+
+    def test_so_a_span_is_seen_along_where_the_wood_is_not(self) -> None:
+        from glisteel.world import Structure
+        wood = self._course()
+        span = self._course([Structure('bridge', 300.0, 700.0)])
+        at = int(500.0 / wood._spacing)
+        assert span.sight_ahead(at) > 3.0 * wood.sight_ahead(at)
+
+
+class TestHowTightABendIsMeasuredOverARealLength:
+    """The circle through a point and its two neighbours is exact for a circle
+    and noisy for a road: at six metres a sample the arc is written down as
+    chords, and one point a hand's breadth off its arc reads as a corner half
+    the radius of the one it is on. A driver reading that brakes to 125 km/h
+    for a bend worth 158.
+
+    So curvature is taken over a length of road rather than between adjacent
+    samples -- long enough that the sampling washes out, short enough to
+    resolve the corner it is about.
+    """
+
+    def _arc(self, radius=200.0, spacing=6.0, jitter=0.0, seed=7):
+        from glisteel.world import Course
+        angle = np.arange(0.0, 2.0 * math.pi, spacing / radius)
+        line = np.stack([radius * np.cos(angle), np.zeros_like(angle),
+                         radius * np.sin(angle)], axis=-1)
+        if jitter:
+            wobble = np.random.default_rng(seed).normal(0.0, jitter, len(line))
+            line[:, 0] *= 1.0 + wobble / radius
+            line[:, 2] *= 1.0 + wobble / radius
+        steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
+        return Course(name='arc', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True,
+                      length=float(steps.sum() * len(line) / (len(line) - 1)))
+
+    def test_a_clean_bend_reads_as_the_bend_it_is(self) -> None:
+        assert self._arc(radius=200.0).radii.min() == pytest.approx(200.0,
+                                                                   rel=0.05)
+
+    def test_and_a_bend_written_down_untidily_still_does(self) -> None:
+        """A tenth of a metre of wobble on a 200 m arc is not a 90 m corner."""
+        found = self._arc(radius=200.0, jitter=0.1).radii
+        assert found.min() > 0.6 * 200.0, (
+            'a %.0f m corner where the road is 200 m' % found.min())
+
+    def test_a_tighter_bend_still_reads_tighter(self) -> None:
+        assert self._arc(radius=80.0).radii.min() < \
+            self._arc(radius=400.0).radii.min()
+
+    def test_and_a_straight_is_still_a_straight(self) -> None:
+        from glisteel.world import Course
+        line = np.stack([np.arange(120) * 6.0, np.zeros(120),
+                         np.zeros(120)], axis=-1)
+        course = Course(name='straight', centreline=line,
+                        carriageway_width=7.2, total_width=10.6, closed=False,
+                        length=714.0)
+        assert course.radii.min() > 1e5

@@ -321,11 +321,21 @@ environment changed and rebuilds, which happens at a portal rather than at a
 frame.
 
 **The road comes with the world.** A pile of triangles does not say where a
-track goes, so the baker writes the centreline, the cross-section and the
-structures into the tileset's `extras` and the game reads them back. That is what
-puts the car on the grid, points it the right way, times the lap, steers the
-autopilot, and — because it is a road and not a pile of triangles — decides what
-is under the wheels.
+track goes, so the baker writes the centreline, the cross-section, the lean of
+each corner and the structures into the tileset's `extras` and the game reads
+them back. That is what puts the car on the grid, points it the right way, times
+the lap, steers the autopilot, and — because it is a road and not a pile of
+triangles — decides what is under the wheels.
+
+**Corners are banked, and the car feels it.** A superelevated corner leans into
+the turn, so part of the car's weight does the work of holding it on the line
+and the tyres have that much less to find; the same corner is worth appreciably
+more speed than it would be flat. It is road banking rather than an oval's —
+one in ten at the steepest, taken up over the approach — and it is in the
+collider as well as in what is drawn, because a flat surface under a leaning
+road is a road the car falls through on the inside of every corner. Where a car
+sits across the carriageway, which side of the crown it keeps and what its sign
+says all follow the lean.
 
 **What the car drives on is built here, not read off the tiles.** Tile geometry
 is level-of-detail geometry: two resolutions of one curve are the better part of
@@ -341,7 +351,8 @@ the design speed allows, a dip, a crest, a bore ahead. Each is a black symbol on
 a yellow diamond and stands a stopping distance before what it is about.
 
 **A bend's sign says how fast it is worth.** The road works out what its own
-radius will hold — `sqrt(grip · g · r)` — and the tab under the diamond carries
+radius and lean will hold — `sqrt(g · r · (grip + bank) / (1 − grip · bank))` —
+and the tab under the diamond carries
 60% of it, rounded down to 10 km/h, because a plate carrying the limit is a
 plate that is wrong for a wet road or a cold tyre. **And the road is posted**:
 `MAXIMUM 80 km/h` on a white plate, repeated every 1500 m, skipping anywhere a
@@ -398,9 +409,9 @@ the reach, and drive in from there. A car placed any nearer is a car that was
 not there a moment ago, which is a pop-in to look at and a lie to anyone
 deciding whether the road ahead is clear.
 
-**They ride the road's own surface**, at the height its centreline runs at and
-dropped by the camber at the distance across they keep -- through a bore, over a
-deck and on the ground alike. One pulled off stands on the verge, 1.6 m past the
+**They ride the road's own surface**, at the height its centreline runs at,
+leaning with it and dropped by whatever camber the lean leaves at the distance
+across they keep -- through a bore, over a deck and on the ground alike. One pulled off stands on the verge, 1.6 m past the
 carriageway's edge, which leaves half a car between it and the treeline.
 
 **The steering keys wind a wheel on and off.** Left and right are a key each, so
@@ -490,6 +501,20 @@ pytest
 The suite runs headless and without a window: a car is numbers, a lap is
 numbers, and a camera is numbers. `tests/test_driver.py` puts a real car on a
 real circuit and asserts that the autopilot gets round it.
+
+**A drive is driven once.** Most of what the suite costs is simulated seconds --
+a minute of an open road is a minute of physics whatever is asked about it -- so
+a run that several tests ask different questions of is made once and shared.
+`tests/test_feel.py` remembers a scripted drive by its arguments (a fixed step, a
+script and no traffic make it deterministic, and a `Scenario` compares as the
+description it is); `tests/test_standin.py` drives one watched lap and writes
+down what happened at each mark. Where the shared thing is *mutable* -- a live
+`Session` -- the readings are taken in the fixture and the numbers are what the
+tests get, so no test can be changed by the one before it.
+
+`tests/support.py` holds what the tests make up and none of them is about: a ring
+or a straight centreline, how long one is, and `counting(owner, name)` for the
+tests that assert how often a frame asks something.
 
 **The run is separate from the window.** `Session` holds the game -- fixed-step
 physics with the controls sampled inside it, the camera, the lap timing, and the

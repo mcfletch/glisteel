@@ -11,17 +11,15 @@ then ``steering`` asked again about the same car in the same step.
 """
 import numpy as np
 import pytest
+import support
 
 from glisteel.driver import Autopilot, DriverStyle
 from glisteel.world import Course
 
 
 def _circuit(points=400, radius=200.0):
-    angle = np.linspace(0.0, 2.0 * np.pi, points, endpoint=False)
-    line = np.stack([np.cos(angle) * radius, np.zeros(points),
-                     np.sin(angle) * radius], axis=-1)
-    return Course(name='circuit', centreline=line, carriageway_width=7.0,
-                  total_width=12.0, closed=True,
+    return Course(name='circuit', centreline=support.ring(points, radius),
+                  carriageway_width=7.0, total_width=12.0, closed=True,
                   length=float(2.0 * np.pi * radius))
 
 
@@ -73,13 +71,8 @@ class TestTheRoadsShapeIsWorkedOutOnce:
 class TestWhatTheDriverAsksTheCourse:
     def test_one_decision_asks_where_the_car_is_once(self) -> None:
         course = _circuit()
-        asked = []
-        real = Course.nearest
-        Course.nearest = lambda self, at: (asked.append(1), real(self, at))[1]
-        try:
+        with support.counting(Course, 'nearest') as asked:
             Autopilot(course).update(_Car(course))
-        finally:
-            Course.nearest = real
         assert len(asked) == 1, 'asked %d times for one decision' % len(asked)
 
     def test_the_pedals_and_the_wheel_are_still_what_they_were(self) -> None:

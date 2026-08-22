@@ -14,6 +14,7 @@ import argparse
 
 import pytest
 
+from glisteel import schemes
 from glisteel.options import Options, window_size
 from glisteel.traffic import DEFAULT_TRAFFIC
 
@@ -76,6 +77,13 @@ class TestWhatTheWindowReads:
         found = Options.from_namespace(_parsed(['--size', '800x600']))
         assert found.size == (800, 600)
 
+    def test_the_way_of_driving_comes_through(self) -> None:
+        found = Options.from_namespace(_parsed(['--control', 'lanes']))
+        assert found.control == 'lanes'
+
+    def test_and_its_default_is_the_controls_the_game_has_always_had(self) -> None:
+        assert Options.from_namespace(_parsed()).control == schemes.DEFAULT
+
     def test_a_track_to_photograph_is_optional(self) -> None:
         assert Options.from_namespace(_parsed()).picture_track is None
 
@@ -98,6 +106,10 @@ class TestWhatIsRefused:
     def test_an_assist_outside_nought_to_one_is_refused(self) -> None:
         with pytest.raises(ValueError, match='assist'):
             Options(world='x', assist=1.5)
+
+    def test_a_way_of_driving_the_game_does_not_have_is_refused(self) -> None:
+        with pytest.raises(ValueError, match='control'):
+            Options(world='x', control='hovercraft')
 
     def test_a_view_the_game_does_not_have_is_refused(self) -> None:
         with pytest.raises(ValueError, match='view'):

@@ -44,6 +44,7 @@ import numpy as np
 
 from glisteel.driver import Autopilot, DriverStyle
 from glisteel.interfaces import CourseLike, SessionLike
+from glisteel.zone import MARGIN, DrivableZone
 
 __all__ = ['DEADZONE', 'MARGIN', 'STRENGTH', 'Straighten']
 
@@ -56,12 +57,6 @@ STRENGTH = 0.55
 #: back to centre passes through very small values, and waiting for exactly
 #: nothing would leave the car un-helped for the moment it most needs it.
 DEADZONE = 0.05
-
-#: How far inside the carriageway's own edge a held line may sit, in metres.
-#: About half a car: a player who lets go with two wheels on the grass is not
-#: asking to be held there, so the line the aid takes up is drawn back onto the
-#: road -- and no further, because the rest of the road is theirs to use.
-MARGIN = 1.0
 
 
 class Straighten:
@@ -79,7 +74,9 @@ class Straighten:
                  deadzone: float = DEADZONE, margin: float = MARGIN) -> None:
         self.strength = float(strength)
         self.deadzone = float(deadzone)
-        self.margin = float(margin)
+        #: How wide the road is and where its lanes are, which is what says
+        #: how far out a held line may sit.
+        self.zone = DrivableZone.of(course, margin=margin)
         #: What works out where the road wants the car; the same geometry the
         #: autopilot drives by, at a gentler gain.
         self.driver = Autopilot(course, style=DriverStyle(tracking=2.5))
@@ -96,13 +93,42 @@ class Straighten:
         return self.strength > 0.0
 
     @property
+    def hands_on(self) -> bool:
+        """Whether the line to hold is still to be taken from the car.
+
+        True while the player is steering, and again after :meth:`release`,
+        which is how anything holding a line of its own learns that the line it
+        had is a line on a road the car is no longer on.
+        """
+        return self._hands_on
+
+    @property
     def line(self) -> float:
         """The line being held: how far to the road's own right, in metres."""
         return float(self.driver.lane)
 
+    @property
+    def margin(self) -> float:
+        """How far inside the carriageway's edge a held line may sit.
+
+        The zone's, and read-only because it is the zone's: the width of the
+        road and how far inside it a car may be put are one description of one
+        road, and a second place to set the margin is a second answer waiting to
+        disagree. Build a :class:`Straighten` with the margin it is to have.
+        """
+        return float(self.zone.margin)
+
     def hold(self, line: float) -> None:
-        """Hold this line from now on, in metres right of the centreline."""
+        """Hold this line from now on, in metres right of the centreline.
+
+        Whoever asks for a line has chosen one, so this also takes the wheel:
+        without that, the next hands-off step would replace what was asked for
+        with wherever the car happens to be. That is what a way of driving that
+        steers by *position* rather than by lock does with its steering
+        (:mod:`glisteel.schemes`).
+        """
         self.driver.lane = float(line)
+        self._hands_on = False
 
     def release(self) -> None:
         """Let go of the line, so the next hands-off step takes a fresh one.
@@ -126,8 +152,7 @@ class Straighten:
         at = np.asarray(car.position, dtype='d').reshape(-1)[:3]
         index, _distance = course.nearest(at)
         across = float(np.dot(at - course.point(index), course.across(index)))
-        edge = max(float(course.carriageway_width) / 2.0 - self.margin, 0.0)
-        return max(-edge, min(edge, across))
+        return self.zone.clamp(across)
 
     def steer(self, session: SessionLike, wanted: float) -> float:
         """What reaches the wheel, given what the player asked for."""
@@ -139,7 +164,6 @@ class Straighten:
             self._hands_on = True
             return float(wanted)
         if self._hands_on:
-            self._hands_on = False
             self.hold(self.line_under(session.car))
         correction = self.driver.steering(session.car) * self.strength
         return max(-1.0, min(1.0, float(wanted) + correction))

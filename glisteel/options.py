@@ -19,8 +19,10 @@ import argparse
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+from glisteel import schemes
 from glisteel.assist import STRENGTH
 from glisteel.camera import VIEWS
+from glisteel.driver import PACE
 from glisteel.session import RACE_LAPS
 from glisteel.traffic import DEFAULT_TRAFFIC
 
@@ -68,8 +70,11 @@ class Options:
     sse: float = 12.0
     #: Whether the speed and lap read-outs are drawn.
     hud: bool = True
-    #: Whether the pointer steers.
+    #: Whether the pointer steers. A source rather than a way of driving, so
+    #: it goes with any of them (:mod:`glisteel.schemes`).
     mouse: bool = False
+    #: Which way of driving the car, by name.
+    control: str = schemes.DEFAULT
     #: Whether the car carries a light into a bore.
     headlights: bool = True
     #: How much of the steering the game puts in while nobody is steering.
@@ -80,6 +85,9 @@ class Options:
     traffic: int = DEFAULT_TRAFFIC
     #: Whether the car drives itself.
     autopilot: bool = False
+    #: How hard it drives itself, as a fraction of what the road allows, where
+    #: it is driving through the controls (:class:`~glisteel.driver.StandIn`).
+    pace: float = PACE
     #: Which view the run starts in, one of :data:`glisteel.camera.VIEWS`.
     view: str = VIEWS[0]
     #: The window, in pixels.
@@ -109,9 +117,14 @@ class Options:
 
     def __post_init__(self) -> None:
         self.assist = _within('assist', float(self.assist), 0.0, 1.0)
+        self.pace = _within('pace', float(self.pace), 0.05, 2.0)
         self.laps = _at_least('laps', int(self.laps), 0)
         self.traffic = _at_least('traffic', int(self.traffic), 0)
         self.sse = _at_least('sse', float(self.sse), 0.0)
+        if self.control not in schemes.available():
+            raise ValueError(
+                'control is %r, which is not a way of driving; there is %s'
+                % (self.control, ', '.join(schemes.available())))
         if self.view not in VIEWS:
             raise ValueError(
                 'there is no view called %r; there is %s'

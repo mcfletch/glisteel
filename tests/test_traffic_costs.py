@@ -11,17 +11,15 @@ question is asked.
 """
 import numpy as np
 import pytest
+import support
 
 from glisteel.traffic import LOOK_AHEAD, Traffic, TrafficCar
 from glisteel.world import Course
 
 
 def _circuit(points=400, radius=300.0):
-    angle = np.linspace(0.0, 2.0 * np.pi, points, endpoint=False)
-    line = np.stack([np.cos(angle) * radius, np.zeros(points),
-                     np.sin(angle) * radius], axis=-1)
-    return Course(name='circuit', centreline=line, carriageway_width=7.2,
-                  total_width=12.0, closed=True,
+    return Course(name='circuit', centreline=support.ring(points, radius),
+                  carriageway_width=7.2, total_width=12.0, closed=True,
                   length=float(2.0 * np.pi * radius))
 
 
@@ -33,13 +31,8 @@ class TestHowOftenTheCourseIsAsked:
     def test_a_frame_asks_where_the_player_is_once(self) -> None:
         traffic = _traffic()
         traffic.update(traffic.course.point(0), 0.0)
-        asked = []
-        real = Course.nearest
-        Course.nearest = lambda self, at: (asked.append(1), real(self, at))[1]
-        try:
+        with support.counting(Course, 'nearest') as asked:
             traffic.update(traffic.course.point(0), 1.0 / 60.0)
-        finally:
-            Course.nearest = real
         assert len(asked) == 1, 'asked %d times in one frame' % len(asked)
 
 

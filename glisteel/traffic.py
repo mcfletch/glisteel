@@ -315,10 +315,10 @@ class TrafficCar:
         about whatever else is standing there and about nothing at all where
         the surface under a car has not been built yet.
         """
-        centre, right = self._frame()
+        centre, right, _along, lean = self._frame()
         out = self.side()
         at: np.ndarray = centre + right * out
-        at[1] += float(self.course.surface_offset(abs(out)))
+        at[1] += float(self.course.surface_offset(abs(out), lean))
         return at
 
     def side(self) -> float:
@@ -335,11 +335,13 @@ class TrafficCar:
         return self.forward() * self.speed
 
     def forward(self) -> np.ndarray:
-        """Which way it is pointing, as a unit vector."""
-        _centre, right = self._frame()
-        along = np.cross((0.0, 1.0, 0.0), right)
-        length = float(np.linalg.norm(along))
-        along = along / length if length > 1e-9 else np.array([0.0, 0.0, -1.0])
+        """Which way it is pointing, as a unit vector.
+
+        The road's own direction, which is level whatever the carriageway is
+        doing across itself: a car on a banked corner leans, and it does not
+        point up the hill.
+        """
+        _centre, _across, along, _lean = self._frame()
         pointing: np.ndarray = along * self.heading
         return pointing
 
@@ -392,7 +394,18 @@ class TrafficCar:
         return True
 
     def _frame(self) -> tuple:
-        """The centreline point at this station, and the way across the road."""
+        """Where this car is on the road, as ``(centre, across, along, lean)``.
+
+        The centreline point at its station, the way across the road there, the
+        way along it, and how far the road leans -- all four together, because
+        everything that places a car needs some of them and finding the station
+        is the cost.
+
+        The way across **leans with the road**, so a car on a superelevated
+        corner keeps its own side of a carriageway that is not level. Held flat,
+        it would hold its distance from the crown in plan and float over the
+        outside of every bend or sink into the inside of it.
+        """
         line = self.course.centreline
         stations = self.course.stations
         index = int(np.clip(np.searchsorted(stations, self.station) - 1, 0,
@@ -401,10 +414,21 @@ class TrafficCar:
         blend = float(np.clip((self.station - stations[index]) / span, 0.0, 1.0))
         centre = line[index] * (1.0 - blend) + line[index + 1] * blend
         along = line[index + 1] - line[index]
+        run = float(np.linalg.norm(along))
         right = np.cross(along, (0.0, 1.0, 0.0))
         length = float(np.linalg.norm(right))
-        return centre, (right / length if length > 1e-9
-                        else np.array([1.0, 0.0, 0.0]))
+        if length <= 1e-9 or run <= 1e-9:        # pragma: no cover - a repeat
+            return (centre, np.array([1.0, 0.0, 0.0]),
+                    np.array([0.0, 0.0, -1.0]), 0.0)
+        right, along = right / length, along / run
+        lean = (self.course.bank_at(index) * (1.0 - blend)
+                + self.course.bank_at(index + 1) * blend)
+        if not lean:
+            return centre, right, along, 0.0
+        angle = math.atan(lean)
+        across = (math.cos(angle) * right
+                  - math.sin(angle) * np.cross(right, along))
+        return centre, across, along, lean
 
 
 class Traffic:

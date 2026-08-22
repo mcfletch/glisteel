@@ -12,6 +12,7 @@ import json
 import math
 
 import pytest
+import support
 
 from glisteel import scenarios
 
@@ -48,15 +49,10 @@ class TestABakedWorldIsReadOnce:
 
         from glisteel.world import RaceWorld
         path = self._tileset(tmp_path)
-        reads = []
-        real = fetch.read_bytes
-        fetch.read_bytes = lambda one, *a, **k: (reads.append(one),
-                                                 real(one, *a, **k))[1]
-        try:
+        with support.counting(fetch, 'read_bytes') as reads:
             RaceWorld(path)
-        finally:
-            fetch.read_bytes = real
-        mine = [one for one in reads if one == path]
+        mine = [one for (args, _named) in reads for one in args[:1]
+                if one == path]
         assert len(mine) <= 2, 'read the tileset %d times' % len(mine)
 
     def test_everything_it_carries_comes_out_of_one_document(self) -> None:

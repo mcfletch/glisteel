@@ -109,7 +109,8 @@ class TestTheLineItHolds:
     lane is changed, and what is held afterwards is the new one.
     """
 
-    def _driving(self, line='throttle 0..14', seconds=14.0, traffic=0):
+    @staticmethod
+    def _driving(line='throttle 0..14', seconds=14.0, traffic=0):
         from glisteel.scripted import Script
         from glisteel.trace import drive
         session = Session(
@@ -119,21 +120,29 @@ class TestTheLineItHolds:
     #: A drive that pulls out of the lane it started in and lets go.
     PULLING_OUT = 'throttle 0..16; left 5..5.6'
 
-    def test_a_car_steered_onto_another_line_is_held_on_that_one(self):
-        session, _trace = self._driving(self.PULLING_OUT, seconds=16.0)
-        settled = _across(session.course, session.car.position)
-        assert settled == pytest.approx(session.assist.line, abs=0.4)
+    @classmethod
+    @pytest.fixture(scope='class')
+    def pulled_out(cls):
+        """Where that drive started, where it settled, and what is held now.
 
-    def test_and_that_line_is_the_one_the_player_let_go_on(self):
-        session, trace = self._driving(self.PULLING_OUT, seconds=16.0)
-        started = _across(session.course, trace.position[0])
-        assert abs(session.assist.line - started) > 0.8
+        Three readings of one sixteen-second drive rather than three drives of
+        it. Read off here and handed over as numbers, so that nothing below
+        holds the session itself: a live session shared between tests is a
+        test that passes or fails on what the one before it did.
+        """
+        session, trace = cls._driving(cls.PULLING_OUT, seconds=16.0)
+        return {'started': _across(session.course, trace.position[0]),
+                'settled': _across(session.course, session.car.position),
+                'held': session.assist.line}
 
-    def test_rather_than_taken_back_to_the_line_it_came_from(self):
-        session, trace = self._driving(self.PULLING_OUT, seconds=16.0)
-        started = _across(session.course, trace.position[0])
-        settled = _across(session.course, session.car.position)
-        assert abs(settled - started) > 0.8, (started, settled)
+    def test_a_car_steered_onto_another_line_is_held_on_that_one(self, pulled_out):
+        assert pulled_out['settled'] == pytest.approx(pulled_out['held'], abs=0.4)
+
+    def test_and_that_line_is_the_one_the_player_let_go_on(self, pulled_out):
+        assert abs(pulled_out['held'] - pulled_out['started']) > 0.8
+
+    def test_rather_than_taken_back_to_the_line_it_came_from(self, pulled_out):
+        assert abs(pulled_out['settled'] - pulled_out['started']) > 0.8, pulled_out
 
     def test_a_car_put_on_a_road_with_two_ways_keeps_its_own_side(self):
         """Which is where the session stands it, and the aid holds it there

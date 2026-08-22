@@ -16,8 +16,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
-__all__ = ['CONTROLS', 'KeyboardDriver', 'KeyboardWheel', 'MouseWheel',
-           'TRAVEL', 'CURVE', 'WIND_ON', 'CENTRE']
+__all__ = ['CONTROLS', 'KEY_FOR', 'KeyboardDriver', 'KeyboardWheel',
+           'MouseWheel', 'TRAVEL', 'CURVE', 'WIND_ON', 'CENTRE']
 
 #: How much of the window's half-width is full lock. Under 1 so a driver does
 #: not have to reach the very edge of the screen to get all of it.
@@ -141,6 +141,14 @@ CONTROLS: Mapping[str, frozenset[str]] = MappingProxyType({
 })
 
 
+#: Which key stands for each control when something presses one on a driver's
+#: behalf -- a written-down drive, or an autopilot at the controls. Settled here
+#: rather than chosen per step: a control is a set of keys that mean the same
+#: thing, so any of them will do, and picking one is not a decision to make a
+#: hundred and twenty times a second.
+KEY_FOR = {control: sorted(keys)[0] for control, keys in CONTROLS.items()}
+
+
 class KeyboardDriver:
     """Whoever is at the keyboard, as a driver a run can be handed.
 
@@ -183,12 +191,12 @@ class KeyboardDriver:
         """Whether any of the keys for a control is down."""
         return bool(self.held & self.controls_for[control])
 
-    def controls(self, session: object, dt: float) -> tuple[float, float, float]:
-        """The pedals and the wheel, from whatever is held down.
+    def pedals(self, session: object) -> tuple[float, float]:
+        """The throttle and the brake, from whatever is held down.
 
-        ``dt`` is the step the steering is wound over: the keys give full lock
-        or none, and :class:`KeyboardWheel` turns that into a wheel that eases
-        on and off rather than a switch.
+        Separate from the wheel because every way of driving the car wants the
+        same two pedals (:mod:`glisteel.schemes`), and only some of them want
+        the steering to mean a steering lock.
         """
         throttle = 1.0 if self.holding('throttle') else 0.0
         brake = 0.0
@@ -203,8 +211,42 @@ class KeyboardDriver:
                 throttle = -1.0
         if self.holding('handbrake'):
             brake = 1.0
-        target = (1.0 if self.holding('left') else 0.0) - \
-            (1.0 if self.holding('right') else 0.0)
+        return throttle, brake
+
+    def key_axis(self) -> float:
+        """Which way the steering keys are asking for: 1 left, -1 right, 0 none.
+
+        The keys as they are, before :class:`KeyboardWheel` winds a wheel out
+        of them. What a way of driving that steers by *position* wants is the
+        request itself, since the winding is what turns a request into a lock.
+        """
+        return ((1.0 if self.holding('left') else 0.0)
+                - (1.0 if self.holding('right') else 0.0))
+
+    def pointer_axis(self) -> float | None:
+        """Where the pointer is asking for, or None where nothing steers by it."""
+        return None if self.pointer is None else float(self.pointer.position)
+
+    def axis(self) -> float:
+        """What the driver is asking for with the steering, from -1 to 1.
+
+        The keys where one is down, and the pointer otherwise: a driver
+        reaching for a key has decided the pointer is not where they want to be.
+        """
+        keys = self.key_axis()
+        if keys or self.pointer is None:
+            return keys
+        return float(self.pointer.position)
+
+    def controls(self, session: object, dt: float) -> tuple[float, float, float]:
+        """The pedals and the wheel, from whatever is held down.
+
+        ``dt`` is the step the steering is wound over: the keys give full lock
+        or none, and :class:`KeyboardWheel` turns that into a wheel that eases
+        on and off rather than a switch.
+        """
+        throttle, brake = self.pedals(session)
+        target = self.key_axis()
         if self.pointer is not None and not target:
             return throttle, brake, self.pointer.position
         return throttle, brake, self.keys.toward(target, dt)

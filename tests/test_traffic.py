@@ -224,8 +224,11 @@ class TestTheTrafficOnARoad:
             assert float(np.linalg.norm(car.position() - at)) < 320.0
 
     def test_both_ways(self) -> None:
-        traffic = self._traffic(count=12)
-        traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
+        """On a road. A circuit is raced one way round -- see
+        :class:`TestWhichWayTheTrafficGoes`."""
+        traffic = self._traffic(course=_course(length=8000.0, count=801),
+                                count=12)
+        traffic.update(np.array([0.0, 0.0, 300.0]), 0.0)
         assert {car.heading for car in traffic.cars} == {1, -1}
 
     def test_none_of_them_is_on_top_of_another(self) -> None:
@@ -244,11 +247,16 @@ class TestTheTrafficOnARoad:
         traffic.update(np.array([-300.0, 0.0, 0.0]), 1.0)
         assert not any(car is other for car in first for other in traffic.cars)
 
-    def test_and_there_are_still_as_many(self) -> None:
-        traffic = self._traffic(count=8, reach=250.0)
+    def test_and_the_new_road_fills_up_as_it_is_driven(self) -> None:
+        """Not at once: traffic joins at the edge of the reach and drives in
+        from there, so a stretch of road nobody has driven yet is a stretch of
+        road with nothing on it -- which is what stops a car appearing in front
+        of somebody who was looking at that piece of road a moment ago."""
+        traffic = self._traffic(count=8)
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
-        traffic.update(np.array([-300.0, 0.0, 0.0]), 1.0)
-        assert len(traffic.cars) == 8
+        for step in range(300):
+            traffic.update(np.array([-300.0 + step * 3.0, 0.0, 0.0]), 0.2)
+        assert len(traffic.cars) >= 6
 
     def test_a_road_with_no_traffic_asked_for_stays_empty(self) -> None:
         traffic = self._traffic(count=0)
@@ -312,13 +320,13 @@ class TestTrafficYouCanSeeAndHit:
         assert float(np.linalg.norm(after - before)) > 3.0
 
     def test_a_retired_car_takes_its_body_with_it(self) -> None:
-        world, traffic = self._fleet(count=3, reach=150.0)
+        world, traffic = self._fleet(count=3, reach=400.0)
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
         traffic.update(np.array([-300.0, 0.0, 0.0]), 1.0)
         assert world.live_body_count == len(traffic.cars) == 3
 
     def test_and_its_node(self) -> None:
-        _world, traffic = self._fleet(count=3, reach=150.0)
+        _world, traffic = self._fleet(count=3, reach=400.0)
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
         traffic.update(np.array([-300.0, 0.0, 0.0]), 1.0)
         assert len(traffic.node.children) == 3
@@ -353,11 +361,15 @@ class TestNotAppearingOnTopOfAnybody:
 
     def test_nor_at_any_point_in_a_lap_of_topping_up(self) -> None:
         """Passing close is the whole idea; *arriving* close is not, so what is
-        checked is each car on the frame it first appears."""
-        traffic = Traffic(course=_ring(), count=8, seed=5)
-        at = np.array([300.0, 0.0, 0.0])
+        checked is each car on the frame it first appears. The driver is moving,
+        because a road tops up by being driven along."""
+        # A ring long enough that the reach is a part of it rather than most
+        # of it, so cars really do fall behind and are replaced.
+        course = _ring(radius=900.0, count=721)
+        traffic = Traffic(course=course, count=8, seed=5)
         seen: set = set()
-        for _ in range(400):
+        for step in range(400):
+            at = course.point((step * 3) % len(course.centreline))
             traffic.update(at, 0.1)
             for car in traffic.cars:
                 if id(car) not in seen:
@@ -721,3 +733,190 @@ class TestTheRoadIsNotEmpty:
     def test_an_empty_circuit_is_still_askable_for(self):
         from glisteel.game import build_parser
         assert build_parser().parse_args(['w.json', '--traffic', '0']).traffic == 0
+
+
+class TestTrafficComesFromBeyondWhatCanBeSeen:
+    """A car that appears a hundred metres up the road is a car that was not
+    there a moment ago, and a driver deciding whether to pass has no way to know
+    the road is clear if the road can grow cars in front of them. New traffic
+    joins at the edge of the reach and drives in from there.
+    """
+
+    def _traffic(self, count=8, course=None):
+        from glisteel.traffic import Traffic
+        course = course if course is not None else _course(length=8000.0,
+                                                           count=801)
+        traffic = Traffic(course, count=count, seed=3)
+        traffic.update(course.point(0), 0.0)
+        return traffic
+
+    def test_nothing_is_placed_where_a_driver_would_see_it_arrive(self) -> None:
+        from glisteel.traffic import EDGE_BAND
+        traffic = self._traffic()
+        here = traffic._station_of(traffic.course.point(0))
+        for car in traffic.cars:
+            gap = traffic._gap(here, car.station)
+            assert gap >= traffic.reach - EDGE_BAND - 1.0, (
+                'a car appeared %.0f m away, inside what a driver has road '
+                'for' % gap)
+
+    def test_the_band_holds_the_traffic_that_has_to_join_through_it(self
+                                                                   ) -> None:
+        """Every car alive arrives through it, and the ones that have to keep
+        :data:`HEADWAY` from each other are those going the same way on the
+        same side -- a quarter of a two-way road's traffic. A band too narrow
+        for them is a road that never fills up."""
+        from glisteel.traffic import DEFAULT_TRAFFIC, EDGE_BAND, HEADWAY
+        together = max(DEFAULT_TRAFFIC // 4, 1)
+        assert EDGE_BAND >= HEADWAY * together, (
+            '%d m of band for %d cars %d m apart'
+            % (EDGE_BAND, together, HEADWAY))
+
+    def test_the_road_fills_up_as_the_driver_goes_down_it(self) -> None:
+        """Only a few fit in the band at once, so a road is populated by being
+        driven along rather than by being conjured whole."""
+        from glisteel.traffic import Traffic
+        course = _course(length=20000.0, count=2001)
+        traffic = Traffic(course, count=8, seed=3)
+        for step in range(400):
+            traffic.update(course.point(step * 4), 0.2)
+        assert len(traffic.cars) >= 6
+
+    def test_both_ways_along_the_road(self) -> None:
+        traffic = self._traffic(count=12)
+        assert {car.heading for car in traffic.cars} == {-1, 1}
+
+
+class TestWhichWayTheTrafficGoes:
+    """A road carries traffic both ways, and a circuit is a road.
+
+    What makes passing worth anything is that the lane you pass in is the lane
+    somebody else is coming down. Take that away and the other lane is just
+    more road: there is no reason to come back to your own, no decision to get
+    right, and the time a pass buys costs nothing to take.
+    """
+
+    def _filled(self, course, count=10):
+        traffic = Traffic(course, count=count, seed=3)
+        for step in range(60):
+            self.at = course.point(step)
+            traffic.update(self.at, 0.2)
+        return traffic
+
+    def test_a_circuit_carries_traffic_both_ways(self) -> None:
+        traffic = self._filled(_ring(), count=12)
+        assert traffic.two_way
+        assert {car.heading for car in traffic.cars} == {-1, 1}
+
+    def test_and_so_does_an_open_road(self) -> None:
+        traffic = self._filled(_course(length=8000.0, count=801), count=12)
+        assert traffic.two_way
+        assert {car.heading for car in traffic.cars} == {-1, 1}
+
+    def test_a_caller_can_ask_for_a_road_with_one_side(self) -> None:
+        traffic = self._filled(_ring(), count=8)
+        one_way = Traffic(_ring(), count=8, seed=3, two_way=False)
+        one_way.update(_ring().point(0), 0.0)
+        assert traffic.two_way and not one_way.two_way
+        assert {car.heading for car in one_way.cars} == {1}
+
+
+class TestHowMuchTrafficMakesARace:
+    def test_it_is_worked_out_from_how_often_a_racer_wants_to_meet_one(self):
+        from glisteel.traffic import cars_for
+        assert cars_for(seconds=5.0) > cars_for(seconds=20.0)
+
+    def test_a_road_with_traffic_coming_the_other_way_needs_more_of_it(self):
+        from glisteel.traffic import cars_for
+        assert cars_for(two_way=True) > cars_for(two_way=False)
+
+    def test_a_faster_racer_catches_them_sooner_and_needs_fewer(self):
+        from glisteel.traffic import cars_for
+        assert cars_for(racing=80.0) < cars_for(racing=40.0)
+
+    def test_there_is_always_at_least_one(self):
+        from glisteel.traffic import cars_for
+        assert cars_for(seconds=1e6) == 1
+
+
+class TestWhatIsAheadIsAheadOnTheRoad:
+    """Measured along the road, not along the way the car happens to point.
+
+    A straight line from the nose leaves the road at the first bend, so a car
+    a couple of hundred metres up a curving road is off that line and reads as
+    "nothing in front" -- until the bend brings it onto the line, all at once,
+    inside braking distance. A driver looking at a road sees what is on it.
+    """
+
+    def _ring(self, radius=200.0, count=256):
+        angle = np.linspace(0.0, 2.0 * np.pi, count, endpoint=False)
+        line = np.stack([np.cos(angle) * radius, np.zeros(count),
+                         np.sin(angle) * radius], axis=-1)
+        return Course(name='ring', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True,
+                      length=float(2.0 * np.pi * radius))
+
+    def _traffic(self, course, at):
+        traffic = Traffic(course, count=0, seed=1)
+        traffic.cars = [TrafficCar(course, station=at, heading=1,
+                                   limit=LIMIT, seed=2)]
+        return traffic
+
+    def _looking(self, course, station=0.0):
+        """Where a car at that station is, in its own lane, and which way it
+        points -- because which lane something is in is measured from where the
+        driver is, not from the crown of the road."""
+        index = int(np.searchsorted(course.stations, station))
+        return (course.lane_point(index, course.driving_lane),
+                course.point(index + 1) - course.point(index))
+
+    def test_a_car_round_the_bend_is_in_front(self) -> None:
+        course = self._ring()
+        traffic = self._traffic(course, at=180.0)
+        at, way = self._looking(course)
+        assert traffic.ahead_of(at, way, reach=300.0)
+
+    def test_and_one_further_round_than_the_reach_is_not(self) -> None:
+        course = self._ring()
+        traffic = self._traffic(course, at=400.0)
+        at, way = self._looking(course)
+        assert not traffic.ahead_of(at, way, reach=300.0)
+
+    def test_one_behind_is_not_in_front(self) -> None:
+        course = self._ring()
+        traffic = self._traffic(course, at=course.length - 100.0)
+        at, way = self._looking(course)
+        assert not traffic.ahead_of(at, way, reach=300.0)
+
+    def test_nor_is_one_in_the_other_lane(self) -> None:
+        course = self._ring()
+        traffic = self._traffic(course, at=180.0)
+        traffic.cars[0].heading = -1
+        at, way = self._looking(course)
+        assert not traffic.ahead_of(at, way, reach=300.0)
+
+    def test_unless_the_whole_road_was_asked_about(self) -> None:
+        course = self._ring()
+        traffic = self._traffic(course, at=180.0)
+        traffic.cars[0].heading = -1
+        at, way = self._looking(course)
+        assert traffic.ahead_of(at, way, reach=300.0,
+                                width=course.carriageway_width)
+
+    def test_they_come_back_nearest_first(self) -> None:
+        course = self._ring()
+        traffic = self._traffic(course, at=90.0)
+        for station in (250.0, 40.0, 160.0):
+            traffic.cars.append(TrafficCar(course, station=station, heading=1,
+                                           limit=LIMIT, seed=3))
+        at, way = self._looking(course)
+        found = [car.station for car in traffic.ahead_of(at, way, reach=300.0)]
+        assert found == sorted(found)
+
+    def test_a_driver_going_the_other_way_looks_the_other_way(self) -> None:
+        """Which way is *forward* is still the car's own, so somebody turned
+        round on the road is not told the road behind them is in front."""
+        course = self._ring()
+        traffic = self._traffic(course, at=180.0)
+        at, way = self._looking(course)
+        assert not traffic.ahead_of(at, -way, reach=300.0)

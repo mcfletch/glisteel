@@ -52,11 +52,21 @@ from OpenGLContext.video.recorder import RecordingMixin  # noqa: E402
 from OpenGLContext.viewer import environment  # noqa: E402
 from OpenGLContext.viewer.sceneviewer import ViewerContext  # noqa: E402
 
-from glisteel import menu, tracks  # noqa: E402
+from glisteel import (  # noqa: E402
+    menu,
+    schemes,  # noqa: E402
+    tracks,
+)
 from glisteel.assist import STRENGTH as ASSIST  # noqa: E402
 from glisteel.camera import VIEWS  # noqa: E402
 from glisteel.car import CarSpec  # noqa: E402
-from glisteel.driver import Autopilot  # noqa: E402
+from glisteel.driver import (  # noqa: E402
+    PACE,  # noqa: E402
+    RACING_KPH,
+    Autopilot,
+    DriverStyle,
+    StandIn,
+)
 from glisteel.hud import RaceHUD  # noqa: E402
 from glisteel.lighting import (  # noqa: E402
     BEAM_COLOUR,
@@ -390,13 +400,12 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         return place
 
     def _driver(self) -> Any:                    # pragma: no cover - needs a window
-        """Whoever is driving: the autopilot, or whoever is at the keyboard."""
-        if self.config.autopilot:
-            assert self.session is not None
-            return Autopilot(self.session.course, lane=self.session.lane)
-        self.keyboard = KeyboardDriver(
-            MouseWheel() if self.config.mouse else None)
-        return self.keyboard
+        """Whoever is driving, and the keys to deliver to them."""
+        assert self.session is not None
+        driver = driver_for(self.config, self.session)
+        self.keyboard = (driver.source
+                         if isinstance(driver, schemes.ControlScheme) else None)
+        return driver
 
     def _bind_keys(self) -> None:                # pragma: no cover - needs a window
         """Ask the runtime for every event the game acts on.
@@ -554,6 +563,35 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.close()
 
 
+def driver_for(config: Any, session: Any) -> Any:
+    """Whoever is driving a run set up like this.
+
+    The autopilot where the car drives itself, and otherwise the way of driving
+    the player asked for (:mod:`glisteel.schemes`) over the keys and, where
+    ``--mouse`` says so, the pointer. Here rather than in the window because
+    which driver a command line asks for is a decision, and one made inside a
+    window is a decision no test can ask about -- which is how ``--mouse`` came
+    to be a documented control that was never connected to anything.
+    """
+    scheme = schemes.named(config.control, trim=config.assist,
+                           pointer=MouseWheel() if config.mouse else None)
+    if not config.autopilot:
+        return scheme
+    # A way of driving that steers for the driver is a way of driving to be
+    # judged, so the autopilot drives it the way a player would -- through the
+    # controls. Where the steering *is* the wheel there is nothing to judge in
+    # pressing a key to wind one, and it steers directly.
+    if scheme.holds_the_line:
+        # Racing, not driving: what it aims for on an open road is
+        # :data:`~glisteel.driver.RACING_KPH` rather than the speed a driver
+        # going somewhere would pick, and ``--pace`` is the fraction of that
+        # and of every corner it asks for.
+        return StandIn(scheme, lane=session.lane,
+                       style=DriverStyle(margin=config.pace,
+                                         maximum_speed=RACING_KPH / 3.6))
+    return Autopilot(session.course, lane=session.lane)
+
+
 @dataclass(frozen=True)
 class Binding:
     """One event the window asks the runtime for.
@@ -638,7 +676,14 @@ def build_parser() -> argparse.ArgumentParser:
                         default=True, help='draw the speed and lap readouts')
     parser.add_argument('--mouse', action='store_true',
                         help='steer with the pointer: where it is across the '
-                             'window is where the wheel is')
+                             'window is where the wheel is. Goes with any '
+                             '--control')
+    parser.add_argument('--control', choices=schemes.available(),
+                        default=schemes.DEFAULT, metavar='WAY',
+                        help='how the steering is driven: %s (default: '
+                             '%%(default)s)'
+                             % '; '.join('%s, %s' % (one, schemes.named(one).summary)
+                                         for one in schemes.available()))
     parser.add_argument('--headlights', action=argparse.BooleanOptionalAction,
                         default=True,
                         help='the light the car carries into a bore')
@@ -657,7 +702,13 @@ def build_parser() -> argparse.ArgumentParser:
                              'last; 0 is an empty circuit, which is what a '
                              'timed lap is (default: %(default)s)')
     parser.add_argument('--autopilot', action='store_true',
-                        help='let the car drive itself round the circuit')
+                        help='let the car drive itself round the circuit. With '
+                             'a --control that steers for the driver it drives '
+                             'through the controls, the way a player does')
+    parser.add_argument('--pace', type=float, default=PACE, metavar='FRACTION',
+                        help='how hard it drives itself when it is driving '
+                             'through the controls, as a fraction of what the '
+                             'road allows (default: %(default)s)')
     parser.add_argument('--size', default=DEFAULT_SIZE, type=window_size,
                         metavar='WIDTHxHEIGHT',
                         help='window size (default: %dx%d)' % DEFAULT_SIZE)

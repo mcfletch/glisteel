@@ -28,7 +28,12 @@ from OpenGLContext.ui.hudwidgets import (
 
 from glisteel.run import COUNTDOWN, FINISHED
 
-__all__ = ['RaceHUD', 'FAST_KPH', 'HOME']
+__all__ = ['RaceHUD', 'FAST_KPH', 'HOME', 'OVER_CAUTION']
+
+#: How far over the speed a sign advises a driver may be before the HUD says
+#: so, in km/h. A number on a plate is advice a careful driver beats, and a
+#: read-out that shouts at somebody one over it is one they learn to ignore.
+OVER_CAUTION = 20.0
 
 #: Speed above which the readout goes critical: the skin's warning colour, so
 #: the driver's eye is caught by the number rather than having to read it.
@@ -46,6 +51,10 @@ class RaceHUD(HUDLayer):
     def __init__(self, **named: Any) -> None:
         super().__init__(**named)
         self.speed = Readout(anchor='bottom-right', align='right', label='KM/H')
+        # Over the speed read-out, so a driver reading their speed reads what
+        # it should be in the same glance.
+        self.caution = Readout(anchor='bottom-right', align='right',
+                               offset=(0, 34), value='', critical=True)
         self.lap = Readout(label='LAP')
         self.best = Readout(label='BEST', value='--:--.---')
         self.last = Readout(label='LAST', value='--:--.---')
@@ -59,8 +68,8 @@ class RaceHUD(HUDLayer):
         # would each take the same corner and be drawn on top of one another.
         self.times = HUDGroup(anchor='top-left',
                               children=[self.lap, self.last, self.best])
-        self.children = [self.times, self.speed, self.warning, self.map,
-                         self.lights]
+        self.children = [self.times, self.speed, self.caution, self.warning,
+                         self.map, self.lights]
 
     def route(self, course: Any) -> None:
         """The circuit the map draws. Set once; a world's shape does not change."""
@@ -77,6 +86,8 @@ class RaceHUD(HUDLayer):
         """
         self.speed.value = '%3.0f' % max(0.0, reading.speed_kph)
         self.speed.critical = bool(reading.speed_kph >= FAST_KPH)
+        self.caution.value = ('SLOW TO %d' % reading.caution
+                              if self.over_caution(reading) else '')
         timing = reading.timing
         if timing is not None:
             self.lap.value = '%d   %s' % (len(timing.laps) + 1,
@@ -94,6 +105,16 @@ class RaceHUD(HUDLayer):
             marks.append((float(reading.at[0]), float(reading.at[2]),
                           'crosshair'))
         self.map.marks = marks
+
+    @staticmethod
+    def over_caution(reading: Any) -> bool:
+        """Whether the car is fast enough over what the road advises to say so.
+
+        A road with nothing to say says nothing: :attr:`Readings.caution` is
+        zero on an open road, and for a driver who is not being advised at all.
+        """
+        return bool(reading.caution
+                    and reading.speed_kph > reading.caution + OVER_CAUTION)
 
     def _start_rig(self, phase: str, lit: int, lights: int) -> None:
         """The lamps, and only while there is a start to watch."""

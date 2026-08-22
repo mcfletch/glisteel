@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 
 from glisteel import scenarios, schemes
-from glisteel.schemes import QUEUED_FOR
 from glisteel.assist import Straighten
+from glisteel.schemes import QUEUED_FOR
 from glisteel.session import Session
 from glisteel.steering import CONTROLS
 from glisteel.zone import DrivableZone

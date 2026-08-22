@@ -11,6 +11,8 @@ off rather than needing a test written afterwards; see
 ``plans/GAMEPLAY-TEST-HARNESS.md`` for what the fix is expected to be.
 """
 
+import functools
+
 import numpy as np
 import pytest
 
@@ -24,6 +26,7 @@ from glisteel.trace import drive
 UP_TO_SPEED = 6.0
 
 
+@functools.cache
 def _drive(line, piece=None, seconds=None, view='cockpit', assist=None):
     """Drive a scripted line on a piece of road and bring back the trace.
 
@@ -31,6 +34,15 @@ def _drive(line, piece=None, seconds=None, view='cockpit', assist=None):
     (:mod:`glisteel.assist`); the default is the shipped one. A test about what
     the car does when nobody corrects it passes 0, since with the assist on
     nobody has to.
+
+    **The same drive is driven once.** A scripted run is deterministic -- a
+    fixed step, a script, and no traffic -- so the same arguments give the same
+    trace, and several of the questions below are asked of one drive: what the
+    car did, where it pointed, and what the view did about it are three
+    measurements of one twelve-second run, not three runs. A
+    :class:`~glisteel.scenarios.Scenario` is a description and compares as one,
+    so ``piece=scenarios.crest()`` written out twice is the same piece. The
+    traces are read and never edited.
     """
     piece = piece or scenarios.straight(length=1600.0)
     named = {} if assist is None else {'assist': assist}
@@ -218,10 +230,6 @@ class TestBeingMired:
         assert 3.0 < stopped < 12.0, trace.report()
 
 
-if __name__ == '__main__':
-    raise SystemExit(pytest.main([__file__, '-v']))
-
-
 class TestWhatTheCarHasToPassWith:
     """An electric supercar's numbers, which is what a pass is made of.
 
@@ -286,9 +294,10 @@ class TestItSlidesRatherThanRolls:
 
     def _flat(self, spec=None):
         from omi_physics.world import PhysicsWorld
-        from glisteel.car import Car
         from OpenGLContext.scenegraph import basenodes as _bn  # noqa: F401
+
         import tests.test_driver as td
+        from glisteel.car import Car
         world = PhysicsWorld()
         td.static_ground(world, size=3000.0)
         return world, Car(world, spec, position=(0.0, 2.0, 0.0))
@@ -336,3 +345,7 @@ class TestItSlidesRatherThanRolls:
                     rolled.append(speed)
                     break
         assert not rolled, 'rolled over at %s m/s' % rolled
+
+
+if __name__ == '__main__':
+    raise SystemExit(pytest.main([__file__, '-v']))

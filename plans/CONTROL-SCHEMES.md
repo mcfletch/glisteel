@@ -892,6 +892,22 @@ the game — a scheme is chosen when the run starts, since what the switch is fo
 is comparable drives rather than a settings screen. The presets of §6, the
 assists of §5.2 to §5.5 and the pointer work of §4.2 are all still ahead of it.
 
+**The look-ahead knows where the road ends.** `Course.caution_ahead` and
+`Course.sight_over` both read a stretch of road in front of a point, and both
+take it from `Course._ahead`: round the join for a circuit, and no further than
+the last point for a road that is not one. On a stage this is the difference
+between advising a driver about the corner they are arriving at and advising
+them about the one at the start line, a kilometre behind. The sight distances
+were already unaffected — the end of an open road has the least view on it
+whatever is counted — so the caution speeds are what this corrects.
+
+Those caution speeds are now worked out for the whole road at once and kept,
+beside `radii` and for the same reason: a driver asks about the next two hundred
+metres every frame, and the road does not change shape between frames. On the
+shipped circuit that is 3 µs a frame rather than 37, for the same answer.
+`Course.moved()` clears every cache the line feeds, which is what makes keeping
+them sound.
+
 
 ## 10 What needs deciding
 

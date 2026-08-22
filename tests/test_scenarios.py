@@ -8,6 +8,8 @@ height field -- so what a test drives is what a player drives, cut down to the
 part that answers the question.
 """
 
+import math
+
 import numpy as np
 import pytest
 
@@ -118,3 +120,58 @@ def _settled(world, position, heading, seconds=2.0):
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestARoadWithSomewhereToPassOnIt:
+    """A ring is a road a driver can never see far enough along to overtake on:
+    the view round a bend of radius *r* runs `sqrt(8 * r * clear)`, which on a
+    circuit small enough to test with is a hundred metres, and getting by an
+    80 km/h car at racing speed wants half as much again.
+
+    An *oval* has straights, which is where a pass happens on any real circuit.
+    A test about a driver deciding to overtake needs a road the manoeuvre fits
+    on, or it is a test about the road.
+    """
+
+    def _course(self, piece):
+        from glisteel.world import Course
+        line = np.stack([piece.plan[:, 0], np.zeros(len(piece.plan)),
+                         piece.plan[:, 1]], axis=-1)
+        steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
+        return Course(name=piece.name, centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True,
+                      length=float(steps.sum()))
+
+    def test_it_is_a_closed_lap_like_any_other_circuit(self) -> None:
+        piece = scenarios.oval()
+        assert piece.closed and len(piece.plan) > 16
+
+    def test_it_joins_up(self) -> None:
+        """Every step of the same size, including the one that closes it: a
+        plan with a jump in it is a road with a jump in it, and a car put on
+        the start line of one never gets going."""
+        plan = scenarios.oval().plan
+        steps = np.linalg.norm(np.diff(np.vstack([plan, plan[:1]]), axis=0),
+                               axis=1)
+        assert steps.max() < 2.0 * steps.min(), (
+            'steps run from %.1f m to %.1f m' % (steps.min(), steps.max()))
+
+    def test_and_it_goes_round_once(self) -> None:
+        """Not back on itself: the plan turns through a full circle and no
+        more, which is what makes it one lap rather than a figure of eight."""
+        plan = scenarios.oval().plan
+        step = np.diff(np.vstack([plan, plan[:2]]), axis=0)
+        angle = np.unwrap(np.arctan2(step[:, 1], step[:, 0]))
+        assert abs(angle[-1] - angle[0]) == pytest.approx(2.0 * math.pi,
+                                                          abs=0.2)
+
+    def test_and_a_driver_can_see_a_long_way_down_its_straights(self) -> None:
+        course = self._course(scenarios.oval())
+        assert course._sight.max() > 300.0
+
+    def test_which_a_ring_of_the_same_size_cannot(self) -> None:
+        ring = self._course(scenarios.circuit(radius_x=400.0, radius_z=300.0))
+        assert ring._sight.max() < 200.0
+
+    def test_it_is_in_the_catalogue_by_name(self) -> None:
+        assert scenarios.named('oval').name == 'oval'

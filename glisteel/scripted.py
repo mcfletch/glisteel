@@ -21,15 +21,10 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel
+from glisteel import schemes
+from glisteel.steering import CONTROLS, KEY_FOR, MouseWheel
 
 __all__ = ['Hold', 'Script']
-
-#: Which key stands for each control when a script presses one. Settled here
-#: rather than chosen per step: a control is a set of keys that mean the same
-#: thing, so any of them will do, and picking one is not a decision to make a
-#: hundred and twenty times a second.
-KEY_FOR = {control: sorted(keys)[0] for control, keys in CONTROLS.items()}
 
 
 @dataclass(frozen=True)
@@ -70,16 +65,37 @@ class Script:
 
     ``pointer`` steers with the mouse instead of the keys where one is given;
     the holds still work, and take the wheel back while a steering key is down.
+
+    ``scheme`` is which way of driving the holds are read as
+    (:mod:`glisteel.schemes`), by name or as one already built -- which is how
+    the same drive is measured under each of them.
     """
 
-    def __init__(self, holds: Any = (), pointer: MouseWheel | None = None) -> None:
+    def __init__(self, holds: Any = (), pointer: MouseWheel | None = None,
+                 scheme: Any = None) -> None:
         self.holds = tuple(holds)
-        self.driver = KeyboardDriver(pointer)
+        #: What the holds are taken to mean.
+        self.scheme = (scheme if isinstance(scheme, schemes.ControlScheme)
+                       else schemes.named(scheme or schemes.DEFAULT,
+                                          pointer=pointer))
+        #: The keys a person's own would go through, which the holds press.
+        self.driver = self.scheme.source
         #: How far into the drive the script has been asked for.
         self.elapsed = 0.0
 
     def __repr__(self) -> str:
         return 'Script(%s)' % ', '.join(str(hold) for hold in self.holds)
+
+    @property
+    def advises(self) -> bool:
+        """Whether the run reads the road ahead for this drive.
+
+        The scheme's own answer, because a scripted drive *is* a drive under
+        that way of driving: what the harness measures has to be what a player
+        gets, and a measure taken without the advice a player would have had is
+        a measure of a different game.
+        """
+        return bool(self.scheme.advises)
 
     @classmethod
     def parse(cls, line: str, **named: Any) -> Script:
@@ -130,4 +146,4 @@ class Script:
                 self.driver.press(name)
             else:
                 self.driver.release(name)
-        return self.driver.controls(session, dt)
+        return self.scheme.controls(session, dt)
