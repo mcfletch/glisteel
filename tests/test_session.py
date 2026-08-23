@@ -553,3 +553,57 @@ class TestWhereARestartStandsTheCar:
                                                  skip=(session.car.body,))
         assert on_the_car is not None and on_the_road is not None
         assert on_the_car > on_the_road
+
+class TestWhatCountsAsHittingSomething:
+    """A crash is *contact*, and two cars in their own lanes never touch.
+
+    What a driver looks at ahead of them is a wide window -- a car in the next
+    lane is worth knowing about. What ends a run is a narrow one: a car the
+    width of the road away is a car that was passed, and calling it a crash
+    ends every run on a two-way road at the first thing coming the other way.
+    """
+
+    @staticmethod
+    def _oncoming(session, across, gap=3.0, speed=30.0):
+        """A car coming the other way, sitting ``across`` metres off the crown.
+
+        ``lane`` is how far to a car's *own* right, so one heading the other way
+        holds the negative of where it sits on the road.
+        """
+        from glisteel.traffic import TrafficCar
+        course = session.world.course
+        index, _distance = course.nearest(session.car.position)
+        here = float(course.stations[index])
+        other = TrafficCar(course, here + gap, heading=-1, limit=speed)
+        other.lane = -across
+        assert other.side() == pytest.approx(across, abs=1e-6)
+        session.world.traffic.cars[:] = [other]
+        return other
+
+    def _ended(self, across):
+        """Whether the run ends with the player on the crown and a car coming
+        the other way ``across`` metres off it."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        self._oncoming(session, session.across() + across)
+        session._watch_for_a_crash()
+        return session.crashes.ended
+
+    def test_one_in_its_own_lane_the_other_way_is_a_pass(self) -> None:
+        """A lane's width away -- both on their own side of a two-lane road:
+        they never touch, however fast they close."""
+        assert self._ended(-3.6) is None
+
+    def test_one_in_the_same_lane_head_on_is_a_crash(self) -> None:
+        assert self._ended(0.0) == 'HIT A CAR'
+
+    def test_one_half_out_of_its_lane_is_a_crash_too(self) -> None:
+        """A sideswipe is contact: what decides it is whether the two of them
+        are in the same piece of road, not which lane it is called."""
+        assert self._ended(-1.5) == 'HIT A CAR'
+
+    def test_the_window_is_narrower_than_what_a_driver_looks_at(self) -> None:
+        """The two are different questions and want different answers."""
+        from glisteel.session import CONTACT_WIDTH
+        from glisteel.traffic import IN_THE_WAY
+        assert CONTACT_WIDTH < IN_THE_WAY

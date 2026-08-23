@@ -10,6 +10,7 @@ it.
 import numpy as np
 import pytest
 
+from OpenGLContext.scenegraph.road import RoadProfile
 from glisteel.world import Course, courses_in
 
 
@@ -104,6 +105,7 @@ class TestTheColliderUnderTheWheels:
     def _corner(self, bank):
         """A quarter circle to the right, banked or not, and its collider."""
         from omi_physics.world import PhysicsWorld
+
         from OpenGLContext.physics.road import RoadColliders
         angle = np.linspace(0.0, np.pi / 2, 60)
         line = np.stack([300.0 - 300.0 * np.cos(angle), np.full(60, 20.0),
@@ -146,6 +148,7 @@ class TestTheColliderUnderTheWheels:
         """What the lean is *for*: without it the two disagree by most of the
         road's own width times the lean."""
         from omi_physics.raycast import raycast
+
         from OpenGLContext.physics.road import RoadColliders
         course, _world = self._corner(
             lambda line: np.full(len(line), 0.10))
@@ -158,3 +161,58 @@ class TestTheColliderUnderTheWheels:
                       np.array([0.0, -1.0, 0.0]), 20.0)
         assert hit is not None
         assert abs(want[1] + 5.0 - hit.distance - want[1]) > 0.2
+
+
+class TestARoadThatIsWiderInPlaces:
+    def _read(self, road):
+        document = {'extras': {'roads': [dict(
+            {'name': 'r', 'centreline': [[0, 0, 0], [0, 0, -10], [0, 0, -20]],
+             'closed': False, 'length': 20.0, 'carriagewayWidth': 7.2},
+            **road)]}}
+        return courses_in(document)[0]
+
+    def test_a_world_that_wrote_a_widening_carries_it(self) -> None:
+        found = self._read({'widening': [0.0, 1.8, 3.6]})
+        assert found.widening_at(2) == pytest.approx(3.6)
+
+    def test_a_world_that_wrote_none_reads_as_one_width(self) -> None:
+        assert self._read({}).widening_at(1) == 0.0
+
+    def test_a_widening_that_does_not_match_the_line_is_dropped(self) -> None:
+        assert self._read({'widening': [0.1]}).widening_at(1) == 0.0
+
+    def test_the_carriageway_is_as_wide_as_the_road_says_it_is(self) -> None:
+        found = self._read({'widening': [0.0, 1.8, 3.6]})
+        assert found.width_at(0) == pytest.approx(7.2)
+        assert found.width_at(2) == pytest.approx(10.8)
+
+    def test_the_collider_is_swept_at_the_width_the_road_has(self) -> None:
+        """A stretch built to be passed on is wider than the road it is on, and
+        a collider at the road's nominal width is a wall down each edge of the
+        extra tarmac."""
+        from omi_physics.raycast import raycast
+        from omi_physics.world import PhysicsWorld
+
+        from OpenGLContext.physics.road import RoadColliders
+        line = _line()
+        world = PhysicsWorld()
+        RoadColliders(world, line, closed=False,
+                      widening=np.full(len(line), 4.0)).update(line[20])
+        # Out past the road's own carriageway edge, where the extra lane is.
+        out = RoadProfile().carriageway_width / 2.0 + 1.5
+        hit = raycast(world, np.array([out, 5.0, -200.0]),
+                      np.array([0.0, -1.0, 0.0]), 20.0)
+        assert hit is not None, "nothing under the lane the road gained"
+        assert 5.0 - hit.distance == pytest.approx(0.0, abs=0.2)
+
+    def test_a_road_of_one_width_is_swept_where_it_always_was(self) -> None:
+        from omi_physics.world import PhysicsWorld
+
+        from OpenGLContext.physics.road import RoadColliders
+        line = _line()
+        plain, wide = (RoadColliders(PhysicsWorld(), line, closed=False,
+                                     widening=extra)
+                       for extra in (None, np.zeros(len(line))))
+        plain.update(line[20])
+        wide.update(line[20])
+        assert plain.triangle_count() == wide.triangle_count()

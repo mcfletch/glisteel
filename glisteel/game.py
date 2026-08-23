@@ -597,7 +597,12 @@ def driver_for(config: Any, session: Any) -> Any:
         return StandIn(scheme, lane=session.lane,
                        style=DriverStyle(margin=config.pace,
                                          maximum_speed=RACING_KPH / 3.6))
-    return Autopilot(session.course, lane=session.lane)
+    # ``--pace`` is how hard the car drives itself, and it means that whichever
+    # way it is being driven: steering directly is not a reason to drive at the
+    # limit of the tyres, and a driver with nothing in hand runs wide the first
+    # time anything puts it off its line.
+    return Autopilot(session.course, lane=session.lane,
+                     style=DriverStyle(margin=config.pace))
 
 
 @dataclass(frozen=True)

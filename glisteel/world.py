@@ -124,6 +124,12 @@ BORE_APPROACH = 24.0
 MOST_LUMINAIRES = 1_000_000
 
 
+#: The kinds of structure a road is carried on that have an **edge**: run wide
+#: on one and there is nothing beside it. A bore is carried too and has no edge,
+#: since what is beside it is the hill it is in.
+CARRIED_ON_AN_EDGE = frozenset(('bridge', 'causeway'))
+
+
 @dataclass(frozen=True)
 class Structure:
     """A stretch of a road that is built rather than laid.
@@ -187,6 +193,12 @@ class Course:
     #: out without a design speed has.
     bank: np.ndarray = dataclasses.field(
         default_factory=lambda: np.zeros(0, dtype='d'))
+    #: How much more carriageway the road has at each point of the centreline,
+    #: in metres. Empty for a road of one width; a lane's worth on a stretch
+    #: built to be passed on, which is where getting by whatever is in front
+    #: does not depend on the driver in front allowing it.
+    widening: np.ndarray = dataclasses.field(
+        default_factory=lambda: np.zeros(0, dtype='d'))
 
     @property
     def lanes(self) -> int:
@@ -210,6 +222,35 @@ class Course:
         if not len(self.bank):
             return 0.0
         return float(self.bank[index % len(self.bank)])
+
+    def widening_at(self, index: int) -> float:
+        """How much wider the carriageway is there, in metres.
+
+        Zero for a road that never widens, which is every road a world wrote no
+        widening for.
+        """
+        if not len(self.widening):
+            return 0.0
+        return float(self.widening[index % len(self.widening)])
+
+    def width_at(self, index: int) -> float:
+        """How far across the carriageway is there, in metres.
+
+        What a driver has to work with: the road's own carriageway, plus
+        whatever a stretch built to be passed on adds to it.
+        """
+        return float(self.carriageway_width) + self.widening_at(index)
+
+    def edges(self) -> tuple:
+        """The stretches with an edge to fall off, as ``(from, to)`` metres.
+
+        A deck and a causeway: beside those there is nothing but whatever the
+        structure was built to cross. A **bore** is carried too and is not one
+        of these -- what is beside a tunnel is the hillside it is driven
+        through, and a wall inside it would be a wall in the middle of the road.
+        """
+        return tuple((one.start, one.end) for one in self.structures
+                     if one.kind in CARRIED_ON_AN_EDGE)
 
     def road_profile(self) -> Any:
         """The cut across the road, as the engine's own profile.
@@ -760,7 +801,8 @@ def courses_in(document: Any) -> list[Course]:
             start=float(road.get('start', 0.0)),
             posted=int(road.get('posted', 0)),
             profile=dict(road.get('profile') or {}),
-            bank=_bank_of(road, len(line)),
+            bank=_along_of(road, 'bank', len(line)),
+            widening=_along_of(road, 'widening', len(line)),
             structures=tuple(
                 Structure(kind=str(one.get('kind', 'dirt')),
                           start=float(one.get('from', 0.0)),
@@ -769,14 +811,15 @@ def courses_in(document: Any) -> list[Course]:
     return out
 
 
-def _bank_of(road: Any, points: int) -> np.ndarray:
-    """A road's lean out of a tileset, or nothing for one that wrote none.
+def _along_of(road: Any, name: str, points: int) -> np.ndarray:
+    """One of a road's per-point figures out of a tileset, or nothing.
 
-    A lean that does not match the line it belongs to is dropped rather than
-    stretched to fit: a world describing half a road is a road to drive flat,
-    and guessing the rest of it puts the car on a corner nobody built.
+    A figure that does not match the line it belongs to is dropped rather than
+    stretched to fit: a world describing half a road is a road to drive as the
+    plain one, and guessing the rest of it puts the car on a corner nobody
+    built.
     """
-    found = np.asarray(road.get('bank') or (), dtype='d').reshape(-1)
+    found = np.asarray(road.get(name) or (), dtype='d').reshape(-1)
     return found if len(found) == points else np.zeros(0, dtype='d')
 
 
@@ -918,7 +961,9 @@ class RaceWorld:
             self.roads.append(RoadColliders(
                 self.physics, road.centreline, road.road_profile(),
                 closed=road.closed,
-                bank=road.bank if len(road.bank) else None))
+                bank=road.bank if len(road.bank) else None,
+                widening=road.widening if len(road.widening) else None,
+                barriers=road.edges()))
         #: The obstacles: boulders and whatever else a world puts in the way.
         #: The ones near the car are in the physics world; the rest are not.
         from OpenGLContext.physics.props import PropColliders
