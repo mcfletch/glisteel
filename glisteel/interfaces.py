@@ -178,6 +178,15 @@ class PhysicsLike(Protocol):
                  position: Any = None) -> Any:
         ...                                      # pragma: no cover - a protocol
 
+    def place_body(self, i: int, position: Any = None,
+                   orientation: Any = None) -> Any:
+        ...                                      # pragma: no cover - a protocol
+
+    def impact_on(self, i: int, above: float = 0.0, skip_static: bool = False,
+                  among: Any = None) -> tuple[int, float] | None:
+        """What struck body ``i`` in the last step, and how fast it closed."""
+        ...                                      # pragma: no cover - a protocol
+
     def step(self, dt: float) -> Any:
         ...                                      # pragma: no cover - a protocol
 

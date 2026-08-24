@@ -31,7 +31,7 @@ from OpenGLContext.telemetry import NOT_RECORDING
 from glisteel.assist import STRENGTH, Straighten
 from glisteel.camera import VIEWS, CameraPose, ChaseCamera
 from glisteel.car import Car, CarSpec
-from glisteel.race import Collisions, OffRoad, RaceTiming, closing_speed, off_course
+from glisteel.race import Collisions, OffRoad, RaceTiming, off_course
 from glisteel.reflections import Reflections
 from glisteel.run import COUNTDOWN, Run
 from glisteel.traffic import IN_THE_WAY
@@ -39,8 +39,8 @@ from glisteel.traffic import IN_THE_WAY
 log = logging.getLogger(__name__)
 
 __all__ = ['Controller', 'Readings', 'Result', 'Session', 'AHEAD_REACH',
-           'CONTACT_REACH', 'CONTACT_WIDTH', 'MAXIMUM_CATCHUP',
-           'PHYSICS_STEP', 'RACE_LAPS', 'STUCK_SECONDS', 'STUCK_SPEED']
+           'MAXIMUM_CATCHUP', 'PHYSICS_STEP', 'RACE_LAPS', 'STUCK_SECONDS',
+           'STUCK_SPEED']
 
 #: The physics step. Fixed, and finer than a frame: a vehicle held up by
 #: springs is stiff, and integrating it at whatever the display manages makes
@@ -75,23 +75,6 @@ LANE_BEHIND = 14.0
 #: that nobody sits looking at a hillside.
 STUCK_SECONDS = 3.0
 STUCK_SPEED = 1.0
-
-#: How far a crash is looked for around the car, in metres: touching distance
-#: and no more. What decides the severity is the closing speed, not the range.
-CONTACT_REACH = 6.0
-
-#: How far **across** the road a crash is looked for, in metres -- two cars'
-#: worth of half-width, which is the distance at which they are in the same
-#: piece of road.
-#:
-#: Narrower than :data:`~glisteel.traffic.IN_THE_WAY`, and deliberately: what a
-#: driver *looks at* ahead of them is a wide window, because a car in the next
-#: lane is worth knowing about, and what *ends a run* is a narrow one, because a
-#: run ends on contact. Asked at the driver's width instead, a car passed
-#: safely in its own lane on a two-way road is a crash the moment the player
-#: drifts a foot off their own line -- which ends every run at the first thing
-#: coming the other way.
-CONTACT_WIDTH = 2.0
 
 #: How high over the grid a car is put before it is dropped onto it, in metres,
 #: and the longest it is left to settle. The player is handed a car that is
@@ -506,12 +489,23 @@ class Session:
             self.car.control(*self.run.allow(*wanted))
             self.car.update(PHYSICS_STEP)
             self.world.physics.step(PHYSICS_STEP)
+            # Inside the step, and immediately after it: what the car hit is
+            # answered by the step that resolved it, and a frame is several
+            # steps. Asked once a frame instead, a crash registers or does not
+            # according to where the frames happened to fall.
+            self._watch_for_a_crash()
             self._accumulated -= PHYSICS_STEP
         self.car.follow(elapsed)
-        if self.world.traffic is not None and not self.run.over:
-            self.world.traffic.update(self.car.position, elapsed,
-                                      speed=self.car.speed())
-            self._watch_for_a_crash()
+        if self.world.traffic is not None:
+            if self.run.over:
+                # Said rather than left unsaid: the cars' bodies carry their
+                # velocity, so traffic that stops being driven and is not told
+                # to stop goes on integrating down a road nobody is putting it
+                # on, and the collider parts company with what draws it.
+                self.world.traffic.halt()
+            else:
+                self.world.traffic.update(self.car.position, elapsed,
+                                          speed=self.car.speed())
         self._recover_if_stuck(elapsed)
         self._mark_the_end()
         pose = self.camera.update(self.car, elapsed)
@@ -667,25 +661,38 @@ class Session:
     def _watch_for_a_crash(self) -> None:
         """End the run if the car met another one hard enough.
 
-        The closing speed against the nearest car in front, which is what the
-        severity of a crash is: a car alongside at the same speed is an
-        overtake, and the back of one at forty metres a second is not.
+        The car's own collider against theirs, asked of the physics rather than
+        worked out from how near the two are and how fast: they touched or they
+        did not, and how hard is the speed they were closing at along the
+        contact when they met
+        (:meth:`omi_physics.world.PhysicsWorld.impact_on`).
 
-        Looked for at **contact width** rather than at the width a driver reads
-        the road ahead at (:data:`CONTACT_WIDTH`): a car going the other way in
-        its own lane is a car being passed, not a car being hit.
+        That moment is the only one the number survives -- resolving a contact
+        is exactly cancelling the velocity that measures it, so a square-on
+        impact read even one step later measures as nothing while a glancing
+        one measures almost undiminished. It is also why this runs inside the
+        fixed step: contacts belong to the step that made them.
+
+        Two cars passing in their own lanes never touch, so nothing here has to
+        decide how far apart is far enough. A scrape along a wing is a contact
+        too, and one the car survives, because the speed *across* the contact
+        is not the speed into it.
+
+        Asked about the traffic and nothing else, because what ends a run here
+        is other cars: the road is under the wheels on every step, and a car
+        that clipped a parapet and a rival in the same one would otherwise be
+        told about the parapet and drive on.
         """
-        ahead = self.world.traffic.ahead_of(self.car.position,
-                                            self.car.forward(),
-                                            reach=CONTACT_REACH,
-                                            width=CONTACT_WIDTH)
-        if not ahead:
+        traffic = self.world.traffic
+        if traffic is None or self.run.over:
             return
-        other = ahead[0]
-        closing = closing_speed(self.car.velocity(), other.velocity(),
-                                other.position() - self.car.position)
-        if self.crashes.update(max(closing, 0.0)) is not None:
-            self._mark_the_crash(other, closing)
+        struck = self.world.physics.impact_on(self.car.body,
+                                              among=traffic.bodies)
+        if struck is None:
+            return
+        body, closing = struck
+        if self.crashes.update(closing) is not None:
+            self._mark_the_crash(traffic.car_of(body), closing)
 
     def _mark_the_crash(self, other: Any, closing: float) -> None:
         """Write down what the car hit, on the frame it hit it.

@@ -1,10 +1,9 @@
 """What decides how a run is going, and what ends it.
 
-Four rules, each fed a reading and a step and each answering once: how far round
-the car is (:class:`RaceTiming`), whether it is on the road and what it is
-driving on (:class:`OffRoad`), whether it hit something hard enough to matter
-(:class:`Collisions`), and how fast two things are coming together
-(:func:`closing_speed`). They share a shape -- fed, then asked, with a
+Three rules, each fed a reading and a step and each answering once: how far
+round the car is (:class:`RaceTiming`), whether it is on the road and what it is
+driving on (:class:`OffRoad`), and whether it hit something hard enough to
+matter (:class:`Collisions`). They share a shape -- fed, then asked, with a
 ``restart`` -- so a session composes them without knowing what each is about.
 
 
@@ -27,7 +26,7 @@ from omi_physics.vehicle import Surface
 
 __all__ = ['Collisions', 'Lap', 'OffRoad', 'RaceTiming',
            'LOST', 'PATIENCE', 'ROUGH', 'SECTORS', 'SURVIVABLE',
-           'TARMAC', 'VERGE', 'closing_speed', 'off_course']
+           'TARMAC', 'VERGE', 'off_course']
 
 #: How many sectors a circuit is divided into for the purpose of saying a lap
 #: was completed rather than cut. Enough that a shortcut across the middle
@@ -247,10 +246,9 @@ SURVIVABLE = 9.0
 class Collisions:
     """Whether the car hit something hard enough to end the run.
 
-    Fed the *closing speed* rather than a contact: a car is always touching the
-    road, and what decides a crash is how fast it arrived at whatever else it
-    found. Which cars and boulders are near enough to matter is the physics
-    world's business; this is only the rule about what counts.
+    Fed how fast the car was closing on whatever it struck, along the contact
+    they met at. What was struck, and whether it was struck at all, is the
+    physics world's business; this is only the rule about what counts.
     """
 
     survivable: float = SURVIVABLE
@@ -275,20 +273,3 @@ class Collisions:
     def restart(self) -> None:
         """Back on the grid: nothing has happened yet."""
         self.ended = None
-
-
-def closing_speed(mine: Any, theirs: Any, offset: Any) -> float:
-    """How fast two things are coming together, in metres per second.
-
-    The relative velocity along the line between them, which is the number a
-    crash's severity is about. Taken as a difference of speeds instead, two cars
-    meeting head-on at thirty read as closing at nothing, and one being overtaken
-    reads as a crash.
-    """
-    between = np.asarray(offset, dtype='d').reshape(-1)[:3]
-    length = float(np.linalg.norm(between))
-    if length < 1e-9:
-        return 0.0
-    return float(np.dot(np.asarray(mine, dtype='d').reshape(-1)[:3]
-                        - np.asarray(theirs, dtype='d').reshape(-1)[:3],
-                        between / length))

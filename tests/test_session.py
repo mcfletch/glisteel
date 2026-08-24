@@ -425,6 +425,131 @@ class TestWhenTheCarNeedsItsOwnLight:
         assert not _session(scenarios.circuit()).in_the_dark()
 
 
+def _traffic_at(session, across, station=45.0, speed=8.0, heading=1):
+    """One car on the road at ``across`` metres right of the crown.
+
+    ``station`` is how far up the road from the player it starts.  ``lane`` is
+    how far to a car's *own* right it sits, so one heading the other way holds
+    the negative of where it is on the road.
+    """
+    from glisteel.traffic import TrafficCar
+    course = session.world.course
+    index, _distance = course.nearest(session.car.position)
+    here = float(course.stations[index])
+    other = TrafficCar(course, here + station, heading=heading,
+                       limit=speed, speed=speed)
+    other.lane = float(across) * heading
+    assert other.side() == pytest.approx(across, abs=1e-6)
+    session.world.traffic.release()
+    return session.world.traffic.put_out(other)
+
+
+def _hold(session, speed):
+    """Put the car back at ``speed`` along its own nose, keeping its rise."""
+    upright = float(session.world.physics.linear_velocity[session.car.body][1])
+    session.world.physics.linear_velocity[session.car.body] = (
+        session.car.forward() * float(speed) + np.array([0.0, upright, 0.0]))
+
+
+def _drive_into(session, speed, frame=FRAME, seconds=6.0):
+    """Launch the car up the road at ``speed`` and let it arrive.
+
+    The speed is put on the car rather than driven up to: what these are about
+    is how fast it was going when it got there, and a hundred metres of
+    accelerating first is a hundred metres of nothing being tested.
+    """
+    _hold(session, speed)
+    for _ in range(int(seconds / frame)):
+        session.advance(frame)
+        if session.crashes.ended is not None:
+            break
+    return session.crashes.ended
+
+
+def _touching(session, other):
+    """Whether the car and that one are in contact this step."""
+    pair = {session.car.body, session.world.traffic.body_of(other)}
+    return any({contact.a, contact.b} == pair
+               for contact in session.world.physics.contacts)
+
+
+class TestHittingACar:
+    """A run ends where the two cars *touch*, and how hard they were closing
+    when they did is what decides it.
+
+    Asked of the physics rather than worked out from how near the two are and
+    how fast: a pair either met or did not, and a rule reading a closing speed
+    off their positions has to be sampled at exactly the right moment to see
+    the impact at all -- one step later the solver has already taken that
+    velocity away, and square-on is the case it takes all of.
+    """
+
+    def test_running_into_the_back_of_one_ends_the_run(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        _traffic_at(session, session.across())
+        assert _drive_into(session, 40.0) == 'HIT A CAR'
+
+    @pytest.mark.parametrize('fps,speed', [(60, 40.0), (60, 95.0),
+                                           (30, 40.0), (30, 95.0)])
+    def test_and_does_so_wherever_the_frames_happen_to_fall(self, fps, speed
+                                                            ) -> None:
+        """Nothing changes between these drives but the distance the other car
+        starts at, which moves where the frames land against the approach.
+
+        A car at ninety-five metres a second covers three of them in a frame at
+        thirty, and the last stretch before two bumpers touch is shorter than
+        that. So a rule sampled once a frame reads the approach on some of
+        these runs and reads the rebound on the rest, and a player driving into
+        the back of a lorry finds out whether the game noticed by how the
+        frames happened to fall. The rule runs on the physics clock instead,
+        which every one of these drives shares.
+        """
+        for shift in (0.0, 0.5, 1.0, 1.5, 2.0, 2.5):
+            session = _session(traffic=1)
+            session.advance(1.0 / fps)
+            _traffic_at(session, session.across(), station=45.0 + shift)
+            assert _drive_into(session, speed, frame=1.0 / fps) == 'HIT A CAR', (
+                'no crash at %d fps and %.0f m/s with the car %.1f m further on'
+                % (fps, speed, shift))
+
+    def test_clipping_one_off_centre_ends_it_too(self) -> None:
+        """A glancing blow is contact: half a car's width over is still a car
+        being hit rather than a car being passed."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        _traffic_at(session, session.across() + 1.2)
+        assert _drive_into(session, 40.0) == 'HIT A CAR'
+
+    def test_catching_one_up_and_touching_it_does_not(self) -> None:
+        """Two cars going nearly the same speed meet at the difference between
+        them, which is a nudge. The car ahead is a car, not a wall: what it is
+        doing counts against what the player is doing -- read as a wall, this
+        is a thirty metre a second impact and the end of the run."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        other = _traffic_at(session, session.across(), station=12.0, speed=26.0)
+        met = False
+        for _ in range(int(6.0 / FRAME)):
+            # Held up to the moment they touch and not past it: what happens
+            # after contact is the game's, not the harness leaning on it.
+            if not met:
+                _hold(session, 30.0)
+            session.advance(FRAME)
+            met = met or _touching(session, other)
+        assert met, 'the two never met'
+        assert session.crashes.ended is None
+
+    def test_one_going_the_other_way_in_its_own_lane_is_a_pass(self) -> None:
+        """Both on their own side of a two-lane road: they never touch,
+        however fast they close."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        _traffic_at(session, session.across() - 3.6, station=120.0,
+                    speed=30.0, heading=-1)
+        assert _drive_into(session, 40.0) is None
+
+
 class TestWritingDownACrash:
     """A run that ends against another car is read backwards from the moment
     it did, and "HIT A CAR" on its own says nothing about which car or where
@@ -445,56 +570,53 @@ class TestWritingDownACrash:
         return kept
 
     @staticmethod
-    def _head_on(session, gap=3.0, speed=30.0):
-        """An oncoming car in whichever lane the player's car is in."""
-        from glisteel.traffic import TrafficCar
-        course = session.world.course
-        index, _distance = course.nearest(session.car.position)
-        here = float(course.stations[index])
-        other = TrafficCar(course, here + gap, heading=-1, limit=speed)
-        other.lane = -session.across()
-        session.world.traffic.cars[:] = [other]
-        return other
+    def _crash(session, across=0.0, speed=40.0, heading=1):
+        """Drive into a car, having started keeping what gets written down."""
+        other = _traffic_at(session, session.across() + across,
+                            station=120.0 if heading < 0 else 45.0,
+                            speed=30.0 if heading < 0 else 8.0, heading=heading)
+        kept = TestWritingDownACrash._kept(session)
+        assert _drive_into(session, speed) == 'HIT A CAR'
+        return kept, other
 
     def test_it_says_what_the_car_hit(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        self._head_on(session)
-        kept = self._kept(session)
-        session._watch_for_a_crash()
-        assert [name for name, _ in kept] == ['crash']
+        kept, _other = self._crash(session)
+        assert [name for name, _ in kept] == ['crash', 'drive-ended']
         fields = kept[0][1]
-        assert fields['oncoming'] is True
+        assert fields['oncoming'] is False
         assert fields['closing'] > 9.0
-        assert fields['gap'] == pytest.approx(3.0, abs=1.0)
+        assert fields['gap'] < 8.0
+
+    def test_and_that_one_was_coming_the_other_way(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        kept, _other = self._crash(session, heading=-1)
+        assert kept[0][1]['oncoming'] is True
 
     def test_and_which_side_of_the_road_each_of_them_was_on(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        self._head_on(session)
-        kept = self._kept(session)
-        session._watch_for_a_crash()
+        kept, other = self._crash(session)
         fields = kept[0][1]
-        assert fields['across'] == pytest.approx(session.across(), abs=0.01)
-        assert fields['theirs'] == pytest.approx(session.across(), abs=0.5)
+        assert fields['across'] == pytest.approx(session.across(), abs=0.5)
+        assert fields['theirs'] == pytest.approx(other.side(), abs=0.5)
 
     def test_and_whether_the_driver_was_part_way_past_something(self) -> None:
         session = _session(traffic=1, driver=_Pedals())
         session.advance(FRAME)
         session.driver.overtaking = True
-        self._head_on(session)
-        kept = self._kept(session)
-        session._watch_for_a_crash()
+        kept, _other = self._crash(session)
         assert kept[0][1]['passing'] is True
 
     def test_a_crash_is_written_down_once_rather_than_every_frame(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        self._head_on(session)
-        kept = self._kept(session)
+        kept, _other = self._crash(session)
         for _ in range(5):
-            session._watch_for_a_crash()
-        assert [name for name, _ in kept] == ['crash']
+            session.advance(FRAME)
+        assert [name for name, _ in kept] == ['crash', 'drive-ended']
 
 
 class TestWhereARestartStandsTheCar:
@@ -554,56 +676,56 @@ class TestWhereARestartStandsTheCar:
         assert on_the_car is not None and on_the_road is not None
         assert on_the_car > on_the_road
 
-class TestWhatCountsAsHittingSomething:
-    """A crash is *contact*, and two cars in their own lanes never touch.
+class TestACarAheadIsACarRatherThanAWall:
+    """Traffic is driven along the road by the game rather than by the solver,
+    and a body moved that way carries its velocity or it carries nothing.
 
-    What a driver looks at ahead of them is a wide window -- a car in the next
-    lane is worth knowing about. What ends a run is a narrow one: a car the
-    width of the road away is a car that was passed, and calling it a crash
-    ends every run on a two-way road at the first thing coming the other way.
+    Everything downstream reads that: what the two cars do to each other on
+    contact, and how hard the physics says they met.
     """
 
-    @staticmethod
-    def _oncoming(session, across, gap=3.0, speed=30.0):
-        """A car coming the other way, sitting ``across`` metres off the crown.
-
-        ``lane`` is how far to a car's *own* right, so one heading the other way
-        holds the negative of where it sits on the road.
-        """
-        from glisteel.traffic import TrafficCar
-        course = session.world.course
-        index, _distance = course.nearest(session.car.position)
-        here = float(course.stations[index])
-        other = TrafficCar(course, here + gap, heading=-1, limit=speed)
-        other.lane = -across
-        assert other.side() == pytest.approx(across, abs=1e-6)
-        session.world.traffic.cars[:] = [other]
-        return other
-
-    def _ended(self, across):
-        """Whether the run ends with the player on the crown and a car coming
-        the other way ``across`` metres off it."""
+    def test_its_body_is_told_how_fast_it_is_going(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        self._oncoming(session, session.across() + across)
-        session._watch_for_a_crash()
-        return session.crashes.ended
+        other = _traffic_at(session, session.across(), speed=26.0)
+        session.advance(FRAME)
+        body = session.world.traffic.body_of(other)
+        assert float(np.linalg.norm(
+            session.world.physics.linear_velocity[body])) == pytest.approx(
+                26.0, abs=0.5)
 
-    def test_one_in_its_own_lane_the_other_way_is_a_pass(self) -> None:
-        """A lane's width away -- both on their own side of a two-lane road:
-        they never touch, however fast they close."""
-        assert self._ended(-3.6) is None
+    def test_and_can_be_traced_back_from_the_body_that_was_hit(self) -> None:
+        """What the physics answers with is a body index."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        other = _traffic_at(session, session.across())
+        traffic = session.world.traffic
+        assert traffic.car_of(traffic.body_of(other)) is other
+        assert traffic.car_of(session.car.body) is None
 
-    def test_one_in_the_same_lane_head_on_is_a_crash(self) -> None:
-        assert self._ended(0.0) == 'HIT A CAR'
+    def test_and_a_retired_car_leaves_nothing_behind(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        other = _traffic_at(session, session.across())
+        body = session.world.traffic.body_of(other)
+        session.world.traffic.release()
+        assert session.world.traffic.car_of(body) is None
 
-    def test_one_half_out_of_its_lane_is_a_crash_too(self) -> None:
-        """A sideswipe is contact: what decides it is whether the two of them
-        are in the same piece of road, not which lane it is called."""
-        assert self._ended(-1.5) == 'HIT A CAR'
-
-    def test_the_window_is_narrower_than_what_a_driver_looks_at(self) -> None:
-        """The two are different questions and want different answers."""
-        from glisteel.session import CONTACT_WIDTH
-        from glisteel.traffic import IN_THE_WAY
-        assert CONTACT_WIDTH < IN_THE_WAY
+    def test_and_a_car_nobody_is_driving_any_more_stands_still(self) -> None:
+        """A run that has ended stops the traffic, and a body left with a
+        velocity would carry on down a road nobody is putting it on -- an
+        invisible car a street away from the one being drawn."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        other = _traffic_at(session, session.across())
+        assert _drive_into(session, 40.0) == 'HIT A CAR'
+        body = session.world.traffic.body_of(other)
+        stopped = session.world.physics.position[body].copy()
+        drawn = np.asarray(session.world.traffic.node_of(other).translation)
+        for _ in range(120):
+            session.advance(FRAME)
+        assert float(np.linalg.norm(
+            session.world.physics.position[body] - stopped)) < 0.1
+        assert float(np.linalg.norm(
+            np.asarray(session.world.traffic.node_of(other).translation)
+            - drawn)) < 0.1

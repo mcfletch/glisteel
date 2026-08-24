@@ -19,6 +19,7 @@ for the four wheels a second of physics each.
 from __future__ import annotations
 
 import math
+from collections.abc import KeysView
 from typing import Any
 
 import numpy as np
@@ -476,6 +477,9 @@ class Traffic:
         # by identity already, so the two behave the same -- except that an id
         # is reused once its object is collected, and a mapping outliving the
         # thing it describes is a bug that waits for the allocator.
+        #: The same mapping read the other way, for anything the physics has
+        #: answered about a body index -- what was hit, rather than what to hit.
+        self._by_body: dict[int, TrafficCar] = {}
         #: One collider shape per kind, since a van and a hatchback are not the
         #: same thing to run into.
         self._shapes: dict[str, Any] = {}
@@ -582,6 +586,52 @@ class Traffic:
         """The physics body driving along under one car."""
         return self._bodies[car]
 
+    def car_of(self, body: int) -> TrafficCar | None:
+        """Which car a physics body belongs to, or None for anything else.
+
+        What the physics answers with is a body index, so this is how a caller
+        turns "something was hit" into "which car" -- and None is the ordinary
+        answer for the road, a bank or a bridge parapet.
+        """
+        return self._by_body.get(int(body))
+
+    @property
+    def bodies(self) -> KeysView[int]:
+        """The physics bodies these cars are, for asking the world about them.
+
+        A set to test membership against, which is how a question about the
+        traffic is put to something that knows only body indices.
+        """
+        return self._by_body.keys()
+
+    def put_out(self, car: TrafficCar) -> TrafficCar:
+        """Put a car the caller made themselves on the road, and return it.
+
+        The cars this manages are its own -- where they are, what kind and how
+        many is what makes a road feel used, and none of it is anybody else's
+        business. A set piece is: a scenario that wants a lorry on the crest of
+        a hill, or a test that wants one particular vehicle in one particular
+        place. Such a car is drawn and given a collider exactly as a spawned
+        one is, and is retired by the same rules once it is left behind.
+        """
+        self.cars.append(car)
+        self._show(car)
+        return car
+
+    def halt(self) -> None:
+        """Stop every car where it stands, and leave it there.
+
+        For a caller that has stopped driving this: the cars keep their bodies
+        and their colliders, and those bodies carry a velocity, so a manager
+        left un-driven would go on integrating them down a road nobody is
+        putting them on -- an invisible car half a street from the one being
+        drawn. Idempotent, and undone by the next :meth:`update`.
+        """
+        if self.physics is None:
+            return
+        for body in self._by_body:
+            self.physics.linear_velocity[body] = 0.0
+
     def release(self) -> None:
         """Take every car off the road."""
         for car in list(self.cars):
@@ -604,10 +654,12 @@ class Traffic:
         if shape is None:
             shape = self.physics.add_shape(model.Shape.box(car.kind.size()))
             self._shapes[car.kind.name] = shape
-        self._bodies[car] = int(self.physics.add_body(
+        body = int(self.physics.add_body(
             model.Motion(type=model.KINEMATIC, mass=1200.0),
             collider=model.Collider(shape=shape),
             position=tuple(self._centre(car))))
+        self._bodies[car] = body
+        self._by_body[body] = car
 
     def _art(self, car: TrafficCar) -> Any:
         """One vehicle to look at, painted in this car's own colour.
@@ -653,11 +705,23 @@ class Traffic:
             self.node.children = [one for one in self.node.children
                                   if one is not node]
         body = self._bodies.pop(car, None)
-        if body is not None and self.physics is not None:
-            self.physics.remove_body(body)
+        if body is not None:
+            self._by_body.pop(body, None)
+            if self.physics is not None:
+                self.physics.remove_body(body)
 
     def _follow(self) -> None:
-        """Put every car's node and body where the car now is."""
+        """Put every car's node and body where the car now is, and how fast.
+
+        The **velocity** as well as the pose, because a kinematic body without
+        one is a wall: the solver resolves against the difference between two
+        bodies' velocities, so a car doing thirty that is written down as still
+        both throws the player off like a parked one and reads as having been
+        hit at thirty by anybody who merely caught up with it. It is also what
+        carries a car along between the frames this runs on -- the physics
+        steps several times to each of them, and a pose written once a frame
+        would otherwise stand still for all but the first.
+        """
         for car in self.cars:
             at = self._standing(car)
             node = self._drawn.get(car)
@@ -666,8 +730,9 @@ class Traffic:
                 node.rotation = (0.0, 1.0, 0.0, car.heading_angle())
             body = self._bodies.get(car)
             if body is not None and self.physics is not None:
-                self.physics.position[body] = self._centre(car, at)
-                self.physics.orientation[body] = _yaw(car.heading_angle())
+                self.physics.place_body(body, self._centre(car, at),
+                                        _yaw(car.heading_angle()))
+                self.physics.linear_velocity[body] = car.velocity()
 
     def _standing(self, car: TrafficCar) -> np.ndarray:
         """Where a car meets the road: its own position, on the surface."""

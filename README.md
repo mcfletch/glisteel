@@ -619,6 +619,31 @@ A scripted drive (`glisteel.trace.drive`) begins at the green light: what it
 measures is the car, and a start sequence in front of it would put every hold in
 the script six seconds later than it reads.
 
+### What ends a run
+
+Three things, in `glisteel.race`. Two are about where the car is: off the
+carriageway for `PATIENCE` seconds (2.5 — long enough to slide a wheel wide and
+gather it up) ends it *mired off the road*, and getting `LOST` road-widths from
+the centreline ends it *off the road* the moment it happens, because there is no
+gathering that up.
+
+The third is hitting another car. **A crash is contact**, asked of the physics
+rather than worked out from how near two cars are: they touched or they did not.
+How hard is the speed the two were closing at along the contact when they met,
+and above `SURVIVABLE` (9 m/s) the run ends with `HIT A CAR`. Below it, a car
+brushed at walking pace or caught up to and nudged is a scrape, and the race
+carries on.
+
+Two things follow from asking the physics rather than the geometry. The speed is
+the one between the *pair*, so a car ahead doing 100 km/h that you touch at 105
+has been hit at five, not at a hundred and five. And the reading is taken inside
+the fixed physics step, on the step that made the contact
+(`omi_physics`' `PhysicsWorld.impact_on`) — resolving a contact is precisely
+cancelling the velocity that measures how hard it was, so read a step later a
+square-on impact measures as nothing while a glancing one measures almost
+undiminished, and whether a crash registered would come down to where the frames
+happened to fall.
+
 ### Steering, and what the game does about it
 
 A keyboard says a key is down or it is not, and a real driver's hands say a
