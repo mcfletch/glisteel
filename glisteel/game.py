@@ -513,7 +513,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             return
         self.hud.show(self.session.readout())
 
-    def SwapBuffers(self, *args: Any) -> Any:    # pragma: no cover - needs a window
+    def presentFrame(self) -> Any:               # pragma: no cover - needs a window
         """Present the frame, and take the picture when one is asked for.
 
         A capture is settled by *drawn frames*, so it is ticked here rather than
@@ -525,7 +525,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             self.tickRecording()
         capture = getattr(self, '_capture', None)
         if capture is not None and capture.tick():
-            result = super().SwapBuffers(*args)
+            result = super().presentFrame()
             self.setCurrent()
             sys.stdout.write('captured %s\n' % (self.config.capture,))
             wanted = self.config.picture_track
@@ -543,12 +543,12 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             self._finish()
             # Straight out, rather than back into a main loop that is mid-frame
             # and has just been told to present one: the backend owns the loop
-            # and offers no way to leave it from inside a buffer swap. Every
-            # teardown that matters has happened above, which is what
-            # :meth:`_finish` is for -- and is what this used to skip.
+            # and offers no way to leave it from inside presenting a frame.
+            # Every teardown that matters has happened above, which is what
+            # :meth:`_finish` is for.
             os._exit(0)
             return result
-        return super().SwapBuffers(*args)
+        return super().presentFrame()
 
     def OnQuit(self, *args: Any) -> None:        # pragma: no cover - needs a window
         self._finish()
