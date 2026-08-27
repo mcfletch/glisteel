@@ -26,7 +26,7 @@ classifiers = [
 # The engine renders and streams the world; omi_physics holds the car up. The
 # tools that *make* a world are not a dependency of driving one.
 dependencies = [
-    "OpenGLContext[glfw]>=3.0.0a1",
+    "OpenGLContext[glfw]>=3.0.0a3",
     "omi_physics>=0.3.0",
     "numpy>=2.0",
 ]
