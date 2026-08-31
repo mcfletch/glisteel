@@ -1,6 +1,6 @@
 """GLinting Steel: drive a car round a baked world.
 
-    oglc-bake --output /tmp/world        # make a world (OpenGLContext-editor)
+    glisteel-bake --output /tmp/world    # make a world (glisteel-editor)
     glisteel /tmp/world/tileset.json     # drive it
 
 Keys::
@@ -738,6 +738,11 @@ def build_parser() -> argparse.ArgumentParser:
                         metavar='SECONDS',
                         help='how long to let the world stream in before '
                              '--capture (default: %(default)s)')
+    parser.add_argument('--capture-frame', type=int, default=0, metavar='N',
+                        help='capture on frame N rather than after '
+                             '--capture-delay seconds. A frame count is where '
+                             'the drive has got to, so replaying a recorded '
+                             'session gives the same picture every time')
     parser.add_argument('--record', metavar='PATH',
                         help='record the drive to PATH (an .mp4) and exit when '
                              'the recording is done')
@@ -788,7 +793,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(
             'no world at %s -- bake one with %r\n'
             % (options.world,
-               'oglc-bake --output %s' % (os.path.dirname(options.world)
+               'glisteel-bake --output %s' % (os.path.dirname(options.world)
                                           or 'world',)))
         return 1
     return _run(options, width, height)               # pragma: no cover - a window
@@ -868,6 +873,14 @@ def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
     The world streams while the clock runs, so the capture waits; with
     ``--drive-seconds`` the car is driven forward first, which is how a picture
     of the game gets a car that is going somewhere.
+
+    Two ways to say when. ``--capture-delay``/``--drive-seconds`` are a wall
+    clock, which is what waits for a world that streams over the network, and
+    which lands the car *near* a place rather than on it. ``--capture-frame`` is
+    a count of frames drawn, which is where the drive has got to: replaying a
+    recorded session (``OPENGLCONTEXT_TELEMETRY_REPLAY``) puts the same times
+    and the same input on the same frames, so frame N is the same picture on
+    every machine.
     """
     from OpenGLContext.capture import SettleCapture
 
@@ -877,7 +890,8 @@ def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
         def OnInit(self) -> None:
             self._capture = None
             super().OnInit()
-            if options.drive_seconds and self.session is not None:
+            if (options.drive_seconds or options.capture_frame) \
+                    and self.session is not None:
                 # A picture of a car going somewhere is not a picture of a
                 # standing start, so the lights are dropped and the throttle
                 # goes down. Without it the picture is of the grid, which is
@@ -886,10 +900,15 @@ def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
                 if self.keyboard is not None:
                     for name in CONTROLS['throttle']:
                         self.keyboard.press(name)
-            self._capture = SettleCapture(
-                options.capture,
-                delay=options.capture_delay + options.drive_seconds,
-                min_frames=30)
+            if options.capture_frame:
+                self._capture = SettleCapture(
+                    options.capture, delay=0.0,
+                    min_frames=options.capture_frame)
+            else:
+                self._capture = SettleCapture(
+                    options.capture,
+                    delay=options.capture_delay + options.drive_seconds,
+                    min_frames=30)
 
     CapturingContext.ContextMainLoop(size=(width, height))
 

@@ -5,8 +5,8 @@ car, a forest road, and a world too big to load. The world streams in around the
 player as they drive it.
 
 ```bash
-pip install glisteel OpenGLContext-editor
-oglc-bake --output /tmp/world
+pip install glisteel glisteel-editor
+glisteel-bake --output /tmp/world
 glisteel /tmp/world/tileset.json
 ```
 
@@ -193,6 +193,37 @@ overrides what the encoder picks from the frame size and rate.
 Recording needs the engine's video extra, `pip install OpenGLContext[video]`, and
 an encoder it can reach — today an NVIDIA card on Linux.
 
+### Taking a picture, twice the same
+
+```bash
+glisteel /tmp/world/tileset.json --autopilot --view chase --no-hud \
+    --capture shot.png --capture-delay 6 --drive-seconds 22
+```
+
+renders one frame once the world has settled and exits. `--capture-delay` waits
+for the world to stream in and `--drive-seconds` drives the car first, so the
+picture is of a car going somewhere rather than of a standing start.
+
+Both are a wall clock, which puts the car *near* a place rather than on it: how
+far it gets in twenty-two seconds depends on how the frames fell. Two things
+make the same command give the same picture:
+
+- **`--capture-frame N`** captures on frame N instead of after a delay, and a
+  frame count is where the drive has got to.
+- **Replaying a recorded session** feeds the engine's clock the recorded frame
+  times and puts the session's randomness back, so the drive plays out the same
+  way it did when it was recorded.
+
+```bash
+OPENGLCONTEXT_TELEMETRY_REPLAY=sessions/doc-lap.jsonl \
+  glisteel baked-world/tileset.json --size 1600x900 --view chase --no-hud \
+  --autopilot --capture-frame 1297 --capture viaduct.png
+```
+
+Two runs of that write the same bytes. [sessions/](sessions/) holds the recorded
+lap and the frames worth knowing in it; `OPENGLCONTEXT_TELEMETRY=<path>` is what
+records a new one.
+
 **The default view is the driver's seat.** A route is a thing you drive
 *through*, and a forest read from seven metres up and behind reads as scenery
 rather than as trees you are passing between. `c` cycles cockpit, chase and
@@ -208,9 +239,9 @@ The releases page carries two builds of each tagged version, neither of which
 needs Python installed:
 
 * **`glisteel-<version>-windows-x64.zip`** — unzip it anywhere. `glisteel.exe`
-  drives, and `oglc-bake.exe` beside it bakes a world to drive.
+  drives, and `glisteel-bake.exe` beside it bakes a world to drive.
 * **`glisteel_<version>_amd64.deb`** — installs the game and the Python that
-  runs it under `/opt/glisteel`, with `glisteel` and `oglc-bake` in
+  runs it under `/opt/glisteel`, with `glisteel` and `glisteel-bake` in
   `/usr/games`, and puts the game in the desktop menu. `apt install
   ./glisteel_*.deb` rather than `dpkg -i`, so that the OpenGL and X11 libraries
   it asks the machine for are resolved.
@@ -220,7 +251,7 @@ one worth driving is the one you made, so a fresh install opens on an empty
 track list. Bake one first:
 
 ```bash
-oglc-bake --output my-world --forest tiles
+glisteel-bake --output my-world --forest tiles
 glisteel my-world/tileset.json
 ```
 
@@ -257,7 +288,7 @@ pyinstaller packaging/glisteel.spec --noconfirm     # dist/glisteel/
 uv python install --install-dir runtime 3.12
 oglc-deb --project . --extras bake --runtime runtime \
     --requirement packaging/requirements-stack.txt \
-    --command glisteel --command oglc-bake --output dist
+    --command glisteel --command glisteel-bake --output dist
 ```
 
 Almost nothing about the engine is in the spec file: PyOpenGL and OpenGLContext
@@ -531,7 +562,7 @@ colour.
 
 The frame rate is set by how much of the world is on screen and how finely it is
 drawn. `--sse` trades sharpness for speed (higher is coarser); a shallower world
-(`oglc-bake --depth 3`) draws fewer tiles.
+(`glisteel-bake --depth 3`) draws fewer tiles.
 
 At 1080p a frame is about 10 ms of drawing, 5 ms of physics and 3 ms of
 everything else. Getting there took four things, each in the engine underneath
@@ -718,7 +749,7 @@ named on the command line it offers whatever is in the library, and with exactly
 one world in it, drives that.
 
 A world is a directory of tiles plus a `world.json` manifest beside them, which
-`oglc-bake` writes: what the world is called, how long its road is, how much of
+`glisteel-bake` writes: what the world is called, how long its road is, how much of
 that is viaduct, bore and causeway, and which picture shows it. The library is
 every such directory under
 
@@ -730,8 +761,8 @@ which is `OpenGLContext.userpaths` — the same rule the engine's settings and
 asset cache follow. Bake into it and the game offers it:
 
 ```bash
-oglc-bake --output ~/.config/glisteel/tracks/ashdown-forest --seed 11
-oglc-bake --output ~/.config/glisteel/tracks/beacon-hill --seed 23 --extent 3072
+glisteel-bake --output ~/.config/glisteel/tracks/ashdown-forest --seed 11
+glisteel-bake --output ~/.config/glisteel/tracks/beacon-hill --seed 23 --extent 3072
 glisteel                       # both are offered, by their own pictures
 ```
 

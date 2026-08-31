@@ -42,7 +42,7 @@ MENU_COLUMNS = 44
 
 #: What the chooser says when there is nothing to drive. Not an error: a fresh
 #: install is exactly this, and the answer is to bake a world.
-NO_TRACKS = 'No tracks yet — bake one with oglc-bake'
+NO_TRACKS = 'No tracks yet — bake one with glisteel-bake'
 
 #: What stands where a best lap would go on a track never driven.
 NEVER_DRIVEN = '--:--.---'

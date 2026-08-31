@@ -403,7 +403,7 @@ class TestAskingForAWorldThatIsNotThere:
     def test_it_says_where_it_looked_and_what_to_do(self, tmp_path) -> None:
         from glisteel.world import RaceWorld
         missing = str(tmp_path / 'nowhere' / 'tileset.json')
-        with pytest.raises(FileNotFoundError, match='oglc-bake'):
+        with pytest.raises(FileNotFoundError, match='glisteel-bake'):
             RaceWorld(missing)
 
     def test_a_caller_can_go_on_afterwards(self, tmp_path) -> None:

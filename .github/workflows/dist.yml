@@ -99,7 +99,7 @@ jobs:
       - name: Check the bundle runs
         run: |
           dist\glisteel\glisteel.exe --help
-          dist\glisteel\oglc-bake.exe --help
+          dist\glisteel\glisteel-bake.exe --help
 
       # The import graph PyInstaller built, for reading when the step above
       # says a module is missing.
@@ -152,7 +152,7 @@ jobs:
           oglc-deb --project . --extras bake \
             --runtime runtime \
             --requirement packaging/requirements-stack.txt \
-            --command glisteel --command oglc-bake \
+            --command glisteel --command glisteel-bake \
             --menu-name 'GLinting Steel' \
             --categories 'Game;Simulation;' \
             --output dist
@@ -166,7 +166,7 @@ jobs:
           sudo apt-get install -y ./dist/*.deb
           dpkg-deb --info ./dist/*.deb
           /usr/games/glisteel --help
-          /usr/games/oglc-bake --help
+          /usr/games/glisteel-bake --help
 
       - uses: actions/upload-artifact@v4
         with:
@@ -201,10 +201,10 @@ jobs:
             --notes "Binary distributions of GLinting Steel $VERSION.
 
           * \`glisteel-$VERSION-windows-x64.zip\` -- unzip it anywhere and run
-            \`glisteel.exe\`. \`oglc-bake.exe\` beside it bakes a world to drive:
-            \`oglc-bake.exe --output my-world\`, then \`glisteel.exe my-world\\tileset.json\`.
+            \`glisteel.exe\`. \`glisteel-bake.exe\` beside it bakes a world to drive:
+            \`glisteel-bake.exe --output my-world\`, then \`glisteel.exe my-world\\tileset.json\`.
           * The \`.deb\` installs the game and the Python that runs it under
-            \`/opt/glisteel\`, with \`glisteel\` and \`oglc-bake\` in \`/usr/games\`.
+            \`/opt/glisteel\`, with \`glisteel\` and \`glisteel-bake\` in \`/usr/games\`.
 
           No world travels with either: a baked world is hundreds of megabytes,
           and the one worth driving is the one you made."

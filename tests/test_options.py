@@ -93,6 +93,21 @@ class TestWhatTheWindowReads:
         assert found.traffic == 0 and found.laps == 2
         assert found.view      # the same default the parser has
 
+    def test_a_capture_can_be_asked_for_by_frame(self) -> None:
+        """Which frame, rather than how many seconds.
+
+        A wall clock puts the car near a place; a frame count puts it on one,
+        so a recorded session replayed (``OPENGLCONTEXT_TELEMETRY_REPLAY``)
+        photographs the same moment of the same drive on any machine.
+        """
+        found = Options.from_namespace(
+            _parsed(['--capture', '/tmp/shot.png', '--capture-frame', '1297']))
+        assert found.capture_frame == 1297
+
+    def test_nothing_is_captured_by_frame_unless_asked(self) -> None:
+        """Zero means the wall-clock delay, which is what waits for streaming."""
+        assert Options.from_namespace(_parsed()).capture_frame == 0
+
 
 class TestWhatIsRefused:
     def test_a_negative_lap_count_is_refused(self) -> None:

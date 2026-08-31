@@ -22,7 +22,7 @@ from OpenGLContext.packaging.multicall import command_modules, run
 #: PyInstaller, so this table is the only place a command is declared.
 COMMANDS = {
     'glisteel': 'glisteel.game:main',
-    'oglc-bake': 'OpenGLContext_editor.bin.bake:main',
+    'glisteel-bake': 'glisteel_editor.bake:main',
 }
 
 #: The modules to tell a freezer about, since the table above names them as

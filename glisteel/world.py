@@ -901,7 +901,7 @@ class RaceWorld:
             # is the command line's decision, and it makes it in
             # :func:`glisteel.game.main`.
             raise FileNotFoundError(
-                "no world at %s -- bake one with 'oglc-bake --output %s'"
+                "no world at %s -- bake one with 'glisteel-bake --output %s'"
                 % (tileset_path, os.path.dirname(tileset_path) or 'world'))
         self.path = tileset_path
         # No colliders from the tiles: tile geometry is level-of-detail

@@ -4,7 +4,7 @@ A car, a circuit, and a world too big to load: the track streams in around the
 player as they drive it, and every tile it pages in becomes collision the car
 drives on.
 
-    oglc-bake --output /tmp/world        # bake a world (OpenGLContext-editor)
+    glisteel-bake --output /tmp/world    # bake a world (glisteel-editor)
     glisteel /tmp/world/tileset.json     # drive it
 
 The game is deliberately thin. Streaming, rendering, roads and physics all

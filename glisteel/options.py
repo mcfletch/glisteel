@@ -99,6 +99,11 @@ class Options:
     #: Render one frame to this path once the world has settled, then exit.
     capture: str | None = None
     capture_delay: float = 4.0
+    #: Capture on this frame instead of after ``capture_delay`` seconds. A
+    #: frame count is where the drive has *got to*, which a wall clock is not:
+    #: replay a recorded session (``OPENGLCONTEXT_TELEMETRY_REPLAY``) and frame
+    #: N is the same moment of the same drive every time.
+    capture_frame: int = 0
     #: Record the drive to this path (an ``.mp4``) and exit when it is done.
     record: str | None = None
     record_seconds: float = 20.0

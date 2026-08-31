@@ -32,8 +32,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Baking a world to drive, for a checkout with no world in it.
-bake = ["OpenGLContext-editor"]
+# Baking a world to drive, for a checkout with no world in it: `glisteel-bake`
+# lives with the editor that authors one.
+bake = ["glisteel-editor"]
 dev = ["glisteel[bake]", "pytest", "pytest-cov", "pytest-timeout", "ruff", "mypy"]
 
 [project.urls]
