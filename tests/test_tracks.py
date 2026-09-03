@@ -1,6 +1,7 @@
 """The worlds a player can choose between, and where they are kept."""
 import json
 import os
+import sys
 
 import pytest
 
@@ -133,23 +134,31 @@ class TestTheLibrary:
         assert named('Beacon', str(tmp_path)) is None
 
 
+#: The variable naming the user's application-data directory on this platform.
+#: userpaths follows each platform's own convention -- %APPDATA% on Windows,
+#: $XDG_CONFIG_HOME elsewhere -- so a test that redirects it has to say which.
+#: Naming only the POSIX one leaves these passing without having redirected
+#: anything, which is worse than failing.
+APPDATA_VARIABLE = 'APPDATA' if sys.platform == 'win32' else 'XDG_CONFIG_HOME'
+
+
 class TestWhereAPlayersFilesLive:
     def test_the_game_keeps_them_under_the_platform_s_own_place(self, monkeypatch,
                                                                 tmp_path):
-        monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+        monkeypatch.setenv(APPDATA_VARIABLE, str(tmp_path))
         assert home().startswith(str(tmp_path))
 
     def test_and_they_are_the_game_s_own(self, monkeypatch, tmp_path):
-        monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+        monkeypatch.setenv(APPDATA_VARIABLE, str(tmp_path))
         assert os.path.basename(home()) == 'glisteel'
 
     def test_tracks_are_kept_together_under_that(self, monkeypatch, tmp_path):
-        monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+        monkeypatch.setenv(APPDATA_VARIABLE, str(tmp_path))
         assert tracks_directory() == os.path.join(home(), 'tracks')
 
     def test_asking_where_they_are_does_not_make_them(self, monkeypatch, tmp_path):
         """Reading a path is not a reason to create a directory."""
-        monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+        monkeypatch.setenv(APPDATA_VARIABLE, str(tmp_path))
         tracks_directory()
         assert not os.path.exists(os.path.join(str(tmp_path), 'glisteel'))
 

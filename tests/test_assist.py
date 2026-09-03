@@ -120,8 +120,11 @@ class TestTheLineItHolds:
     #: A drive that pulls out of the lane it started in and lets go.
     PULLING_OUT = 'throttle 0..16; left 5..5.6'
 
-    @classmethod
+    # pytest.fixture outermost: the other order hands pytest a classmethod
+    # object, which carries no fixture marker, and the fixture is then simply
+    # not there -- every test asking for it errors at setup.
     @pytest.fixture(scope='class')
+    @classmethod
     def pulled_out(cls):
         """Where that drive started, where it settled, and what is held now.
 
