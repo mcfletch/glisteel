@@ -9,8 +9,8 @@ it.
 """
 import numpy as np
 import pytest
-
 from OpenGLContext.scenegraph.road import RoadProfile
+
 from glisteel.world import Course, courses_in
 
 
@@ -105,7 +105,6 @@ class TestTheColliderUnderTheWheels:
     def _corner(self, bank):
         """A quarter circle to the right, banked or not, and its collider."""
         from omi_physics.world import PhysicsWorld
-
         from OpenGLContext.physics.road import RoadColliders
         angle = np.linspace(0.0, np.pi / 2, 60)
         line = np.stack([300.0 - 300.0 * np.cos(angle), np.full(60, 20.0),
@@ -148,7 +147,6 @@ class TestTheColliderUnderTheWheels:
         """What the lean is *for*: without it the two disagree by most of the
         road's own width times the lean."""
         from omi_physics.raycast import raycast
-
         from OpenGLContext.physics.road import RoadColliders
         course, _world = self._corner(
             lambda line: np.full(len(line), 0.10))
@@ -192,7 +190,6 @@ class TestARoadThatIsWiderInPlaces:
         extra tarmac."""
         from omi_physics.raycast import raycast
         from omi_physics.world import PhysicsWorld
-
         from OpenGLContext.physics.road import RoadColliders
         line = _line()
         world = PhysicsWorld()
@@ -207,7 +204,6 @@ class TestARoadThatIsWiderInPlaces:
 
     def test_a_road_of_one_width_is_swept_where_it_always_was(self) -> None:
         from omi_physics.world import PhysicsWorld
-
         from OpenGLContext.physics.road import RoadColliders
         line = _line()
         plain, wide = (RoadColliders(PhysicsWorld(), line, closed=False,

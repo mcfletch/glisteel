@@ -20,6 +20,6 @@ camera watches from, the lap timing, and the HUD.
 ``game``     the window, the loop, and the keys
 """
 
-__version__ = "0.1.0a1"
+__version__ = "1.0.0a1"
 __author__ = "Michael Colin Fletcher"
 __license__ = "BSD-Style, see license.txt for details"
