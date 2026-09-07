@@ -282,11 +282,11 @@ editable — PyInstaller follows import statements and cannot see through an
 editable install's import hook:
 
 ```bash
-pip install -r packaging/requirements-stack.txt ".[bake]" pyinstaller
+pip install -r packaging/requirements-stack.txt . pyinstaller
 pyinstaller packaging/glisteel.spec --noconfirm     # dist/glisteel/
 
 uv python install --install-dir runtime 3.12
-oglc-deb --project . --extras bake --runtime runtime \
+oglc-deb --project . --runtime runtime \
     --requirement packaging/requirements-stack.txt \
     --command glisteel --command glisteel-bake --output dist
 ```

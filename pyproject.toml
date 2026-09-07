@@ -32,10 +32,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Baking a world to drive, for a checkout with no world in it: `glisteel-bake`
-# lives with the editor that authors one.
-bake = ["glisteel-editor"]
-dev = ["glisteel[bake]", "pytest", "pytest-cov", "pytest-timeout", "ruff", "mypy"]
+# There is deliberately no `bake` extra pulling in glisteel-editor. The editor
+# requires the game -- it drives what it has just authored -- and a game that
+# required its editor back would be a dependency cycle for a resolver to unpick
+# and for a release to be sequenced around. `glisteel-bake` comes from
+# installing glisteel-editor, which is what the bundle and the .deb do through
+# `packaging/requirements-stack.txt`.
+dev = ["pytest", "pytest-cov", "pytest-timeout", "ruff", "mypy"]
 
 [project.urls]
 Repository = "https://github.com/mcfletch/glisteel"

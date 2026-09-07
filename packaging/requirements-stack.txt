@@ -33,3 +33,7 @@ omi_audio @ git+https://github.com/mcfletch/omi_audio@main
 omi_physics @ git+https://github.com/mcfletch/omi_physics@develop
 OpenGLContext @ git+https://github.com/mcfletch/openglcontext@develop
 OpenGLContext-editor @ git+https://github.com/mcfletch/openglcontext-editor@main
+# The world baker, which travels in the bundle beside the game. It arrives
+# here rather than through an extra of the game: glisteel-editor requires
+# glisteel, and a game that required its editor back would be a cycle.
+glisteel-editor @ git+https://github.com/mcfletch/glisteel-editor@main

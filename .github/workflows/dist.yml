@@ -78,13 +78,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       # The stack first, from the file that is the one place either build says
-      # where it comes from; then the game with the extra that brings in the
-      # world baker, which travels in the bundle beside it.
+      # where it comes from -- the world baker that travels in the bundle beside
+      # the game is in there -- and then the game itself.
       - name: Install the game and the stack
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r packaging/requirements-stack.txt
-          python -m pip install ".[bake]"
+          python -m pip install .
           python -m pip install pyinstaller
 
       # PyOpenGL and OpenGLContext carry their own PyInstaller hooks, found
@@ -149,7 +149,7 @@ jobs:
 
       - name: Build the package
         run: |
-          oglc-deb --project . --extras bake \
+          oglc-deb --project . \
             --runtime runtime \
             --requirement packaging/requirements-stack.txt \
             --command glisteel --command glisteel-bake \
