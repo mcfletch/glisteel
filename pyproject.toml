@@ -93,16 +93,12 @@ python_version = "3.12"
 warn_return_any = true
 warn_unused_ignores = true
 ignore_missing_imports = true
+# Every definition states its types, and a body is checked rather than skipped:
+# an unannotated parameter is `Any`, and an `Any` travelling through a call is
+# a check that reports success without having compared anything.
+check_untyped_defs = true
 disallow_untyped_defs = true
-
-# The engine and the physics ship no ``py.typed``, so mypy has nothing to check
-# their surface against. Saying so per package keeps the silence deliberate and
-# narrow: anything *else* that cannot be resolved is still an error worth
-# seeing, which a bare global ignore would hide.
-[[tool.mypy.overrides]]
-module = ["OpenGLContext.*", "OpenGLContext_editor.*", "omi_physics.*", "OpenGL.*"]
-ignore_missing_imports = true
-follow_untyped_imports = false
+disallow_incomplete_defs = true
 
 [tool.pytest.ini_options]
 # The package as well as the tests: the modules teach with worked examples, and
