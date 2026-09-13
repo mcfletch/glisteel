@@ -1,8 +1,9 @@
 # What the drive is missing, and one thing the bake gets wrong
 
-**Status: §1 (the bore) has landed, and §6's chooser with it — the five ways of
-driving are reachable from the menu at last. §2 is measured and diagnosed to a
-line of code. §3, §4, §5 and §7 are open.**
+**Status: §1 (the bore), §4 (the swerve) and §6's chooser have landed — the five
+ways of driving are reachable from the menu at last. §3's cause is found and
+fixed; its harness budget and the road's lay-by are still open. §2 is measured
+and diagnosed to a line of code. §5 and §7 are open.**
 
 Seven things between the game as it is and the game it is meant to be, gathered
 from playing it. They are not one body of work — a terrain-renderer feature, a
@@ -172,35 +173,98 @@ network* does, and if that is wanted it is new work rather than lost work.
       closed loop; the answer may be no, and saying so is worth more than
       leaving the question open.
 
-## 3. Traffic ends up in the ditch
+## 3. Traffic ends up in the ditch — *cause found and fixed*
 
-Often enough to be among the first things a player notices. Unknown cause; the
-candidates are the lateral controller losing the centreline on a curve, the
-recovery from a nudge overshooting, and the road's own edge being somewhere the
-traffic model does not think it is.
+Often enough to be among the first things a player notices. It was the third of
+the three candidates: **the road's edge was somewhere the traffic model did not
+think it was.** A quarter of the traffic pulls off for fourteen seconds at a
+time, and `TrafficCar._pulled_off` measured how far out to go to the car's
+*centre*, with nothing allowed for its width — so 1.3 m of a 2.8 m car stood
+past the verge, among the trees, which is what a player sees and calls the
+ditch. Two or three of ten are standing there at once.
 
+Measuring it is what settled it. The carriageway is 7.2 m and the made ground
+10.6 m, so there are 1.7 m between the carriageway's edge and the verge and a
+car is 2.8 m wide: **there is nowhere on this profile to be wholly off the
+road.** A car pulled off now sits with its outer edge on the edge of the made
+ground and the rest of it overhanging the carriageway, which is what a car on a
+narrow shoulder does. A road with a real lay-by is the proper answer and is the
+road's to offer.
+
+- [x] Find which of the three it is before changing any of them.
 - [ ] Reproduce it in the gameplay harness
       ([GAMEPLAY-TEST-HARNESS.md](GAMEPLAY-TEST-HARNESS.md)) rather than by
       watching: drive a fixed seed and count how many traffic cars leave the
       carriageway per kilometre. That number is the whole of the problem
       statement and the whole of the acceptance test.
-- [ ] Find which of the three it is before changing any of them.
 - [ ] A budget in the harness, so it cannot come back quietly.
+- [ ] A lay-by in the road profile, so a car that means to stop has somewhere
+      to stop that is not the carriageway.
 
-## 4. Traffic drives into collisions without trying to avoid them
+## 4. Traffic drives into collisions without trying to avoid them — *landed*
 
-A traffic car holds its line into an impact that a human would swerve away
-from. The physics already knows how hard a pair met —
+A traffic car held its line into an impact that a human would swerve away from.
+The physics already knew how hard a pair met —
 [2026-08-23-CRASH-ON-CONTACT.md](2026-08-23-CRASH-ON-CONTACT.md) added
-`Contact.approach` and `PhysicsWorld.impact_on` — but nothing reads a *closing*
-situation before it becomes a contact.
+`Contact.approach` and `PhysicsWorld.impact_on` — but nothing read a *closing*
+situation before it became a contact.
 
-- [ ] A traffic driver that looks ahead along its own lane and to the side, and
-      asks for the lane over when what is in front is closing too fast. The
-      manoeuvre already exists: this is the `Lanes` lane switch under an AI
-      rather than a player.
-- [ ] Do not make it perfect. Traffic that never crashes is traffic that reads
-      as scenery; what is wanted is traffic that *tries*.
+**It is not a lane change.** The first sketch here was the `Lanes` lane switch
+under an AI, and that is the wrong manoeuvre: a lane change is considered,
+signalled and taken at a metre a second, and traffic that calmly re-arranged
+itself around the player would be traffic that never seems worried. Being
+barrelled at is exactly the moment it should. What a driver with a second or
+two of warning does is go for the verge and take whatever is past it, braking the whole
+way — so the state is `EVADING`, it moves at `SWERVE` rather than `SIDEWAYS`
+(7 m/s against 1.2), and it ends `DITCH` metres *past* the verge that §3 just
+confined a deliberate stop to.
+
+Four things make somebody a threat rather than a pass, and taking any one away
+leaves the driver holding their line: they are in front of this car rather than
+behind it, closing at more than `BARRELLING` over what it is doing, arriving
+inside `PANIC_SECONDS`, and coming down this car's own `IN_THE_WAY` of road.
+Closing speed is taken along the line between the two cars rather than along
+the road, so it is the same question on a straight and around a bend.
+
+**What it costs a lap was measured, not assumed.** An autopilot keeping its own
+side of a two-way road, racing an 800 m circuit with six cars out, provokes
+**no swerves at all** in the thirty seconds a race lasts. The same drive with
+the autopilot on the centreline provokes **six** — one per oncoming car, every
+one of them met with 1.7 to 1.9 m between the two centres, which for a 2.8 m
+car is a head-on clip. The rule is free to a driver on their own side and
+constant for one who is not, which is what it is for.
+
+**"In front" is why being caught is not the same as being met.** Somebody in
+the mirror is somebody about to overtake, which is what a road is for; it is
+also the case a driver can do nothing about, since a car arriving at 65 km/h
+over is on the bumper by the time the mirror has been looked at.
+
+The player's direction comes from differencing their position, not from the
+speedometer: a speed is a number, and somebody arriving at seventy and somebody
+leaving at seventy read the same on the dial.
+
+**It does not always work, and that is the design.** The first version of this
+cleared every car out of the way in time, and the twelve crash-rule tests in
+`tests/test_session.py` went green by never crashing — traffic had become
+scenery with right of way. Two numbers put the failure back, and both are the
+car rather than the rule: `REACTION`, the 1.2 s between a driver seeing
+something and their hands answering, and `GRIP`, the 8 m/s² a road tyre will
+take the car sideways at. A driver who sees somebody at four seconds gets clear
+easily; one who sees them at one second has not moved the wheel when they
+arrive. Between the two is a swerve that half works, which is a clipped wing
+mirror instead of a square hit.
+
+- [x] A traffic driver that reads a closing situation before it is a contact.
+- [x] An emergency response rather than a manoeuvre, and one that is over in
+      `EVADE_SECONDS` so the road does not fill with parked cars.
+- [x] Do not make it perfect: `REACTION` and `GRIP`, and a test that says a car
+      given no warning is simply hit.
+- [x] `tests/test_traffic.py::TestGettingOutOfTheWay` — that it goes, that it
+      goes further and faster than a car pulling off, that it goes *away* and
+      not across, that it comes back, three of the four ways of not being a
+      threat, and the way of being one too late.
+- [ ] A capture of one taking the ditch, which is the only way to know whether
+      it looks like a driver getting out of the way or a car sliding sideways.
 
 ## 5. The game is silent
 

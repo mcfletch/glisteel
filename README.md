@@ -494,6 +494,26 @@ car on the grid is a car in the road. They are placed and driven by distance
 along the course rather than simulated as vehicles, which is why there can be
 eight of them for nothing measurable.
 
+**Meet one head-on in its own lane and its driver gets out of your way.** Not a
+lane change — a driver with a second or two does not signal and ease across at
+a metre a second — but a swerve for the verge and whatever is past it, braking
+the whole way, and back on the road a few seconds later. That is the manoeuvre
+a two-way road exists to make possible: the lane you overtake in is the lane
+somebody is coming down.
+
+**Somebody in the mirror is not a threat, it is an overtake.** A driver being
+caught expects to be passed, and at sixty-five km/h over they are on the bumper
+by the time the mirror has been looked at — so a car being caught holds its
+line, which is what stops traffic spending the lap in the ditch. Nor does a car
+in the *other* lane react, which is every oncoming car on an ordinary lap.
+
+**And it does not always work, which is the point.** A driver takes a beat to
+get from seeing you to moving the wheel, and the car then has to gather itself
+against the grip it has — so somebody who sees you at four seconds is clear
+long before you arrive, somebody who sees you at one has not moved when you get
+there, and in between is a swerve that half works. Traffic that always escaped
+would be scenery with right of way.
+
 **Which way they go is what kind of road it is.** A closed course is a circuit
 and a circuit is raced one way round; an open road carries traffic both ways.
 It matters because passing on a two-lane road means using the lane the oncoming

@@ -18,7 +18,10 @@ from glisteel import models
 from glisteel.traffic import (
     CRUISING,
     DEFAULT_TRAFFIC,
+    EVADING,
+    IN_THE_WAY,
     PULLING_OFF,
+    REACTION,
     SLOWING,
     Traffic,
     TrafficCar,
@@ -974,3 +977,123 @@ class TestNoCarEndsUpInTheDitch:
         course, seen = self.driven()
         lane = course.carriageway_width / 4.0
         assert max(seen) > lane + 0.5, 'no car pulled off in the whole run'
+
+
+class TestGettingOutOfTheWay:
+    """What a driver does when something is coming at them and will not stop.
+
+    Not a lane change. A lane change is a manoeuvre -- considered, signalled,
+    taken at a metre a second -- and a driver about to be hit does not make
+    one. They go for the verge and take the ditch if the ditch is what there
+    is, because a car in a ditch is a car whose driver walks away.
+
+    This is deliberately *not* general lane-switching for traffic: traffic that
+    calmly re-arranged itself around the player would be traffic that never
+    seems worried, and being barrelled at is exactly the moment it should. Nor
+    does it always work -- there are four ways of not being a threat and three
+    of them have a test here, and a driver who sees one too late does not get
+    out of the way at all.
+    """
+
+    def threatened(self, warning=3.5, closing=50.0, seconds=2.5,
+                   same_way=False, same_lane=True):
+        """Drive the player at a car for ``seconds``; return the car.
+
+        The player comes up the road at ``closing`` metres a second, placed so
+        that they arrive at the car ``warning`` seconds from now. By default
+        that is head-on in the middle of an overtake, which is the case a
+        two-way road exists to create; ``same_way`` makes it somebody arriving
+        in the mirror instead, and ``same_lane`` false puts them where they
+        belong, which is most of a lap.
+
+        Driven rather than placed, because what makes somebody a threat is
+        which way they are going, and that is differenced from where they were.
+        """
+        course = _course(length=6000.0, count=601)
+        crowd = Traffic(course, count=0, seed=1)
+        heading = 1 if same_way else -1
+        # How fast the gap shuts: the two speeds subtract going the same way
+        # and add meeting.
+        rate = closing - LIMIT * heading
+        car = crowd.put_out(TrafficCar(course, station=1000.0 + warning * rate,
+                                       heading=heading, limit=LIMIT))
+        # The course runs up +Z with its own "right" towards -X, so a station
+        # is a Z and a side is a negated X. The player holds whichever lane
+        # they were put in; it is the car that leaves it.
+        across = -car.side() if same_lane else car.side()
+        where, dt = 1000.0, 1.0 / 60.0
+        for _ in range(int(seconds / dt)):
+            crowd.update((across, 0.0, where), dt, speed=closing)
+            where += closing * dt
+        return car
+
+    def off_the_road(self, car):
+        """Whether the whole car is past the edge of the made ground."""
+        return (abs(car.side()) + IN_THE_WAY / 2.0
+                > car.course.total_width / 2.0)
+
+    def test_a_car_met_head_on_in_its_own_lane_gets_out_of_the_way(self) -> None:
+        assert self.threatened().state == EVADING
+
+    def test_it_goes_further_out_than_a_car_pulling_off(self) -> None:
+        """The verge is where you stop on purpose; this is not on purpose."""
+        assert self.off_the_road(self.threatened())
+
+    def test_it_is_a_swerve_rather_than_a_lane_change(self) -> None:
+        """The considered version of the same move, given the same time.
+
+        A car leaving the road on purpose crosses it at ``SIDEWAYS``; give one
+        the seconds this driver had and it is still out over the white line
+        while the swerved car is in the ditch.
+        """
+        swerved = self.threatened()
+        deliberate = _car(course=_course())
+        deliberate.pull_off()
+        for _ in range(int((2.5 - REACTION) * 60)):
+            deliberate.advance(1.0 / 60.0)
+        assert abs(swerved.side()) > abs(deliberate.side())
+
+    def test_it_swerves_away_from_the_player_not_across_them(self) -> None:
+        """Into the verge on its own side. The other way is into them."""
+        car = self.threatened()
+        assert car.side() * car.heading > 0.0, 'it crossed the road to get away'
+
+    def test_somebody_in_the_other_lane_is_not_a_threat(self) -> None:
+        """Which is every oncoming car on an ordinary lap. A road on which
+        meeting somebody put them in the ditch would be unusable."""
+        assert self.threatened(same_lane=False).state == CRUISING
+
+    def test_and_neither_is_somebody_a_long_way_off(self) -> None:
+        assert self.threatened(warning=30.0).state == CRUISING
+
+    def test_a_driver_does_not_see_somebody_coming_up_behind_them(self
+                                                                  ) -> None:
+        """Somebody in the mirror is somebody about to overtake, which is what
+        a road is for -- and at sixty-five kilometres an hour over, somebody
+        who is on the bumper by the time the mirror has been looked at. Traffic
+        that dived for the verge every time it was caught would spend the lap
+        in the ditch.
+        """
+        assert self.threatened(same_way=True, closing=60.0).state == CRUISING
+
+    def test_somebody_arriving_inside_the_reaction_time_is_simply_hit(self
+                                                                      ) -> None:
+        """Traffic that always got out of the way would be scenery with right
+        of way. A driver has to see them coming far enough out to do anything,
+        and a player who arrives faster than that hits a car that never moved.
+        """
+        car = self.threatened(warning=REACTION * 0.5, seconds=REACTION * 0.5)
+        assert car.state == CRUISING
+        assert car.side() == pytest.approx(car.lane * car.heading)
+
+    def test_it_recovers_once_the_danger_is_by(self) -> None:
+        """Seconds in the ditch, not the rest of the lap."""
+        car = self.threatened()
+        for _ in range(60 * 12):
+            car.advance(1.0 / 60.0)
+            if car.state != EVADING:
+                break
+        assert car.state == CRUISING
+        for _ in range(60 * 4):
+            car.advance(1.0 / 60.0)
+        assert not self.off_the_road(car)

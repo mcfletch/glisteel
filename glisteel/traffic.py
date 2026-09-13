@@ -30,16 +30,19 @@ from glisteel import models
 from glisteel.geometry import yaw_to_face
 
 __all__ = ['TrafficCar', 'Traffic', 'CRUISING', 'SLOWING', 'PULLING_OFF',
+           'EVADING',
            'DEFAULT_TRAFFIC', 'SPEED_LIMIT', 'MEETING_SECONDS', 'RETIRE',
            'EDGE_BAND',
            'cars_for']
 
 #: What a traffic car is doing. Cruising is the speed limit and its own lane;
 #: slowing is something its driver saw and the player did not; pulling off is a
-#: turning, a gateway, or somewhere to stop.
+#: turning, a gateway, or somewhere to stop; evading is somebody arriving who
+#: is not going to stop.
 CRUISING = 'cruising'
 SLOWING = 'slowing'
 PULLING_OFF = 'pulling-off'
+EVADING = 'evading'
 
 #: How hard a traffic car accelerates and brakes, in metres per second squared.
 #: An ordinary car being driven ordinarily, which is the point of it.
@@ -57,6 +60,66 @@ SLOW_FOR = 6.0
 #: that drove through trees to get there.
 OFF_ROAD = 1.6
 PULL_OFF_SECONDS = 14.0
+
+#: How fast a car moves across the road when it is being driven, in metres per
+#: second, and how fast when it is being thrown. A metre a second is a lane
+#: change: signalled, mirrored, taken over three or four seconds. The other is
+#: the wheel going over and the car following it.
+#:
+#: :data:`GRIP` is how quickly it gets from the one to the other, in metres per
+#: second squared -- eight-tenths of gravity, which is a road tyre on dry
+#: tarmac. A car cannot start going sideways at seven metres a second; it takes
+#: the better part of a second to arrive there, and that second is most of why
+#: a swerve started late is a swerve that does not work.
+SIDEWAYS = 1.2
+SWERVE = 7.0
+GRIP = 8.0
+
+#: How far past the verge a swerve ends up, in metres, and how long the car
+#: stays there. Past it on purpose: the verge is where a driver stops when
+#: stopping was the plan, and this was not the plan. There is a ditch, or trees,
+#: or a fence, and a car that takes one of those is a car whose driver walks
+#: away from what the road was about to do to them.
+DITCH = 1.2
+EVADE_SECONDS = 8.0
+
+#: How long before somebody arrives that a driver reads them as a threat, in
+#: seconds, and how fast they have to be arriving to be one, in metres per
+#: second.
+#:
+#: Four seconds is a driver looking down a road rather than at a bumper: two
+#: cars meeting at a hundred and seventy kilometres an hour between them are
+#: two hundred metres apart, which is about as far down a road as there is to
+#: see. Less than that and there is no room in the window for
+#: :data:`REACTION`; more and a driver is reacting to somebody who has not
+#: decided anything yet.
+#:
+#: The closing speed is what separates being overtaken from being run down:
+#: fifteen metres a second over your own is somebody arriving at fifty-odd
+#: kilometres an hour more than you are doing, which is not a pass. Below it a
+#: driver does nothing, because traffic that flinched at every overtake would
+#: be traffic nobody believed.
+PANIC_SECONDS = 4.0
+BARRELLING = 15.0
+
+#: How long a driver takes to get from seeing that to doing something about it,
+#: in seconds.
+#:
+#: **This is what makes traffic hittable.** Seeing somebody at four seconds is
+#: ample; seeing them at one is a driver who watches them arrive, because the
+#: wheel does not move until this has passed and then the car still has to
+#: gather itself against :data:`GRIP`. Traffic that always got out of the way
+#: would read as scenery with right of way. A little over a second is a driver
+#: who was already watching the mirror -- quicker than the second and a half a
+#: highway engineer allows for a hazard nobody expected, and slower than
+#: somebody with their hands set for it.
+REACTION = 1.2
+
+#: The fastest anything on this road goes, in metres per second. A step longer
+#: than this in one frame is not a car driving, it is a car being *put*
+#: somewhere -- a restart, a respawn, a fresh session -- and the speed read off
+#: it would be a phantom arriving at a thousand kilometres an hour.
+TELEPORT = 200.0
 
 #: How often a driver does something, as a chance per second, and how much of
 #: that is pulling off rather than braking.
@@ -220,6 +283,10 @@ class TrafficCar:
         self._until = 0.0
         self._sideways = 0.0
         self._elapsed = 0.0
+        #: When this driver's hands answer what their eyes have seen, or None
+        #: while there is nothing to answer.
+        self._alarmed: float | None = None
+        self._swerve_from = 0.0
 
     def __repr__(self) -> str:
         return 'TrafficCar(%s at %.0fm, %s)' % (
@@ -231,6 +298,9 @@ class TrafficCar:
         Its own intention, held down by whatever is in front of it: no driver
         drives into the back of the car ahead, and a stationary one on the grid
         is something the road behind has to notice.
+
+        A car leaving the road stops, whether it is doing so because it meant
+        to (:data:`PULLING_OFF`) or because it had to (:data:`EVADING`).
         """
         if self.state == CRUISING:
             wanted = self.limit
@@ -273,6 +343,36 @@ class TrafficCar:
         self.state = PULLING_OFF
         self._until = self._elapsed + PULL_OFF_SECONDS
 
+    def alarm(self, coming: bool, reason: str = 'somebody coming') -> None:
+        """Say whether somebody is arriving who is not going to stop.
+
+        Told every frame rather than once, so a driver who sees a threat go
+        away again -- the player lifted, or took the other lane -- goes back to
+        driving instead of swerving at nobody a second later. Seeing it is not
+        yet doing anything about it: :data:`REACTION` seconds pass between the
+        two, and somebody who arrives inside those is somebody this driver
+        watches arrive.
+        """
+        if not coming:
+            self._alarmed = None
+        elif self._alarmed is None:
+            self._alarmed = self._elapsed + REACTION
+            self.reason = str(reason)
+
+    def evade(self, reason: str = 'somebody coming') -> None:
+        """Get off the road now: somebody is arriving and will not stop.
+
+        Not a lane change. A driver out of time does not consider the other
+        lane, signal, and move into it at a metre a second; they go for the
+        verge and take whatever is past it, and they brake the whole way.
+        :data:`SWERVE` is how fast that happens, :data:`GRIP` how quickly it
+        gets there, and :data:`DITCH` how far past the made ground it ends.
+        """
+        self.state = EVADING
+        self.reason = str(reason)
+        self._until = self._elapsed + EVADE_SECONDS
+        self._swerve_from = self._elapsed
+
     def advance(self, dt: float) -> None:
         """Drive for ``dt`` seconds: decide, then accelerate, then move."""
         self._elapsed += dt
@@ -289,9 +389,33 @@ class TrafficCar:
         wanted = self.station + self.heading * step
         self.turn_at_the_end(wanted)
         self.station = self.on_the_road(wanted)
-        wanted_side = self._pulled_off() if self.state == PULLING_OFF else 0.0
-        self._sideways += max(-dt * 1.2, min(dt * 1.2,
-                                             wanted_side - self._sideways))
+        wanted_side, rate = self._off_the_road(), self._sideways_rate()
+        self._sideways += max(-dt * rate, min(dt * rate,
+                                              wanted_side - self._sideways))
+
+    def _off_the_road(self) -> float:
+        """How far out from its own side this car is trying to be, in metres.
+
+        Zero for a car that is driving, the verge for one that is stopping
+        there, and past the verge for one that is getting out of the way.
+        """
+        if self.state == PULLING_OFF:
+            return self._pulled_off()
+        if self.state == EVADING:
+            return self._pulled_off() + DITCH
+        return 0.0
+
+    def _sideways_rate(self) -> float:
+        """How fast it may cross the road to get there, in metres per second.
+
+        A swerve builds against :data:`GRIP` from the moment the wheel went
+        over -- ``v = a t`` up to :data:`SWERVE` -- so a car that started one
+        late has barely begun to move when whatever it was avoiding arrives.
+        """
+        if self.state != EVADING:
+            return SIDEWAYS
+        since = max(self._elapsed - self._swerve_from, 0.0)
+        return min(SWERVE, GRIP * since)
 
     def _pulled_off(self) -> float:
         """How much further out than its own side a car pulling off goes.
@@ -371,11 +495,21 @@ class TrafficCar:
         return yaw_to_face(self.forward())
 
     def _decide(self, dt: float) -> None:
-        """Whether this driver does something, and what."""
+        """Whether this driver does something, and what.
+
+        Getting out of the way comes before anything else and overrides
+        whatever the car was doing: a driver braking for a hazard who then sees
+        somebody coming at them has a larger problem than the hazard.
+        """
+        if self._alarmed is not None and self.state != EVADING:
+            if self._elapsed >= self._alarmed:
+                self.evade(self.reason)
+                return
         if self.state != CRUISING:
             if self._elapsed >= self._until:
                 self.state = CRUISING
                 self.reason = ''
+                self._alarmed = None
             return
         if self._rng.random() < EVENT_RATE * dt:
             if self._rng.random() < PULL_OFF_SHARE:
@@ -483,6 +617,8 @@ class Traffic:
         self.node = Transform(children=[])
         self._rng = np.random.default_rng(seed)
         self._next = 0
+        #: Where the player was last frame, for how fast they are arriving.
+        self._was: np.ndarray | None = None
         self._drawn: dict[TrafficCar, Any] = {}
         self._scenes: dict[TrafficCar, Any] = {}
         self._bodies: dict[TrafficCar, int] = {}
@@ -504,11 +640,13 @@ class Traffic:
         something the traffic behind it has to notice, whether or not it is
         being driven.
         """
-        at = np.asarray(position, dtype='d').reshape(-1)[:3]
+        at = np.array(position, dtype='d').reshape(-1)[:3]
+        coming = self._coming(at, dt)
         # Where the player is on the road, found once. Every car put out this
         # frame joins relative to that same point, and finding a point on a
         # course is a pass over the whole centreline.
-        here = self._look_ahead(at, speed)
+        here, side = self._look_ahead(at, speed)
+        self._get_out_of_the_way(at, side, coming)
         for car in self.cars:
             car.advance(dt)
         keeping: list[TrafficCar] = []
@@ -527,14 +665,81 @@ class Traffic:
             self._show(fresh)
         self._follow()
 
-    def _look_ahead(self, at: Any, speed: float) -> float:
+    def _coming(self, at: np.ndarray, dt: float) -> np.ndarray | None:
+        """How fast the player is moving and which way, in metres per second.
+
+        Differenced from where they were rather than taken from the speedometer,
+        because a speed is a number and what a driver about to be hit needs is a
+        direction: somebody arriving at seventy and somebody leaving at seventy
+        read the same on the dial. None on the first frame, when there is no
+        previous position to difference, and on any step long enough to be a
+        respawn rather than a drive (:data:`TELEPORT`).
+        """
+        was, self._was = self._was, at.copy()
+        if was is None or dt <= 0.0:
+            return None
+        step = at - was
+        if float(np.linalg.norm(step)) > TELEPORT * dt:
+            return None
+        moving: np.ndarray = step / dt
+        return moving
+
+    def _get_out_of_the_way(self, at: np.ndarray, side: float,
+                            coming: np.ndarray | None) -> None:
+        """Have any car the player is about to arrive at leave the road.
+
+        Four things make somebody a threat rather than a pass: they are in
+        front of this car rather than behind it, they are closing at more than
+        :data:`BARRELLING` over what it is doing, they arrive inside
+        :data:`PANIC_SECONDS`, and they are coming down this car's own width of
+        road. Take any of the four away and a driver holds their line, which is
+        what makes the swerve mean something when it comes.
+
+        **In front** is what separates being met from being caught. Somebody in
+        the mirror is somebody about to overtake, which is what a road is for,
+        and it is also the case a driver can do nothing about: a car arriving at
+        sixty-five kilometres an hour over is on the bumper by the time the
+        mirror has been looked at.
+
+        **Own lane** is what decides how often any of this happens. Racing an
+        800 m circuit with six cars out, a driver keeping their own side
+        provokes no swerves in the thirty seconds a race lasts, and one holding
+        the centreline provokes six -- every oncoming car, each met with under
+        two metres between the two centres.
+
+        Closing speed is taken along the line between the two cars rather than
+        along the road, so it is the same question on a straight and around a
+        bend.
+        """
+        if coming is None:
+            return
+        pace = float(np.linalg.norm(coming))
+        for car in self.cars:
+            car.alarm(car.state != EVADING
+                      and self._arriving(car, at, side, coming, pace))
+
+    def _arriving(self, car: TrafficCar, at: np.ndarray, side: float,
+                  coming: np.ndarray, pace: float) -> bool:
+        """Whether the player is about to arrive at ``car`` and not stop."""
+        if pace <= car.speed:
+            return False
+        away = car.position() - at
+        gap = float(np.linalg.norm(away))
+        if gap <= 1e-6 or float(np.dot(away, car.forward())) >= 0.0:
+            return False
+        closing = float(np.dot(coming - car.velocity(), away / gap))
+        return (closing >= BARRELLING and gap <= closing * PANIC_SECONDS
+                and abs(side - car.side()) < IN_THE_WAY)
+
+    def _look_ahead(self, at: Any, speed: float) -> tuple[float, float]:
         """Tell every car what is in front of it in its own lane.
 
         The player counts: a car sitting on the grid is a car in the road, and
         traffic that drove through it would be traffic nobody could race.
 
-        Answers how far along the road the player is, because finding that is
-        the expensive part of this and the rest of the frame wants it too.
+        Answers where the player is on the road -- how far along, and how far to
+        its right -- because finding that is the expensive part of this and the
+        rest of the frame wants it too.
         """
         here, side = self._where_is(at)
         mine = float(np.sign(side) or 1.0)
@@ -562,7 +767,7 @@ class Traffic:
                     continue
                 nearest = int(np.nanargmin(gaps))
                 car.following(float(gaps[nearest]), float(speeds[nearest]))
-        return here
+        return here, side
 
     def _reaches(self, car: TrafficCar, stations: Any) -> np.ndarray:
         """How far in front of ``car`` each station is; NaN for anything behind.
