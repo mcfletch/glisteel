@@ -296,14 +296,27 @@ class TrafficCar:
     def _pulled_off(self) -> float:
         """How much further out than its own side a car pulling off goes.
 
-        :data:`OFF_ROAD` past the carriageway's edge is where it ends up, and
-        it is already :attr:`lane` out from the centreline, so what it has left
-        to travel is the difference. Added to the lane instead, a car that
-        pulled off is standing half its own width past the verge, which on this
-        road is inside the trees.
+        As far as the verge will take it and not one metre further: the car's
+        outer edge ends on the edge of the made ground, so the whole of it is
+        on something a car can stand on.
+
+        **It still overhangs the carriageway, and that is the road's doing.**
+        Between the carriageway's edge and the verge there are 1.7 m on this
+        profile -- a 0.7 m shoulder and a 1.0 m verge -- and a car is
+        :data:`IN_THE_WAY` metres wide. There is nowhere to be wholly off, so a
+        car pulled off sits partly on the road, which is what a car on a narrow
+        shoulder does. What it must not do is what it did: the offset was
+        measured to the car's *centre*, with nothing for its width, so 1.3 m of
+        it stood past the verge -- among the trees, which is what a player sees
+        and calls the ditch. A quarter of the traffic pulls off for fourteen
+        seconds at a time, so two or three of ten are standing there at once.
+
+        A road with a real lay-by is the proper answer and is the road's to
+        offer; until one does, this is as far off as there is to go.
         """
-        return max(float(self.course.carriageway_width) / 2.0 + OFF_ROAD
-                   - self.lane, 0.0)
+        half = IN_THE_WAY / 2.0
+        verge = float(self.course.total_width) / 2.0
+        return max(verge - half - self.lane, 0.0)
 
     def position(self) -> np.ndarray:
         """Where the car is: on its own side of the road, on the surface.

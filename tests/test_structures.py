@@ -7,6 +7,7 @@ matrix between the two. What is asserted here is the answer, and that asking
 about a lot of ground at once does not cost a lot of memory.
 """
 import numpy as np
+import pytest
 
 from glisteel.world import Course, Structure
 
@@ -132,3 +133,69 @@ class TestWhatHasAnEdgeToFallOff:
     def test_each_carried_stretch_gets_its_own(self) -> None:
         found = self._course('bridge', 'tunnel', 'causeway').edges()
         assert found == ((0.0, 20.0), (20.0, 40.0))
+
+
+class TestACarThatHasPulledOff:
+    """Where a car that has left the carriageway actually stands.
+
+    A quarter of the traffic pulls off for fourteen seconds at a time -- a
+    turning, a gate, a lay-by -- so two or three of ten are standing at the
+    roadside at any moment. Where they stand is the first wrong thing a player
+    sees, and they stood in the trees: the offset was measured to the car's
+    *centre* and nothing accounted for the car being 2.8 m wide.
+    """
+
+    def course(self, carriageway=7.2, total=10.6):
+        line = np.stack([np.linspace(0.0, 4000.0, 401), np.zeros(401),
+                         np.zeros(401)], axis=-1)
+        return Course(name='road', centreline=line,
+                      carriageway_width=carriageway, total_width=total,
+                      closed=False, length=4000.0, structures=())
+
+    def pulled_off(self, course):
+        from glisteel.traffic import TrafficCar
+        car = TrafficCar(course, station=1000.0, heading=1, limit=25.0)
+        car.pull_off()
+        return car._pulled_off() + car.lane
+
+    def test_the_whole_car_is_on_ground_a_car_can_stand_on(self) -> None:
+        """Its body, not its centre: half of 2.8 m is what was left out, and
+        1.3 m of the car stood past the verge among the trees."""
+        from glisteel.traffic import IN_THE_WAY
+        course = self.course()
+        edge = self.pulled_off(course) + IN_THE_WAY / 2.0
+        assert edge <= course.total_width / 2.0 + 1e-9, (
+            'a pulled-off car reaches %.2f m and the verge ends at %.2f m'
+            % (edge, course.total_width / 2.0))
+
+    def test_it_goes_as_far_off_as_the_verge_allows(self) -> None:
+        """Not merely inside it -- against it. A car that pulled off and barely
+        moved has not pulled off."""
+        from glisteel.traffic import IN_THE_WAY
+        course = self.course()
+        edge = self.pulled_off(course) + IN_THE_WAY / 2.0
+        assert edge == pytest.approx(course.total_width / 2.0)
+
+    def test_it_still_overhangs_the_carriageway_and_that_is_the_road(self) -> None:
+        """Stated rather than hidden: there are 1.7 m between the carriageway's
+        edge and the verge, and a car is 2.8 m wide. There is nowhere to be
+        wholly off, so being partly on is the honest answer and a lay-by is the
+        road's to offer."""
+        from glisteel.traffic import IN_THE_WAY
+        course = self.course()
+        room = course.total_width / 2.0 - course.carriageway_width / 2.0
+        assert room < IN_THE_WAY, 'this road has room for a lay-by after all'
+        inner = self.pulled_off(course) - IN_THE_WAY / 2.0
+        assert inner < course.carriageway_width / 2.0
+
+    def test_a_wide_verge_gets_the_car_wholly_off(self) -> None:
+        """Where there *is* room, the car uses it -- so a road that offers a
+        lay-by gets one without this changing again."""
+        from glisteel.traffic import IN_THE_WAY
+        course = self.course(carriageway=7.2, total=14.0)
+        inner = self.pulled_off(course) - IN_THE_WAY / 2.0
+        assert inner >= course.carriageway_width / 2.0
+
+    def test_it_never_pulls_off_towards_the_middle(self) -> None:
+        course = self.course()
+        assert self.pulled_off(course) >= course.carriageway_width / 2.0 - 1.2

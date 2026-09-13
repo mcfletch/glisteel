@@ -134,13 +134,24 @@ class TestWhatItDoesNext:
             car.advance(1.0 / 60.0)
         assert car.state == CRUISING
 
-    def test_pulling_off_takes_it_off_the_carriageway(self) -> None:
-        car = _car()
+    def test_pulling_off_takes_it_as_far_off_as_there_is_to_go(self) -> None:
+        """Its outer edge on the edge of the made ground.
+
+        This used to ask whether the car's *centre* had passed 4.0 m, which was
+        a proxy for "off the road" chosen against a placement that put 1.3 m of
+        the car past the verge and into the trees. The centre sits closer in
+        now and the car is further off, because what is placed is the car
+        rather than the point it is drawn around.
+        """
+        from glisteel.traffic import IN_THE_WAY
+        course = _course()
+        car = _car(course=course)
         car.pull_off()
         for _ in range(60 * 8):
             car.advance(1.0 / 60.0)
         assert car.state == PULLING_OFF
-        assert abs(float(car.position()[0])) > 4.0
+        edge = abs(float(car.position()[0])) + IN_THE_WAY / 2.0
+        assert edge == pytest.approx(course.total_width / 2.0, abs=0.05)
 
     def test_and_stops_beside_the_road_rather_than_in_the_trees(self) -> None:
         """A car pulls onto the verge. Where it ends up is measured from the
@@ -920,3 +931,46 @@ class TestWhatIsAheadIsAheadOnTheRoad:
         traffic = self._traffic(course, at=180.0)
         at, way = self._looking(course)
         assert not traffic.ahead_of(at, -way, reach=300.0)
+
+
+@pytest.mark.slow
+class TestNoCarEndsUpInTheDitch:
+    """A budget over a run, so this cannot come back quietly.
+
+    The arithmetic is checked a car at a time elsewhere; this drives a road full
+    of traffic for a few minutes of simulation and asks the question a player
+    asks -- is anything standing where a car cannot stand? A quarter of the
+    cars pull off for fourteen seconds at a time, so a run of this length sees
+    the state many times over rather than once.
+    """
+
+    def driven(self, seconds=180.0, count=12, seed=3):
+        """Where every car was, every second, over a run."""
+        from glisteel.traffic import Traffic
+        course = _course(length=4000.0, count=401)
+        crowd = Traffic(course, count=count, seed=seed)
+        step, at = 1.0 / 60.0, 0.0
+        seen = []
+        while at < seconds:
+            crowd.update((0.0, 0.0, at * 8.0 % 4000.0), step, speed=8.0)
+            at += step
+            if abs(at % 1.0) < step:
+                seen.extend(abs(float(car.position()[0])) for car in crowd.cars)
+        assert seen, 'nothing was driven'
+        return course, seen
+
+    def test_nothing_stands_past_the_verge(self) -> None:
+        from glisteel.traffic import IN_THE_WAY
+        course, seen = self.driven()
+        verge = course.total_width / 2.0
+        outside = [one for one in seen if one + IN_THE_WAY / 2.0 > verge + 1e-6]
+        assert not outside, (
+            f'{len(outside)} of {len(seen)} car-seconds had a car past the '
+            f'verge, the furthest by '
+            f'{max(outside) + IN_THE_WAY / 2.0 - verge:.2f} m')
+
+    def test_and_some_of_them_did_pull_off(self) -> None:
+        """A budget met by traffic that never left the road proves nothing."""
+        course, seen = self.driven()
+        lane = course.carriageway_width / 4.0
+        assert max(seen) > lane + 0.5, 'no car pulled off in the whole run'
