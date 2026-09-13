@@ -16,6 +16,8 @@ handling without knowing anything about any of it:
     the track is and the quickest lap driven on it.
 :func:`download_screen`
     What is on offer, what it costs, whose it is, and how far a fetch has got.
+:func:`driving_screen`
+    Which of the five ways of driving is in use, each in its own words.
 :func:`finish_screen`
     The time, where it came, and what to do next.
 
@@ -41,8 +43,8 @@ from OpenGLContext.ui.widgets import (
 )
 
 __all__ = ['ALL_HERE', 'BEST', 'FINISHED', 'GAME_TITLE', 'NEVER_DRIVEN',
-           'NO_TRACKS', 'STOPPED', 'download_screen', 'finish_screen',
-           'main_menu', 'track_screen']
+           'NO_TRACKS', 'STOPPED', 'download_screen', 'driving_screen',
+           'finish_screen', 'main_menu', 'track_screen']
 
 #: The name of the game, in exactly one place.
 GAME_TITLE = 'GLinting Steel'
@@ -81,6 +83,7 @@ def main_menu(on_drive: Callable[[], None] | None = None,
               on_settings: Callable[[], None] | None = None,
               on_quit: Callable[[], None] | None = None,
               on_resume: Callable[[], None] | None = None,
+              on_driving: Callable[[], None] | None = None,
               subtitle: str = '') -> Panel:
     """The first screen, and the one Escape brings up mid-race.
 
@@ -95,6 +98,7 @@ def main_menu(on_drive: Callable[[], None] | None = None,
         ('resume', 'Resume', on_resume, True) if racing else None,
         ('drive', 'Drive', on_drive, not racing),
         ('tracks', 'Tracks', on_tracks, False),
+        ('driving', 'Driving', on_driving, False),
         ('settings', 'Settings', on_settings, False),
         ('quit', 'Quit', on_quit, False),
     ]
@@ -184,6 +188,56 @@ def track_screen(tracks: Sequence[Any],
     cancel.on_activate = lambda _widget: finish(False)
     panel.on_close = lambda _closing: finish(False)
     return panel
+
+
+def driving_screen(chosen: str | None = None,
+                   on_choose: Callable[[str], None] | None = None,
+                   on_cancel: Callable[[], None] | None = None) -> Panel:
+    """How the car is driven.
+
+    Five ways exist and only one of them has ever been reachable: `DEFAULT` is
+    the wheel, and `--control` is a command line a player starting the game the
+    ordinary way never types. So the work that went into the others -- the lane
+    switch that asks for the next lane over and takes the car there, the
+    chauffeur that drives until anything is touched -- reads as missing because
+    it *is* missing, to everyone who has not read the source.
+
+    Each is offered with the summary it already carries, because a list of five
+    names makes a player start five races to find out which is which.
+    """
+    from glisteel import schemes
+    ways = list(schemes.available())
+    picker = Select(name='scheme', options=ways,
+                    value=chosen if chosen in ways else schemes.DEFAULT)
+    caption = Label(text=_how(picker.value), wrap=True, name='how')
+    use = Button(text='Use this', name='use', role='primary')
+    cancel = Button(text='Cancel', name='cancel')
+
+    def picked(widget: Any) -> None:
+        caption.text = _how(widget.value)
+    picker.on_change = picked
+
+    def chose(_widget: Any = None) -> None:
+        if on_choose is not None:
+            on_choose(str(picker.value))
+    use.on_activate = chose
+    if on_cancel is not None:
+        cancel.on_activate = lambda _widget=None: on_cancel()
+
+    return Panel(title='Driving', scrim=True, modal=True,
+                 preferredColumns=MENU_COLUMNS,
+                 children=[Column(spacing=4, children=[
+                     picker, caption, Separator(top=6),
+                     Row(spacing=2, children=[use, Spacer(), cancel])])])
+
+
+def _how(name: Any) -> str:
+    """What one way of driving does, in its own words."""
+    from glisteel import schemes
+    try:
+        return str(schemes.named(str(name)).summary)
+    except (KeyError, ValueError):               # pragma: no cover - no such way
+        return ''
 
 
 def download_screen(packs: Sequence[Any],

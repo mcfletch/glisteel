@@ -1,7 +1,8 @@
 # What the drive is missing, and one thing the bake gets wrong
 
-**Status: §1 (the bore) has landed. §2 is measured and half-answered. §3–§7 are
-open.**
+**Status: §1 (the bore) has landed, and §6's chooser with it — the five ways of
+driving are reachable from the menu at last. §2 is measured and diagnosed to a
+line of code. §3, §4, §5 and §7 are open.**
 
 Seven things between the game as it is and the game it is meant to be, gathered
 from playing it. They are not one body of work — a terrain-renderer feature, a
@@ -219,13 +220,49 @@ What the drive should have:
 | Birdsong | placed in the forest, not on the camera — the world is a place |
 | Water | at the causeways and the lake edge, which Tidewater is nearly all of |
 
+### Where the sounds come from
+
+Attribution is acceptable — the tree models are already CC-BY — so the licence
+rule for audio is the same one the art follows: **CC0 or CC-BY yes, CC-BY-SA
+never** (copyleft, [CLAUDE.md](../../CLAUDE.md)), CC-BY-NC never.
+
+**Freesound is the source to build on.** Checked rather than assumed:
+
+- Its `license` field is filterable and takes exactly three values —
+  *Attribution*, *Attribution NonCommercial*, *Creative Commons 0*. **There is
+  no ShareAlike on the platform**, so the one licence class that is forbidden
+  here cannot arrive from it. `filter=license:("Creative Commons 0" OR
+  "Attribution")` excludes only the NonCommercial third.
+- Searching needs an API key; **downloading an original needs OAuth2**. The
+  `previews` field gives `preview-hq-ogg`/`-mp3` URLs that need neither, which
+  is enough for ambience and for a first pass at everything else.
+- 60 requests a minute, 2000 a day — ample for assembling a pack once.
+
+Ruled out, with the reason, so nobody re-treads it:
+
+- **Pixabay** is *not* CC0 whatever the search results say. Its own licence
+  forbids distributing content "on a Standalone basis … where no creative
+  effort has been applied", which is exactly what a content pack does.
+- **Kenney** is genuinely CC0 and redistributable, and has no engine, vehicle
+  or nature audio — the packs are UI, impact, sci-fi and casino. Worth keeping
+  in mind for menu sounds and nothing here.
+- **OpenGameArt** has CC0 collections and mixed per-item licences, so every
+  file has to be checked individually. A fallback, not a first stop.
+
+### How it ships
+
+As a **content pack**, not in the wheel: the same rule the art follows, and the
+facility is already built. `copyright` on the pack carries the attributions,
+which is what makes CC-BY workable — the engine requires that field of every
+pack and generates the notices from it.
+
 - [ ] The car's own sounds, driven by the physics that already computes slip,
       load and speed.
 - [ ] The world's sounds as emitters in the scene, so they are positioned and
       the existing spatial mixer does the work.
-- [ ] Licensing checked before anything is committed: BSD-compatible or CC0
-      only, per [CLAUDE.md](../../CLAUDE.md), recorded where the tree art's
-      attributions already are.
+- [ ] A `tools/` script that searches under the licence filter above, takes the
+      previews, and writes the pack with each sound's own licence and author in
+      the `copyright` — so a sound that cannot state its terms cannot get in.
 - [ ] Silence stays a valid backend — `omi_audio` supports it, and a machine
       with no device must still play.
 
@@ -243,11 +280,17 @@ touches anything. Five schemes exist — `Wheel`, `Loose`, `Line`, `Lanes`,
 ordinary way gets the wheel and can never reach the rest without knowing a
 command-line flag exists. That is why the work reads as missing: it is.
 
-- [ ] A control chooser in the front end, offering each scheme with the summary
-      it already carries.
+- [x] A control chooser in the front end: **Menu → Driving**, offering each
+      scheme with the summary it already carries, because a list of five names
+      makes a player start five races to find out which is which. It changes
+      the way of driving *under the car* rather than at the next race — a way of
+      driving is something to feel, and telling somebody to restart to find out
+      is telling them to judge it from memory.
 - [ ] Decide the default on evidence. `CONTROL-SCHEMES.md` §8.1 has the first
       numbers off the feel harness; "on trial" has to end in a choice.
-- [ ] Remember it, beside the track library and the best times.
+- [ ] Remember it between runs, beside the track library and the best times.
+      Choosing a way of driving and finding the wheel back next time is worse
+      than not offering the choice.
 
 ## 7. The editor has never been used in anger
 

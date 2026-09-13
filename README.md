@@ -30,9 +30,11 @@ and through a bore where it does not. The second drives it.
 | `escape` | the menu |
 | `F2` | screenshot |
 
-`glisteel --control lanes` drives it by picking a lane rather than by steering;
-`--control` is the switch between the ways of driving, and the section below
-says what each is. `glisteel --autopilot` drives itself, which is the quickest way to see a lap and
+**Menu → Driving** offers the five ways of driving, each in its own words, and
+changes it under the car rather than at the next race — a way of driving is
+something to feel, and being told to restart to find out is being told to judge
+it from memory. `--control lanes` is the same choice from the command line, and
+the section below says what each is. `glisteel --autopilot` drives itself, which is the quickest way to see a lap and
 the same code an opponent car would use; `--view chase` starts in a view other
 than the driver's seat.
 
@@ -43,7 +45,7 @@ the menu and leaves the game running, which is what a player wants.
 
 ### Ways of driving it
 
-**What a steering key means is a choice, and `--control` is that choice.** The
+**What a steering key means is a choice, and Driving is that choice.** The
 keyboard says a key is down or it is not; what the game makes of that decides
 how hard the car is to place on the road. These are being tried against each
 other rather than settled — see

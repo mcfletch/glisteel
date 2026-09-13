@@ -413,3 +413,54 @@ class TestGettingToTheDownloads:
         """More to fetch is the usual case, not only the empty one."""
         track = Track(name='A', directory='/x', tileset='/x/tileset.json')
         assert 'downloads' in names(menu.track_screen([track]))
+
+
+class TestChoosingHowToDrive:
+    """Five ways to drive exist and a player can reach one of them.
+
+    `schemes.Lanes` is the model the plans call for -- a press asks for the next
+    lane over and the steering takes the car there, leaving the driver the
+    pedals and the decision about when to pass. `Chauffeur` drives until
+    anything is touched. Both are built, tested, and `DEFAULT` is `wheel` with
+    `--control` the only way to change it, so a player who starts the game the
+    ordinary way never meets either. That is why the work reads as missing.
+    """
+
+    def test_the_screen_offers_every_way_of_driving(self):
+        from glisteel import schemes
+        offered = widget(menu.driving_screen(), 'scheme')
+        assert list(offered.options) == list(schemes.available())
+
+    def test_it_starts_on_the_one_in_use(self):
+        assert widget(menu.driving_screen(chosen='lanes'), 'scheme').value \
+            == 'lanes'
+
+    def test_each_says_what_it_does(self):
+        """A name alone makes a player try all five to find out which is which."""
+        from glisteel import schemes
+        found = _text(menu.driving_screen(chosen='lanes'))
+        assert schemes.named('lanes').summary in found
+
+    def test_choosing_one_reports_it(self):
+        chose = []
+        panel = menu.driving_screen(chosen='wheel',
+                                    on_choose=lambda name: chose.append(name))
+        widget(panel, 'scheme').value = 'chauffeur'
+        widget(panel, 'use').activate()
+        assert chose == ['chauffeur']
+
+    def test_it_can_be_left_without_choosing(self):
+        left = []
+        panel = menu.driving_screen(on_cancel=lambda: left.append(1))
+        widget(panel, 'cancel').activate()
+        assert left == [1]
+
+    def test_the_main_menu_reaches_it(self):
+        """Where a player looks for how the game is played."""
+        assert 'driving' in names(menu.main_menu())
+
+    def test_and_calls_its_handler(self):
+        called = []
+        panel = menu.main_menu(on_driving=lambda: called.append(1))
+        widget(panel, 'driving').activate()
+        assert called == [1]

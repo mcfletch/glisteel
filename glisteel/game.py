@@ -73,6 +73,7 @@ from glisteel.lighting import (  # noqa: E402
     Headlights,
 )
 from glisteel.options import DEFAULT_SIZE, Options, window_size  # noqa: E402
+from glisteel.preferences import Preferences  # noqa: E402
 from glisteel.records import Records  # noqa: E402
 from glisteel.session import RACE_LAPS, Session  # noqa: E402
 from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel  # noqa: E402
@@ -146,6 +147,8 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     track: Any = None
     #: The player's best times, kept between sessions.
     records: Any = None
+    #: What the player chose, kept between runs.
+    preferences: Any = None
     #: Whether the finish screen has been shown for the run now over.
     _told: bool = False
     #: The lights the car carries and the ones the world lends it.
@@ -170,6 +173,13 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         # to move on that same clock or the video is not what was driven.
         self._clock = systemTime()
         self.records = Records()
+        self.preferences = Preferences()
+        # What was chosen last time, unless this run asked for something. The
+        # command line is a deliberate answer for one run and outranks the
+        # remembered one without replacing it.
+        if self.preferences.control and self.config.control == schemes.DEFAULT:
+            self.config = dataclasses.replace(
+                self.config, control=self.preferences.control)
         self.hud = RaceHUD()
         self.addHUDLayer(self.hud)
         self._show_hud()
@@ -341,6 +351,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         panel = menu.main_menu(
             on_drive=self._on_drive, on_tracks=self.show_tracks,
             on_settings=self._on_settings, on_quit=self._on_quit,
+            on_driving=self.show_driving,
             on_resume=self._on_resume if racing else None,
             subtitle=subtitle)
         panel.name = 'menu'
@@ -445,6 +456,32 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
 
     def _on_track(self, track: Any) -> None:     # pragma: no cover - needs a window
         self.open(track)
+
+    def show_driving(self) -> None:              # pragma: no cover - needs a window
+        """Which of the five ways of driving is in use.
+
+        The lane switch and the chauffeur have existed for as long as the wheel
+        has and could only be reached by typing `--control`, which is to say
+        they could not be reached.
+        """
+        self._drop_menu()
+        self.pushOverlay(menu.driving_screen(
+            chosen=self.config.control, on_choose=self._on_driving,
+            on_cancel=self.show_menu))
+
+    def _on_driving(self, name: str) -> None:    # pragma: no cover - needs a window
+        """Drive this way from now on, including the race already running.
+
+        Changed under the car rather than at the next race: a player choosing a
+        way of driving wants to feel it, and telling them to restart to find out
+        is telling them to judge it from memory.
+        """
+        self.config = dataclasses.replace(self.config, control=name)
+        self.preferences.control = name
+        self.preferences.save()
+        if self.session is not None:
+            self.session.driver = self._driver()
+        self.show_menu()
 
     def _on_settings(self) -> None:              # pragma: no cover - needs a window
         from OpenGLContext.ui import settings
