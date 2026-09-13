@@ -21,9 +21,10 @@ Every model is built by ``tools/cars.py`` and the shapes are described in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib import resources
 
 from OpenGLContext.loaders.assets import AssetLibrary
+
+from glisteel import content
 
 __all__ = ['ART', 'BONNET', 'HERO', 'HERO_WHEEL_FRONT', 'HERO_WHEEL_REAR',
            'PILLARS', 'STEER_CLIP', 'TRAFFIC', 'VEHICLE_MATERIALS', 'TrafficKind']
@@ -33,7 +34,7 @@ __all__ = ['ART', 'BONNET', 'HERO', 'HERO_WHEEL_FRONT', 'HERO_WHEEL_REAR',
 #: Found through the package rather than through ``__file__``: that is what
 #: :mod:`importlib.resources` is for, and it is the spelling that keeps working
 #: when the package is not a directory of files on a disk.
-ART = AssetLibrary(str(resources.files('glisteel') / 'assets'))
+ART = AssetLibrary(content.art_directory())
 
 #: The player's car: bodywork, interior and glass in one file.
 HERO = 'cars/hero.glb'

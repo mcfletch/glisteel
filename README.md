@@ -246,9 +246,29 @@ needs Python installed:
   ./glisteel_*.deb` rather than `dpkg -i`, so that the OpenGL and X11 libraries
   it asks the machine for are resolved.
 
-**No world travels with either.** A baked world is hundreds of megabytes and the
-one worth driving is the one you made, so a fresh install opens on an empty
-track list. Bake one first:
+**No world travels with either, and neither do the cars.** A baked track is
+22 MB and the four this release carries are 88 MB together, which is not a
+wheel: the archives are attached to a GitHub release and fetched from the game.
+So is the art the car is drawn with, which is why a first run fetches something
+before it shows a menu — one download, asked for, rather than a stall at the
+first frame that wants a model.
+
+Four tracks are on offer. **Tracks → Get more** says what each is, how big it
+is and whose it is, and fetches the one chosen along with the art it shares:
+
+| | | |
+|---|---|---|
+| **Ashdown** | 22 MB | 7.2 km lap; 895 m of viaduct, 289 m of bore |
+| **Tidewater** | 27 MB | 7.3 km lap with the valleys flooded; 773 m of causeway |
+| **Beacon** | 8 MB | 3.0 km hill climb, point to point; more than half inside the hill |
+| **Steelbowl** | 5 MB | 1.7 km banked oval, nothing carried |
+
+Each needs `glisteel/forest-art` (25 MB), which is the same art in every track
+and is therefore downloaded once. `OPENGLCONTEXT_CONTENT` points a packaged,
+offline or CI run at a local copy instead, and nothing is fetched.
+
+Or bake your own, which is what [glisteel-editor](https://github.com/mcfletch/glisteel-editor)
+is for:
 
 ```bash
 glisteel-bake --output my-world --forest tiles

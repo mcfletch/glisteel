@@ -1,9 +1,10 @@
 # Tracks as downloads, and more than one of them
 
-**Status: §1 and §2 have landed — `glisteel-bake --recipe` with every scalar
-knob, the four launch recipes in `glisteel-editor/tracks/`, and `--art-pack`.
-All four bake into one 113.7 MB release carrying a single copy of the art, and
-every figure below is measured rather than projected. §3–§7 are open.**
+**Status: §1–§5 and §7 have landed. The four tracks bake from committed
+recipes, archive to 88.1 MB with one copy of the art, and the game offers them:
+Tracks → Get more says what each is, how big it is and whose it is, fetches it
+with the art it shares, and lists it beside a track baked by hand. §6 is the
+part that needs a release to exist, which is not something code does.**
 
 A release should offer a player several tracks that feel unlike each other,
 without any of them being in the wheel. This plan covers what a track costs,
@@ -162,31 +163,36 @@ The recipes are `glisteel/tracks/*.toml`, read by `glisteel-bake --recipe`.
    silently would put one track's art under another's tiles. Nothing about a
    path changes: both unpack into the same directory, so `trees/...` in a tile
    resolves as it always did.
-3. **Track pictures.** `glisteel <tileset> --picture` already drives a lap and
-   photographs it; the release build runs it per track, and the result is the
-   pack's `preview`. The engine resolves a preview against the registry, so a
-   chooser shows what each track looks like before a byte of it is downloaded.
-4. **`glisteel/packs.json`** and `glisteel/previews/*.jpg` — the four tracks and
-   the art pack, with digests, `needs` naming the art pack, and `copyright`
-   carrying the tree attributions the manifest already records (Fir tree by
-   Georgeous, Noel Pine by 3D Error 404, Maple trees by LOLIPOP, all CC-BY 4.0;
-   ambientCG ground materials CC0). Also published as a **registry bundle** —
-   the JSON and the thumbnails zipped together — on the same release, so a later
-   set of tracks can be offered to an already-installed game by pointing it at a
-   URL rather than by shipping a new version.
-5. **The download screen**, on the engine's `FetchJob`, reached from the track
-   chooser: what it is, how big, its terms, a bar, and a cancel.
+3. ✅ **Track pictures.** Four thumbnails, driven and captured, 87 KB in total
+   against the 88 MB they describe. They ship in the wheel, because a chooser
+   needs them *before* it downloads anything.
+4. ✅ **`glisteel/packs.json`** and `glisteel/previews/*.jpg`, written by
+   `tools/release_content.py` **from the archives it built** — so no digest can
+   describe content that was never made. Six packs: the cars (base), the art,
+   and four tracks each naming the art in `needs`.
+
+   Still open: publishing the registry as a **bundle** — the JSON and the
+   thumbnails zipped — so a later set of tracks can be offered to an installed
+   game by pointing it at a URL rather than by shipping a new version. The
+   engine reads one; nothing builds one yet.
+5. ✅ **The download screen**, on the engine's `FetchJob`, reached by **Get
+   more** from the track chooser. It fetches the whole set a choice pulls in
+   rather than the one pack named, since a track without its art arrives as
+   bare ground. A download the player stopped is said differently from one that
+   failed. The bar is `OpenGLContext.ui.ProgressBar`, written in the engine
+   rather than here: a capability any game would want.
 6. **The release workflow** — bake every recipe, take each picture, archive,
    digest, and upload to a `content-v1` tag. Reproducibility is worth having
    here: the archive should be built with fixed timestamps and sorted entries so
    a rebake at the same tag gives the same digest. Whether the bake itself is
    byte-deterministic at a given seed needs checking before that is claimed.
-7. **`glisteel/assets/`** (1.3 MB of cars) becomes the **base pack** — the
-   engine's `base` flag, fetched before the menu on a first run, digested,
-   published to the same `content-v1` tag as the tracks. A fresh `uv run --with
-   glisteel glisteel` then reaches the network before it can draw a car, which
-   is the cost of keeping data off PyPI; `OPENGLCONTEXT_CONTENT` is what a
-   packaged, offline or CI run uses instead.
+7. ✅ **`glisteel/assets/`** (792 KB of cars) is the **base pack** — the
+   — digested, and fetched before the menu on a first run.
+   `content.art_directory()` reads the pack once it is here and the copy in the
+   wheel until then, which is what let this land before the release does;
+   taking the copy out of the wheel is then one line of `pyproject.toml`.
+   `OPENGLCONTEXT_CONTENT` is what a packaged, offline or CI run uses instead
+   of the network.
 
 ## One thing in the way
 

@@ -290,3 +290,126 @@ class TestTheFinish:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestTheDownloadScreen:
+    """What is on offer, what it costs, and whose it is.
+
+    A track is 22 MB and the set is 88 MB, so none of it is in the wheel. The
+    screen exists because a download is a thing a player agrees to: it says the
+    size before it starts, the terms the content carries, and what is already
+    here so nobody pays twice.
+    """
+
+    def offered(self, **named):
+        from OpenGLContext.contentpacks.pack import ContentPack
+        base = dict(url='https://example.invalid/a.tar.gz', archive='tar',
+                    copyright='Somebody, CC-BY 4.0', marker='tileset.json')
+        return [ContentPack(key='glisteel/ashdown', title='Ashdown',
+                            directory='ashdown', approximate_bytes=23_000_000,
+                            notes='7.2 km, a lap.', **dict(base, **named)),
+                ContentPack(key='glisteel/beacon', title='Beacon',
+                            directory='beacon', approximate_bytes=9_000_000,
+                            **dict(base, **named))]
+
+    def test_it_names_every_pack_on_offer(self):
+        offered = widget(menu.download_screen(self.offered()), 'offered')
+        assert list(offered.options) == ['glisteel/ashdown', 'glisteel/beacon']
+
+    def test_it_says_what_a_download_costs(self):
+        panel = menu.download_screen(self.offered())
+        assert '23 MB' in _text(panel)
+
+    def test_it_says_whose_the_content_is(self):
+        """A pack's terms are why `copyright` is required of one."""
+        assert 'CC-BY 4.0' in _text(menu.download_screen(self.offered()))
+
+    def test_it_offers_to_fetch_and_to_leave(self):
+        found = names(menu.download_screen(self.offered()))
+        assert 'fetch' in found and 'cancel' in found
+
+    def test_choosing_one_asks_for_it_and_what_it_needs(self):
+        wanted = []
+        panel = menu.download_screen(
+            self.offered(), on_fetch=lambda pack: wanted.append(pack.key))
+        widget(panel, 'fetch').activate()
+        assert wanted == ['glisteel/ashdown']
+
+    def test_nothing_on_offer_is_not_an_error(self):
+        """Everything downloaded is the ordinary end state, not a failure."""
+        panel = menu.download_screen([])
+        assert menu.ALL_HERE in _text(panel)
+        assert not widget(panel, 'fetch').enabled
+
+    def test_a_fetch_under_way_says_how_far(self):
+        class _Job:
+            fraction = 0.42
+            state = 'Ashdown'
+            finished = False
+            failed = None
+            cancelled = False
+        found = _text(menu.download_screen(self.offered(), job=_Job()))
+        assert '42' in found and 'Ashdown' in found
+
+    def test_one_that_failed_says_so_rather_than_looking_idle(self):
+        class _Job:
+            fraction = 0.3
+            state = 'Ashdown'
+            finished = True
+            failed = OSError('the server said no')
+            cancelled = False
+        assert 'the server said no' in _text(
+            menu.download_screen(self.offered(), job=_Job()))
+
+    def test_one_the_user_stopped_is_not_reported_as_a_failure(self):
+        class _Job:
+            fraction = 0.3
+            state = 'Ashdown'
+            finished = True
+            failed = None
+            cancelled = True
+        found = _text(menu.download_screen(self.offered(), job=_Job()))
+        assert menu.STOPPED in found
+
+
+def _text(panel):
+    """Every word the screen shows."""
+    found = []
+
+    def walk(node):
+        for attribute in ('text', 'title'):
+            value = getattr(node, attribute, None)
+            if isinstance(value, str):
+                found.append(value)
+        for child in getattr(node, 'children', None) or ():
+            walk(child)
+    walk(panel)
+    return ' | '.join(found)
+
+
+class TestGettingToTheDownloads:
+    """A screen nobody can reach is a screen nobody has.
+
+    The download screen is where the tracks come from now, so the track chooser
+    offers it -- that being where a player goes when they want something to
+    drive and the answer is "there is nothing yet".
+    """
+
+    def test_the_track_screen_offers_downloads(self):
+        assert 'downloads' in names(menu.track_screen([]))
+
+    def test_it_calls_its_handler(self):
+        called = []
+        panel = menu.track_screen([], on_downloads=lambda: called.append(1))
+        widget(panel, 'downloads').activate()
+        assert called == [1]
+
+    def test_an_empty_library_no_longer_says_only_to_bake(self):
+        """There are tracks to fetch; telling a fresh install to run a command
+        line tool is telling it the harder of two answers."""
+        assert 'download' in menu.NO_TRACKS.lower()
+
+    def test_the_button_is_there_even_with_tracks(self):
+        """More to fetch is the usual case, not only the empty one."""
+        track = Track(name='A', directory='/x', tileset='/x/tileset.json')
+        assert 'downloads' in names(menu.track_screen([track]))

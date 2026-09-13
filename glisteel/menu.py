@@ -14,6 +14,8 @@ handling without knowing anything about any of it:
 :func:`track_screen`
     The library (:mod:`glisteel.tracks`) as a band of pictures, each with what
     the track is and the quickest lap driven on it.
+:func:`download_screen`
+    What is on offer, what it costs, whose it is, and how far a fetch has got.
 :func:`finish_screen`
     The time, where it came, and what to do next.
 
@@ -29,10 +31,18 @@ from typing import Any
 from OpenGLContext.ui.gallery import Carousel
 from OpenGLContext.ui.layout import Column, Row
 from OpenGLContext.ui.panel import Panel
-from OpenGLContext.ui.widgets import Button, Label, Select, Separator, Spacer
+from OpenGLContext.ui.widgets import (
+    Button,
+    Label,
+    ProgressBar,
+    Select,
+    Separator,
+    Spacer,
+)
 
-__all__ = ['GAME_TITLE', 'NO_TRACKS', 'NEVER_DRIVEN', 'FINISHED', 'BEST',
-           'main_menu', 'track_screen', 'finish_screen']
+__all__ = ['ALL_HERE', 'BEST', 'FINISHED', 'GAME_TITLE', 'NEVER_DRIVEN',
+           'NO_TRACKS', 'STOPPED', 'download_screen', 'finish_screen',
+           'main_menu', 'track_screen']
 
 #: The name of the game, in exactly one place.
 GAME_TITLE = 'GLinting Steel'
@@ -41,8 +51,17 @@ GAME_TITLE = 'GLinting Steel'
 MENU_COLUMNS = 44
 
 #: What the chooser says when there is nothing to drive. Not an error: a fresh
-#: install is exactly this, and the answer is to bake a world.
-NO_TRACKS = 'No tracks yet — bake one with glisteel-bake'
+#: install is exactly this, and the answer is to fetch one or bake one.
+NO_TRACKS = 'No tracks yet — download one, or bake one with glisteel-bake'
+
+#: What the download screen says when there is nothing left to fetch. The
+#: ordinary end state of downloading things, not a failure.
+ALL_HERE = 'Everything is downloaded'
+
+#: What it says about a download the player stopped. Distinct from a failure:
+#: nothing went wrong, and telling somebody their own decision was an error is
+#: a poor way to answer it.
+STOPPED = 'Stopped'
 
 #: What stands where a best lap would go on a track never driven.
 NEVER_DRIVEN = '--:--.---'
@@ -96,7 +115,8 @@ def track_screen(tracks: Sequence[Any],
                  chosen: Any = None,
                  records: Any = None,
                  on_choose: Callable[[Any], None] | None = None,
-                 on_cancel: Callable[[], None] | None = None) -> Panel:
+                 on_cancel: Callable[[], None] | None = None,
+                 on_downloads: Callable[[], None] | None = None) -> Panel:
     """Choose a world to drive.
 
     A drop-down is the wrong control. What tells one circuit from another is
@@ -108,6 +128,11 @@ def track_screen(tracks: Sequence[Any],
     ``records`` is ``{track key: best Record}``; a track never driven shows
     :data:`NEVER_DRIVEN` rather than nothing, so the row is the same shape
     either way.
+
+    **More** is offered here whether or not there are any, because this is
+    where a player comes when they want something to drive: an install with
+    nothing yet finds the answer in the same place as one looking for another
+    circuit.
     """
     tracks = list(tracks)
     times = dict(records or {})
@@ -115,6 +140,7 @@ def track_screen(tracks: Sequence[Any],
     caption = Label(text=_caption(tracks, chooser, times), wrap=True,
                     name='caption')
     drive = Button(text='Drive', name='drive', role='primary')
+    downloads = Button(text='Get more', name='downloads')
     cancel = Button(text='Cancel', name='cancel')
     drive.enabled = bool(tracks)
 
@@ -128,8 +154,8 @@ def track_screen(tracks: Sequence[Any],
                   preferredColumns=MENU_COLUMNS * 2,
                   children=[Column(spacing=4, children=[
                       chooser, caption, Separator(top=6),
-                      Row(children=[Spacer(), cancel, drive], spacing=8, top=8,
-                          name='buttons')])])
+                      Row(children=[downloads, Spacer(), cancel, drive],
+                          spacing=8, top=8, name='buttons')])])
     answered = False
 
     def finish(started: bool) -> None:
@@ -146,10 +172,116 @@ def track_screen(tracks: Sequence[Any],
         elif not started and on_cancel is not None:
             on_cancel()
 
+    def wanted_more(_widget: Any = None) -> None:
+        # Not `finish`: asking for more is not answering the question this
+        # screen asked, and a player who closes the downloads should find the
+        # chooser where they left it.
+        if on_downloads is not None:
+            on_downloads()
+
     drive.on_activate = lambda _widget: finish(True)
+    downloads.on_activate = wanted_more
     cancel.on_activate = lambda _widget: finish(False)
     panel.on_close = lambda _closing: finish(False)
     return panel
+
+
+def download_screen(packs: Sequence[Any],
+                    job: Any = None,
+                    on_fetch: Callable[[Any], None] | None = None,
+                    on_cancel: Callable[[], None] | None = None) -> Panel:
+    """What is on offer, what it costs, and whose it is.
+
+    A track is 22 MB and the set is 88 MB, so none of it ships in the wheel.
+    This screen is where a player agrees to a download: the size before it
+    starts, the terms the content carries, and -- since a track is incomplete
+    without the art it shares -- the size of *everything* the choice pulls in
+    rather than of the one pack named.
+
+    ``packs`` is what is missing; an empty one is :data:`ALL_HERE` rather than
+    an empty screen. ``job`` is a
+    :class:`~OpenGLContext.contentpacks.fetch.FetchJob` under way, and the
+    screen is rebuilt from it as it is polled.
+    """
+    packs = list(packs)
+    chooser = Select(name='offered', options=[one.key for one in packs],
+                     value=packs[0].key if packs else None)
+    caption = Label(text=_offer(packs[0]) if packs else ALL_HERE, wrap=True,
+                    name='offer')
+    # A bar and the words: the bar is how far, the words are which pack and
+    # what went wrong. Neither says the other's half.
+    progress = ProgressBar(fraction=_fraction(job), text=_progress(job),
+                           name='progress')
+    fetch = Button(text='Download', name='fetch', role='primary')
+    cancel = Button(text='Close', name='cancel')
+    fetch.enabled = bool(packs) and not _running(job)
+
+    def picked(widget: Any) -> None:
+        caption.text = _offer(_pack_named(packs, widget.value))
+    chooser.on_change = picked
+
+    def wanted(_widget: Any = None) -> None:
+        chosen = _pack_named(packs, chooser.value)
+        if chosen is not None and on_fetch is not None:
+            on_fetch(chosen)
+    fetch.on_activate = wanted
+    if on_cancel is not None:
+        cancel.on_activate = lambda _widget=None: on_cancel()
+
+    return Panel(title='Downloads', scrim=True, modal=True,
+                 preferredColumns=MENU_COLUMNS * 2,
+                 children=[Column(spacing=4, children=[
+                     chooser, caption, progress, Separator(top=6),
+                     Row(spacing=2, children=[fetch, Spacer(), cancel])])])
+
+
+def _pack_named(packs: Sequence[Any], key: Any) -> Any:
+    for one in packs:
+        if one.key == key:
+            return one
+    return packs[0] if packs else None
+
+
+def _offer(pack: Any) -> str:
+    """One pack as a player reads it before agreeing to fetch it."""
+    if pack is None:
+        return ALL_HERE
+    said = ['%s — %s' % (pack.title, pack.human_size())]
+    if pack.notes:
+        said.append(pack.notes)
+    said.append(pack.copyright)
+    return '\n'.join(said)
+
+
+def _fraction(job: Any) -> float:
+    """How far the bar is filled. Nothing where there is no job to ask."""
+    if job is None:
+        return 0.0
+    return float(getattr(job, 'fraction', 0.0))
+
+
+def _running(job: Any) -> bool:
+    return job is not None and not getattr(job, 'finished', False)
+
+
+def _progress(job: Any) -> str:
+    """How far a download has got, or why it stopped.
+
+    A job that failed and a job the player stopped are different things and are
+    said differently; a job that finished says nothing, because the screen it
+    came back to already shows what arrived.
+    """
+    if job is None:
+        return ''
+    if getattr(job, 'cancelled', False):
+        return STOPPED
+    failed = getattr(job, 'failed', None)
+    if failed is not None:
+        return 'Could not download: %s' % (failed,)
+    if getattr(job, 'finished', False):
+        return ''
+    return '%s — %d%%' % (getattr(job, 'state', '') or '',
+                          round(float(getattr(job, 'fraction', 0.0)) * 100))
 
 
 def finish_screen(result: Any, place: int | None = None,

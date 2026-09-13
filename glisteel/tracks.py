@@ -143,23 +143,43 @@ class Track:
         return ', '.join(parts) or 'a road'
 
 
-def library(directory: str | None = None) -> list[Track]:
-    """Every world under a directory, by name.
+def library(directory: str | None = None, store: Any = None) -> list[Track]:
+    """Every world a player can drive: their own, and the ones downloaded.
 
     Sorted, because a chooser that reorders itself between runs is one a player
     cannot learn. A directory that holds no worlds -- including one that is not
     there -- is an empty library rather than an error: a fresh install is
     exactly that.
+
+    A track that arrived as a content pack is a track like one baked by hand --
+    a directory with a manifest beside a tileset -- so it is listed beside them
+    and nothing downstream needs to know which it was. ``store`` names where the
+    downloaded ones live; the default is this game's own.
     """
     root = directory or tracks_directory()
     try:
         inside = sorted(os.listdir(root))
     except OSError:
-        return []
+        inside = []
     found = [Track.at(os.path.join(root, entry)) for entry in inside
              if os.path.isdir(os.path.join(root, entry))]
+    known = {track.directory for track in found if track is not None}
+    for track in _downloaded(store):
+        if track.directory not in known:
+            found.append(track)
     return sorted((track for track in found if track is not None),
                   key=lambda track: track.key)
+
+
+def _downloaded(store: Any) -> list[Track]:
+    """The tracks fetched as content packs, or none where that is not built.
+
+    Imported here rather than at the top: :mod:`glisteel.content` reads this
+    module to turn a pack into a :class:`Track`, and a module that imports its
+    own reader at import time cannot be imported at all.
+    """
+    from glisteel import content
+    return content.installed_tracks(store=store)
 
 
 def named(name: str, directory: str | None = None) -> Track | None:

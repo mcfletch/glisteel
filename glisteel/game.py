@@ -155,6 +155,9 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     #: The video being written, or None. Declared because the mixin that owns it
     #: is untyped, and mypy cannot otherwise tell what it holds.
     recorder: Any = None
+    #: The download under way, or None. Polled once a frame; a job nobody polls
+    #: tells nobody anything.
+    _fetching: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
     addEventHandler: Any
@@ -351,7 +354,61 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.pushOverlay(menu.track_screen(
             found, chosen=self.track,
             records={key: one for key, one in best.items() if one is not None},
-            on_choose=self._on_track, on_cancel=self.show_menu))
+            on_choose=self._on_track, on_cancel=self.show_menu,
+            on_downloads=self.show_downloads))
+
+    def show_downloads(self) -> None:            # pragma: no cover - needs a window
+        """What is on offer, and what a download costs.
+
+        Over the chooser rather than instead of it: asking for more is not
+        answering the question the chooser asked, and closing this should find
+        it where it was left.
+        """
+        from glisteel import content
+        panel = menu.download_screen(
+            content.missing(), job=self._fetching,
+            on_fetch=self._on_fetch, on_cancel=self.show_tracks)
+        panel.name = 'downloads'
+        self.pushOverlay(panel)
+
+    def _on_fetch(self, pack: Any) -> None:      # pragma: no cover - needs a window
+        """Start a download, off the frame loop.
+
+        The whole set the choice pulls in, not the one pack named: a track
+        without the art it shares arrives as bare ground, and a user who agreed
+        to a track agreed to a track that works.
+        """
+        from OpenGLContext.contentpacks.fetch import FetchJob
+
+        from glisteel import content
+        wanted = content.wanted_for(pack)
+        self._fetching = FetchJob(content.missing(wanted), content.store(),
+                                  on_progress=self.triggerRedraw).start()
+        self.show_downloads()
+
+    def pollDownloads(self) -> None:             # pragma: no cover - needs a window
+        """Publish what the download has managed, once a frame.
+
+        `poll` is the only place anything the worker wrote is read, which is
+        the whole of the thread safety; a job nobody polls tells nobody
+        anything. Rebuilding the screen is what shows it.
+        """
+        job = self._fetching
+        if job is None:
+            return
+        was = (job.fraction, job.finished)
+        job.poll()
+        if job.finished:
+            self._fetching = None
+        if (job.fraction, job.finished) != was \
+                and self.overlays.named('downloads') is not None:
+            self._drop_named('downloads')
+            self.show_downloads()
+
+    def _drop_named(self, name: str) -> None:    # pragma: no cover - needs a window
+        panel = self.overlays.named(name)
+        if panel is not None:
+            self.overlays.remove(panel)
 
     def show_finish(self, result: Any, place: Any) -> None:  # pragma: no cover
         """What the race came to, and what to do next.
@@ -476,6 +533,9 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self._clock = now
         if self.session is not None:
             self.advance(elapsed)
+        # Here rather than in the draw: a download is not a thing being drawn,
+        # and the frame loop runs whether or not a race does.
+        self.pollDownloads()
         self.triggerRedraw(1)
         return 1
 

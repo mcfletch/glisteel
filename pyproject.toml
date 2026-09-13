@@ -57,7 +57,12 @@ include = ["glisteel*"]
 # fetched at first run is a car missing on a machine with no network. The
 # script that builds them is tools/cars.py, which is not packaged.
 [tool.setuptools.package-data]
-glisteel = ["assets/**/*.glb", "assets/**/CREDITS.md"]
+# `packs.json` and the previews beside it are what a chooser needs *before* it
+# downloads anything: a pack's own art is inside the archive being chosen, so a
+# screen offering one has nothing to show it with otherwise. They are a document
+# and four thumbnails -- 87 KB against the 88 MB they describe.
+glisteel = ["assets/**/*.glb", "assets/**/CREDITS.md",
+            "packs.json", "previews/*.jpg"]
 
 [tool.ruff]
 line-length = 100
