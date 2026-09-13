@@ -784,6 +784,49 @@ one for the headlights — seven of eight, with one left for whatever a world
 wants next. `--no-headlights` drives without them; they come on where it is
 dark, which in this world means inside a bore.
 
+### What it sounds like, and where the sound comes from
+
+**Nothing is a recording.** A GLinting Steel car is an EV, and an EV's noise is
+three things a physics step already knows: a motor whine whose pitch is the road
+speed, tyres whose hiss is how fast they are rolling and whose roar is how much
+they are scrubbing, and wind that goes as the square of how fast the body is
+being pushed through the air. Each is an `omi_audio.synth` clip — a tone with a
+harmonic series, and noise with the top or the bottom taken off — played round
+and round with its gain and its playback rate written every frame.
+
+So the car's sound ships in the wheel at the size of the code that makes it,
+with no licence, no attribution and no download. Only the world's ambience —
+birdsong, water — is recorded, and that is a content pack.
+
+| | |
+|---|---|
+| Motor | pitch is road speed: one reduction gear and no clutch, so there are no shifts to hear. Quiet coasting, loud under power |
+| Tyres | rolling with speed, and **scrubbing much louder** when the car lets go. Silent with the wheels off the ground |
+| Wind | speed squared, which is most of what makes speed feel like speed |
+| Impacts | every contact, at the closing speed the crash rule already measures. A scrape is quieter than a crash, and a nudge at walking pace is nothing |
+
+**It reads the car rather than being told about it.** `omi_physics` computes
+`Wheel.slip` — the sideways speed at the contact patch — for its own reasons,
+and documents it as the number a game makes tyre noise from. Nothing here is
+scripted to a lap or hung off an event, so the car sounds like whatever it is
+actually doing, including things nobody wrote a case for.
+
+Which also bounds what it can tell you. Slip stays very small until a tyre
+actually breaks away — 0.09 m/s on average getting round a circuit, and still
+only 0.38 for an autopilot pushed 80% past its own grip — and then jumps an
+order of magnitude, to 3.2 for full lock at 30 m/s and 5.0 for a handbrake turn.
+So the scrub comes in over *that* band, and what you hear is the car **letting
+go**, not a warning that it is about to.
+
+Every gain is rate-limited: full scale takes `SETTLE` seconds, because one wheel
+catching a kerb changes slip by metres a second between two frames and a gain
+that jumps is a click. The emitter is `global` rather than placed — the listener
+is *in* this car, and panning the driver's own motor across their head as the
+car turns would be wrong.
+
+`OPENGLCONTEXT_AUDIO=0` turns it off, and a machine with no sound device plays
+the game unchanged: the nodes traverse, there is no engine, and nothing sounds.
+
 ### Tracks, and the times driven on them
 
 Starting the game with no arguments is a reasonable thing to do: with no world

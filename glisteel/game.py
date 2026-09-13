@@ -238,6 +238,10 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             *ViewerContext.defaultLights(WORLD_LIGHT_SCALE),
             world.terrain,
             self.session.car.node,
+            # The car's motor, tyres and wind. A `global` emitter, so it is not
+            # placed: the listener is in this car, and panning the driver's own
+            # motor across their head as the car turns would be wrong.
+            self.session.sound.node,
         ]
         if world.traffic is not None:
             # Mounted once; the cars under it come and go as the player passes.

@@ -266,12 +266,52 @@ mirror instead of a square hit.
 - [ ] A capture of one taking the ditch, which is the only way to know whether
       it looks like a driver getting out of the way or a car sliding sideways.
 
-## 5. The game is silent
+## 5. The game is silent — *the car is done; the world is not*
 
-Nothing in `glisteel/` references audio at all. The engine's side is ready and
+Nothing in `glisteel/` referenced audio at all. The engine's side was ready and
 unused: `OpenGLContext/audio/` is a spatial audio scene on the glTF
 `KHR_audio_emitter` model, and `omi_audio` is a core dependency of OpenGLContext
-rather than an extra, so the capability is already installed with the game.
+rather than an extra, so the capability was already installed with the game.
+
+### What landed, and why it needs no content pack
+
+**The car's sounds are arithmetic, not recordings.** An EV's noise is three
+things a physics step already knows — a whine whose pitch is road speed, tyres
+whose hiss is rolling and whose roar is scrubbing, wind as the square of speed —
+and `omi_audio.synth` already builds exactly the clips those want: a tone with a
+harmonic series, and noise with the top or the bottom taken off. So the car ships
+in the wheel at the size of the code that makes it, with **no licence, no
+attribution and no download**.
+
+That is the part of this section that was wrong when it was written. The plan
+assumed every sound was a recording and therefore a pack, and priced the whole
+of §5 accordingly. Only the ambience actually is.
+
+- `glisteel/sound.py` — `CarSound` is the behaviour and touches nothing: four
+  numbers a frame in, gains and playback rates out. `Soundtrack` owns the nodes.
+  31 tests, none needing a device, a window or an audio thread.
+- It **reads** the car rather than being told about it. `omi_physics` computes
+  `Wheel.slip` for its own reasons and documents it as the number a game makes
+  tyre noise from, so nothing here is scripted to a lap or hung off an event.
+- Every gain is rate-limited to full scale in `SETTLE`, because one wheel
+  catching a kerb changes slip by metres a second between two frames and a gain
+  that jumps is a click.
+- The emitter is `global`: the listener is *in* this car, so there is nothing to
+  position, and panning the driver's own motor across their head as the car
+  turns would be wrong.
+
+**One engine change made it possible.** `AudioSource` resolved a clip from a
+`url` or from a glTF document's audio library and from nowhere else, so a clip
+an application *made* — including one from the engine's own synthesiser, whose
+docstring offers them as placeholders "while real content is being made" — could
+not reach a scene at all. `AudioSource.useClip()` takes one, resampling it to the
+engine's rate as `ClipCache.put` does for a clip registered by name. Four tests.
+
+### What is left
+
+Birdsong and water, which genuinely are recordings, and the tool that fetches
+them. Smaller than this section assumed and no longer blocking: the game has
+sound.
 
 What the drive should have:
 

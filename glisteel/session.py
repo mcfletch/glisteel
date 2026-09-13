@@ -34,6 +34,7 @@ from glisteel.car import Car, CarSpec
 from glisteel.race import Collisions, OffRoad, RaceTiming, off_course
 from glisteel.reflections import Reflections
 from glisteel.run import COUNTDOWN, Run
+from glisteel.sound import Soundtrack
 from glisteel.traffic import IN_THE_WAY
 
 log = logging.getLogger(__name__)
@@ -209,6 +210,10 @@ class Session:
         self.timing = RaceTiming(course)
         self.watch = OffRoad(course)
         self.crashes = Collisions()
+        #: What the car sounds like. Mount :attr:`Soundtrack.node` in the scene
+        #: and it plays; leave it out and everything here still runs, because a
+        #: node nobody traverses is never asked for audio.
+        self.sound = Soundtrack()
         #: Which part of the race this is, and what it lets through to the car.
         self.run = Run(laps=laps)
         #: The steering the game puts in while the player is not steering.
@@ -496,6 +501,11 @@ class Session:
             self._watch_for_a_crash()
             self._accumulated -= PHYSICS_STEP
         self.car.follow(elapsed)
+        # After the steps, so it hears the car as the frame leaves it, and on
+        # the frame's own elapsed time rather than the fixed step: gains move
+        # at so much a second, and running them several times a frame would
+        # make how quickly the car got loud depend on the frame rate.
+        self.sound.update(elapsed, self.car)
         if self.world.traffic is not None:
             if self.run.over:
                 # Said rather than left unsaid: the cars' bodies carry their
@@ -691,6 +701,11 @@ class Session:
         if struck is None:
             return
         body, closing = struck
+        # Every contact is audible, not only the ones that end a run: a scrape
+        # along a wing is something the car did and something the player should
+        # hear. How gentle is too gentle to be a bang is the soundtrack's own
+        # question, and it answers it with silence.
+        self.sound.hit(closing)
         if self.crashes.update(closing) is not None:
             self._mark_the_crash(traffic.car_of(body), closing)
 
