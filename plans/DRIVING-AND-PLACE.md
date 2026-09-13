@@ -141,10 +141,23 @@ the engine's road texture rather than in any world:
 - [ ] A lane line between the two lanes on the widened side — a road with three
       lanes and one line painted on it is not marked, it is merely wide.
 
-The texture is one image stretched along the whole road, so this is a change to
-how `section_u` unwraps a widened cut rather than a second image: the extra
-lane has to occupy its own span of `u`, and the paint then lands where the
-lanes are.
+The mechanism, read off the code: `road_surface` sets
+
+    u = np.tile(profile.section_u(), len(line))
+
+— **the same texture row at every station**, taken from the base profile.
+`widened_sections` moves the cut's vertices apart; nothing moves their `u`. So
+a widened section stretches the same paint over a wider road, and the single
+centre line goes with it.
+
+That makes this a larger change than it first looks, and worth doing as its own
+piece of work rather than tacked on: `u` has to vary per station against a
+texture drawn for the *widest* cross-section, so the extra lane occupies its own
+span and an unwidened section reaches only the part of the image that is a
+two-lane road. Every road the engine draws is textured through that line, so it
+wants its own before-and-after captures on a widened stretch, an ordinary one,
+and the taper between them — which is where a per-station unwrap would show any
+seam.
 
 - [x] A capture of a climbing lane from the road, and one from 30 m straight
       down, which is where the single centre line is unmistakable.
