@@ -754,33 +754,41 @@ class TestTheMaskThatOpensABore:
                                                 np.array([400.0])))[0])
 
 
-class TestACaptureIsNotPacedByADisplay:
-    """`glisteel --capture` draws N frames and writes a file. Nothing else.
+class TestNeitherWritingModeIsPacedByADisplay:
+    """`--capture` and `--record` both draw N frames and write a file.
 
     A compositor throttles the buffer swap to its own frame callback, and a
     window it is not presenting never gets one -- so `swap_buffers` blocks for
     ever, the first frame never finishes, and the run produces no error, no
     output and no end. Found with `faulthandler` on a capture that had sat for
     100 seconds without drawing five frames.
+
+    **Both**, because the first fix went into `--capture` alone and left its
+    sibling with the defect: a ten-second recording then sat for ten minutes on
+    twelve seconds of CPU. The reason belongs to the pair, so it is written down
+    once in `game._unpaced` and both call it, and these ask both.
     """
 
-    def test_the_capture_path_asks_for_no_vsync(self, monkeypatch) -> None:
+    @pytest.mark.parametrize('mode', ['capture', 'record'])
+    def test_it_asks_for_no_vsync(self, monkeypatch, mode) -> None:
         import os
         monkeypatch.delenv('OPENGLCONTEXT_NO_VSYNC', raising=False)
-        _run_capture_setup(monkeypatch)
+        _run_writing_setup(monkeypatch, mode)
         assert os.environ.get('OPENGLCONTEXT_NO_VSYNC') == '1'
 
-    def test_a_machine_that_wants_pacing_still_gets_it(self, monkeypatch) -> None:
-        """`setdefault`: somebody watching a capture on a real desktop may want
-        it paced, and saying so has to keep working."""
+    @pytest.mark.parametrize('mode', ['capture', 'record'])
+    def test_a_machine_that_wants_pacing_still_gets_it(self, monkeypatch, mode
+                                                       ) -> None:
+        """`setdefault`: somebody watching one on a real desktop may want it
+        paced, and saying so has to keep working."""
         import os
         monkeypatch.setenv('OPENGLCONTEXT_NO_VSYNC', '0')
-        _run_capture_setup(monkeypatch)
+        _run_writing_setup(monkeypatch, mode)
         assert os.environ.get('OPENGLCONTEXT_NO_VSYNC') == '0'
 
 
-def _run_capture_setup(monkeypatch):
-    """`_capture` up to the point it would open a window, and no further."""
+def _run_writing_setup(monkeypatch, mode='capture'):
+    """`_capture` or `_record` up to the window, and no further."""
     from glisteel import game
 
     class _Stop(Exception):
@@ -792,8 +800,12 @@ def _run_capture_setup(monkeypatch):
             raise _Stop()
 
     monkeypatch.setattr(game, 'GlisteelContext', _Context)
-    options = game.build_parser().parse_args(['--capture', 'x.png'])
+    argument, entry = {
+        'capture': (['--capture', 'x.png'], game._capture),
+        'record': (['--record', 'x.mp4'], game._record),
+    }[mode]
+    options = game.build_parser().parse_args(argument)
     try:
-        game._capture(options, 320, 180)
+        entry(options, 320, 180)
     except _Stop:
         pass

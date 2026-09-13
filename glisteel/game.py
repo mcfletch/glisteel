@@ -920,6 +920,22 @@ def _run(options: Any, width: int, height: int) -> int:  # pragma: no cover
     return 0
 
 
+def _unpaced() -> None:
+    """Stop a display deciding how fast this run goes, or whether it goes.
+
+    A mode that draws a fixed number of frames and writes a file must not be
+    paced by a display, and there are two of those: :func:`_capture` and
+    :func:`_record`. A compositor throttles the swap to its own frame callback,
+    and a window it is not presenting never gets one -- ``swap_buffers`` then
+    blocks for ever and the first frame never finishes. No error, no output, a
+    run that simply never ends.
+
+    ``setdefault``, so ``OPENGLCONTEXT_NO_VSYNC=0`` still asks for a paced run
+    on a machine where that is wanted.
+    """
+    os.environ.setdefault('OPENGLCONTEXT_NO_VSYNC', '1')
+
+
 def _record(options: Any, width: int, height: int) -> None:  # pragma: no cover
     """Drive, recording the drive to a video file, and exit when it is done.
 
@@ -930,6 +946,8 @@ def _record(options: Any, width: int, height: int) -> None:  # pragma: no cover
     takes -- which is why this is a mode rather than something the game does
     while someone is playing it.
     """
+    _unpaced()
+
     encoder: dict[str, Any] = {}
     if options.record_bitrate:
         encoder['bitrate'] = options.record_bitrate
@@ -985,13 +1003,7 @@ def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
     """
     from OpenGLContext.capture import SettleCapture
 
-    # A capture draws a fixed number of frames and writes a file, so it must not
-    # be paced by a display. A compositor throttles the swap to its own frame
-    # callback, and a window it is not presenting never gets one: `swap_buffers`
-    # then blocks for ever and the first frame never finishes -- no error, no
-    # output, a run that simply never ends. `setdefault`, so `OPENGLCONTEXT_NO_VSYNC=0`
-    # still asks for a paced capture on a machine where that is wanted.
-    os.environ.setdefault('OPENGLCONTEXT_NO_VSYNC', '1')
+    _unpaced()
 
     class CapturingContext(GlisteelContext):
         config = options
