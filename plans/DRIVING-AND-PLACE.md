@@ -1,6 +1,7 @@
 # What the drive is missing, and one thing the bake gets wrong
 
-**Status: Planned**
+**Status: §1 (the bore) has landed. §2 is measured and half-answered. §3–§7 are
+open.**
 
 Seven things between the game as it is and the game it is meant to be, gathered
 from playing it. They are not one body of work — a terrain-renderer feature, a
@@ -47,31 +48,69 @@ which is right to look at and a wall to drive into."
 Replace the terrain cells at each portal and run the bore under the surface
 everywhere else. In the three repositories:
 
-- [ ] **OpenGLContext** — `HeightField.mesh(holes=...)` drops a cell whose
-      centre is in a hole, which is *the same rule the collider uses*, so the
-      two agree to within half a cell by construction rather than by care.
-      `SplatTerrain` passes it through.
-- [ ] **glisteel** — hand `_bores()` to the terrain node as well as to the
-      collider. It is already computed; it is already correct; it reaches one of
-      the two things that need it.
-- [ ] **openglcontext-editor** — `RoadPath.reshaped_segments()` stops including
-      every segment inside a bore, so the hill is left whole. Its docstring is
-      the argument for the flattening and has to go with it; `_bore_corridor`
-      and the vegetation `road_cut` that reads it follow.
+- [x] **OpenGLContext** — `HeightField.mesh(holes=...)` drops a *triangle*
+      whose centre is in a hole, which is the collider's rule to the letter, so
+      the two agree by construction rather than by care. `SplatTerrain` takes
+      it; `TilesTerrain.holes` is settable after construction, since a game
+      reads a tileset to stand the ground up and reads it again to find the
+      roads, and only the roads know where a bore runs.
+- [x] **glisteel** — `_bores()` goes to the terrain as well as the collider,
+      computed **once** and shared: two closures over the same courses would
+      answer alike today and drift apart on any change.
+- [x] **openglcontext-editor** — the earthwork reshapes what stands on the land
+      and nothing else. `_bore_corridor` went with it, and so did the three
+      things that read it: the vegetation clearing (a tree stands on the hill
+      again, and how deep the bore is no longer changes what is cleared — the
+      tell that the clearing was sized by earthworks nobody digs), the road
+      layer painted on the bore's floor, and the boulder rule.
 
 ### How it is checked
 
 The defect is invisible from the driving seat, which is how it survived a play
 review. So the check is not a drive:
 
-- [ ] A capture from *beside* the circuit, looking at the hill a bore runs
-      through, before and after.
-- [ ] The portal from the road, at both ends, confirming the arch is an opening
-      in a hillside rather than the end of a trench.
-- [ ] A drive through, confirming the car still gets through — the collider is
-      unchanged, so this is a regression check rather than a new behaviour.
+- [x] A capture from *beside* the circuit: a sand-coloured trench gouged
+      through the hill before, unbroken hillside after. The deepest bore in the
+      shipped world carries 53.5 m of cover.
+- [x] The portal from the road: an open arch with hill above it and the road
+      running in, driven to at 50 s of a lap.
+- [x] A drive through: at 56 s the car is inside the bore — lining, ceiling
+      luminaires, traffic ahead, daylight at the far end.
 - [ ] Beacon is the case that shows it worst: 1774 m of its 3.02 km is inside
       the hill.
+
+### Left open: the mask is the game's, and belongs to the world
+
+The bore is right **in glisteel** and wrong in `oglc-view`, which shows the hill
+filling the entrance. That is not the viewer's fault: holes reach the terrain
+only because `RaceWorld` hands `_bores()` over, and a generic tileset viewer
+knows nothing about bores. Before this change it showed a trench; now it shows
+a wall. `oglc-view` is the tool anyone reaches for to look at a baked world, so
+that matters.
+
+The knowledge is in the wrong place, and the tileset already holds what is
+needed: `extras.roads[*]` carries `centreline`, `totalWidth`, `closed` and
+`structures` — `{"kind": "tunnel", "from": 1177.4, "to": 1466.8}` in the
+shipped world. So:
+
+- [ ] `TilesTerrain` derives its own holes from the extras it already loads, and
+      every consumer of a baked world gets a bore that is a bore. A caller may
+      still pass its own.
+- [ ] Which means hoisting the geometry `glisteel.world.Course.inside` does —
+      distance to a centreline within a station range, with a margin and an
+      approach — into the engine, where the workspace rule says a capability a
+      game would want belongs. It is written to answer a whole chunk of terrain
+      at once without materialising a distance matrix, and that property has to
+      survive the move.
+- [ ] glisteel then stops handing them over, or keeps doing so only to override.
+
+Found on the way, and fixed with it: **`glisteel --capture` never ended.** It
+drew no frames and produced no error. `faulthandler` on a run that had sat 100
+seconds without drawing five frames put the main thread in
+`glfw.swap_buffers` — a compositor throttles the swap to its own frame
+callback, and a window it is not presenting never gets one. A capture draws a
+fixed number of frames and writes a file, so it is no longer paced by a
+display.
 
 ## 2. Road diversity: half arrived, half never built
 
