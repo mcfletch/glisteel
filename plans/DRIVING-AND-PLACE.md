@@ -15,32 +15,63 @@ profile are all built, tested and invisible.
 
 ## 1. A bore does not bore
 
-**The mountain over a tunnel is pushed down to road level**, so what should be
-a hole through a hill is a cutting with a lid, and the skyline is wrong from
-every viewpoint that is not on the road.
+**The mountain over a tunnel is pushed down to road level**, so a bore reads as
+a valley with a lid rather than as a hole through a hill. It is visually broken
+and logically wrong: the hill is *there*, and the road goes *under* it.
 
-This is a **recorded decision, not a regression**.
-[2026-08-19-PLAY-REVIEW.md §7](2026-08-19-PLAY-REVIEW.md) states the cost
-plainly: `RoadPath.reshaped_segments` puts every segment inside a bore under the
-earthwork, so the cutting runs the length of the tunnel; the batter is 0.6, so a
-bore 30 m below the surface opens about 50 m either side. It was accepted
-because *from the road* — the only place a player was — the tunnel reads as a
-tunnel.
+### What is already built
 
-That is no longer the whole of where a player is, and the review already names
-the right answer: **a hole in the ground mesh, with the bore's own outside
-plugging it.** The field terrain is a height field and a splat map, so a hole in
-it is a change to the terrain renderer — which puts this in **OpenGLContext**,
-not here, per the workspace rule that a capability a game would want lives in
-the engine.
+More than the [2026-08-19 review](2026-08-19-PLAY-REVIEW.md) suggests, which
+called the fix "a terrain feature" and left it. Three of the four pieces exist:
 
-Beacon is where it shows worst: 1774 m of its 3.02 km is inside the hill.
+- **The collider already has holes.** `physics/heightfield.HeightFieldColliders`
+  takes `holes(x, z) -> mask`, "true where the ground is not to be collided
+  against -- over a tunnel's bore, say", and drops a triangle when its centre
+  falls in one.
+- **The game already computes the mask.** `glisteel.world._bores()` returns
+  exactly that callable, over every course with a tunnel, and passes it to the
+  collider today.
+- **The portal already has a face.** `TunnelProfile.portal_border` is "how far
+  the portal's face stands out around the arch where the bore meets the
+  hillside" — the thing that plugs the opening.
 
-- [ ] Holes in `scenegraph/terrain` — the height field, the splat map, the
-      collider and the LOD all have to agree about a cell that is not there.
-- [ ] `_bore_corridor` stops flattening once the renderer can carry a hole.
-- [ ] A capture from beside the circuit, not on it, as the check — the defect is
-      invisible from the driving seat, which is how it survived.
+**What is missing is one of the four: the drawn surface cannot skip a cell.**
+`HeightField.mesh()` builds a regular grid of quads with no way to leave one
+out, so the visible ground has no hole even where the collider does. The
+flattening is the workaround for that, and `world._bores()` already says so in
+its own docstring: the field terrain "keeps the hill a tunnel passes through,
+which is right to look at and a wall to drive into."
+
+### The fix
+
+Replace the terrain cells at each portal and run the bore under the surface
+everywhere else. In the three repositories:
+
+- [ ] **OpenGLContext** — `HeightField.mesh(holes=...)` drops a cell whose
+      centre is in a hole, which is *the same rule the collider uses*, so the
+      two agree to within half a cell by construction rather than by care.
+      `SplatTerrain` passes it through.
+- [ ] **glisteel** — hand `_bores()` to the terrain node as well as to the
+      collider. It is already computed; it is already correct; it reaches one of
+      the two things that need it.
+- [ ] **openglcontext-editor** — `RoadPath.reshaped_segments()` stops including
+      every segment inside a bore, so the hill is left whole. Its docstring is
+      the argument for the flattening and has to go with it; `_bore_corridor`
+      and the vegetation `road_cut` that reads it follow.
+
+### How it is checked
+
+The defect is invisible from the driving seat, which is how it survived a play
+review. So the check is not a drive:
+
+- [ ] A capture from *beside* the circuit, looking at the hill a bore runs
+      through, before and after.
+- [ ] The portal from the road, at both ends, confirming the arch is an opening
+      in a hillside rather than the end of a trench.
+- [ ] A drive through, confirming the car still gets through — the collider is
+      unchanged, so this is a regression check rather than a new behaviour.
+- [ ] Beacon is the case that shows it worst: 1774 m of its 3.02 km is inside
+      the hill.
 
 ## 2. Road diversity: half arrived, half never built
 
