@@ -884,6 +884,14 @@ def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
     """
     from OpenGLContext.capture import SettleCapture
 
+    # A capture draws a fixed number of frames and writes a file, so it must not
+    # be paced by a display. A compositor throttles the swap to its own frame
+    # callback, and a window it is not presenting never gets one: `swap_buffers`
+    # then blocks for ever and the first frame never finishes -- no error, no
+    # output, a run that simply never ends. `setdefault`, so `OPENGLCONTEXT_NO_VSYNC=0`
+    # still asks for a paced capture on a machine where that is wanted.
+    os.environ.setdefault('OPENGLCONTEXT_NO_VSYNC', '1')
+
     class CapturingContext(GlisteelContext):
         config = options
 

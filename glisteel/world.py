@@ -918,6 +918,13 @@ class RaceWorld:
         self._assemble(courses_in(document), field=self.terrain.field,
                        props=_baked_props(extras), traffic=traffic,
                        gravity=gravity, luminaires=_baked_luminaires(extras))
+        # The same holes the collider got -- the same object, not an equal one
+        # -- so the hill a bore runs through is drawn with the opening the car
+        # drives through rather than cut down to road level to fake one. Set
+        # after `_assemble` because only the courses know where the bores are,
+        # and in time because the ground's mesh is not built until the first
+        # draw.
+        self.terrain.holes = self.bores
 
     @classmethod
     def from_course(cls, courses: Any, field: Any = None, props: Any = (),
@@ -950,10 +957,15 @@ class RaceWorld:
         #: The ground, when the world carries its landscape as a field. The
         #: chunks near the car are in the physics world; the rest are not.
         self.ground: Any = None
+        #: Where the ground is not there, because a road runs inside it. One
+        #: callable, handed to everything that has to agree about it: what is
+        #: drawn and what is driven on are the same surface, and sharing the
+        #: answer is how that stays true.
+        self.bores = self._bores()
         if field is not None:
             from OpenGLContext.physics.heightfield import HeightFieldColliders
             self.ground = HeightFieldColliders(self.physics, field,
-                                               holes=self._bores())
+                                               holes=self.bores)
         #: The carriageway, built from the course rather than from the tiles.
         self.roads: list[Any] = []
         for road in self.courses:

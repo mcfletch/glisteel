@@ -644,3 +644,156 @@ class TestHowTightABendIsMeasuredOverARealLength:
                         carriageway_width=7.2, total_width=10.6, closed=False,
                         length=714.0)
         assert course.radii.min() > 1e5
+
+
+class TestTheHillABoreRunsThrough:
+    """The ground is drawn with the opening the car drives through.
+
+    A height field is a surface, so a hill a road passes *inside* had nowhere to
+    say it was hollow, and the bake cut it down to road level to fake one -- a
+    bore read as a valley with a lid. The engine's drawn mesh takes the same
+    `holes` the collider has always taken, so the surface seen and the surface
+    driven on are the same surface.
+    """
+
+    def test_the_terrain_is_given_the_holes_the_collider_got(self, tmp_path):
+        """The same object, not an equal one: two closures over the same
+        courses would answer alike today and drift apart on any change."""
+        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+        world = _race(build_sample_tileset(str(tmp_path)))
+        assert world.terrain.holes is world.bores
+        if world.ground is not None:
+            assert world.ground.holes is world.bores
+
+    def test_a_world_with_no_bore_asks_for_no_holes(self, tmp_path):
+        """`_bores()` answers None where nothing tunnels, and None is right:
+        every triangle is drawn, and nothing is tested per triangle."""
+        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+        world = _race(build_sample_tileset(str(tmp_path)))
+        if not any(one.kind == 'tunnel'
+                   for road in world.courses for one in road.structures):
+            assert world.terrain.holes is None
+
+    def test_the_ground_still_has_its_mesh(self, tmp_path):
+        """A hole that swallowed the whole field would pass the check above."""
+        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+        world = _race(build_sample_tileset(str(tmp_path)))
+        if world.terrain.field is not None:
+            assert world.terrain.field.mesh(holes=world.terrain.holes)[1].size
+
+
+class TestTheMaskThatOpensABore:
+    """What the editor stopped faking: the opening at a portal.
+
+    The hill a bore runs through is left whole now, so the thing that makes a
+    mouth a mouth is this mask -- handed to the drawn terrain and to the
+    collider alike. It has to cover the bore itself, a margin either side so the
+    opening clears the lining rather than grazing it, and the approach, where a
+    cutting sampled on a grid metres wide meets untouched hillside and rides
+    over the carriageway by the better part of a step.
+
+    A real course with a real bore, built here: the sample tileset tunnels
+    through nothing, and a case that skips is a case that says nothing.
+    """
+
+    def bores(self):
+        """The mask a world with one tunnelled road would hand out."""
+        import numpy as np
+
+        from glisteel.world import Course, RaceWorld, Structure
+        line = np.stack([np.linspace(0.0, 4000.0, 401), np.zeros(401),
+                         np.zeros(401)], axis=-1)
+        course = Course(name='road', centreline=line, carriageway_width=7.0,
+                        total_width=12.0, closed=False, length=4000.0,
+                        structures=(Structure(kind='tunnel', start=1000.0,
+                                              end=2000.0),))
+        world = RaceWorld.__new__(RaceWorld)
+        world.courses = [course]
+        found = world._bores()
+        assert found is not None, 'a world with a bore in it needs a mask'
+        return found
+
+    def test_it_covers_the_middle_of_a_bore(self) -> None:
+        import numpy as np
+        assert bool(np.asarray(self.bores()(np.array([1500.0]),
+                                            np.array([0.0])))[0])
+
+    def test_it_reaches_out_past_the_mouth(self) -> None:
+        """The straddling cell: a portal's own sample is not enough.
+
+        Where a sampled cutting meets untouched hillside the drawn surface rides
+        over the carriageway, so the opening has to start before the arch does.
+        """
+        import numpy as np
+
+        from glisteel.world import BORE_APPROACH
+        assert BORE_APPROACH > 0.0
+        just_outside = 1000.0 - BORE_APPROACH / 2.0
+        assert bool(np.asarray(self.bores()(np.array([just_outside]),
+                                            np.array([0.0])))[0])
+
+    def test_it_clears_the_lining_rather_than_grazing_it(self) -> None:
+        """Beside the road as well as along it."""
+        import numpy as np
+
+        from glisteel.world import BORE_MARGIN
+        beside = 12.0 / 2.0 + BORE_MARGIN / 2.0
+        assert bool(np.asarray(self.bores()(np.array([1500.0]),
+                                            np.array([beside])))[0])
+
+    def test_it_leaves_the_open_road_alone(self) -> None:
+        """A mask true everywhere would pass the rest of these and delete the
+        world."""
+        import numpy as np
+        assert not bool(np.asarray(self.bores()(np.array([3000.0]),
+                                                np.array([0.0])))[0])
+
+    def test_and_leaves_the_country_either_side_alone(self) -> None:
+        import numpy as np
+        assert not bool(np.asarray(self.bores()(np.array([1500.0]),
+                                                np.array([400.0])))[0])
+
+
+class TestACaptureIsNotPacedByADisplay:
+    """`glisteel --capture` draws N frames and writes a file. Nothing else.
+
+    A compositor throttles the buffer swap to its own frame callback, and a
+    window it is not presenting never gets one -- so `swap_buffers` blocks for
+    ever, the first frame never finishes, and the run produces no error, no
+    output and no end. Found with `faulthandler` on a capture that had sat for
+    100 seconds without drawing five frames.
+    """
+
+    def test_the_capture_path_asks_for_no_vsync(self, monkeypatch) -> None:
+        import os
+        monkeypatch.delenv('OPENGLCONTEXT_NO_VSYNC', raising=False)
+        _run_capture_setup(monkeypatch)
+        assert os.environ.get('OPENGLCONTEXT_NO_VSYNC') == '1'
+
+    def test_a_machine_that_wants_pacing_still_gets_it(self, monkeypatch) -> None:
+        """`setdefault`: somebody watching a capture on a real desktop may want
+        it paced, and saying so has to keep working."""
+        import os
+        monkeypatch.setenv('OPENGLCONTEXT_NO_VSYNC', '0')
+        _run_capture_setup(monkeypatch)
+        assert os.environ.get('OPENGLCONTEXT_NO_VSYNC') == '0'
+
+
+def _run_capture_setup(monkeypatch):
+    """`_capture` up to the point it would open a window, and no further."""
+    from glisteel import game
+
+    class _Stop(Exception):
+        pass
+
+    class _Context:
+        @classmethod
+        def ContextMainLoop(cls, **named):
+            raise _Stop()
+
+    monkeypatch.setattr(game, 'GlisteelContext', _Context)
+    options = game.build_parser().parse_args(['--capture', 'x.png'])
+    try:
+        game._capture(options, 320, 180)
+    except _Stop:
+        pass
