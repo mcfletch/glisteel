@@ -27,6 +27,7 @@ import json
 import os
 import sys
 import tarfile
+import zipfile
 
 #: Where a release's artefacts are fetched from.
 URL = 'https://github.com/mcfletch/glisteel/releases/download/%s/%s'
@@ -57,6 +58,36 @@ def build(where: str, name: str, into: str) -> tuple[str, int, str]:
                 with open(full, 'rb') as handle:
                     archive.addfile(info, handle)
     return path, os.path.getsize(path), digest_of(path)
+
+
+def bundle_registry(manifest: str, into: str) -> str:
+    """The registry and its thumbnails as one file; its path.
+
+    What an application is pointed at when it is offered a set of content it
+    did not ship with. It is a document and some pictures -- 100 KB against the
+    88 MB it describes -- so fetching one gives a chooser every pack's title,
+    size, terms and picture while downloading none of the content.
+
+    Attached to the same release as the archives, which is what lets a later
+    set of tracks reach an installed game without shipping a new version of it.
+    Read back by
+    :func:`OpenGLContext.contentpacks.catalog.load_bundle`, which wants the
+    document at the top under its own name.
+    """
+    beside = os.path.dirname(os.path.abspath(manifest))
+    path = os.path.join(into, '%s-registry.zip' % (NAMESPACE,))
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.write(manifest, 'packs.json')
+        with open(manifest, encoding='utf-8') as handle:
+            declared = json.load(handle)
+        for entry in declared.get('packs') or ():
+            named = entry.get('preview')
+            if not named:
+                continue
+            found = os.path.join(beside, named)
+            if os.path.isfile(found):
+                archive.write(found, named)
+    return path
 
 
 def digest_of(path: str) -> str:
@@ -116,6 +147,9 @@ def main(argv: list[str] | None = None) -> int:
     with open(out, 'w', encoding='utf-8') as handle:
         json.dump(registry, handle, indent=1)
         handle.write('\n')
+    bundle = bundle_registry(out, options.into)
+    print('registry bundle: %s (%.0f KB)'
+          % (os.path.basename(bundle), os.path.getsize(bundle) / 1024))
     total = sum(one['approximate_bytes'] for one in packs)
     print('%d packs, %.1f MB, written to %s' % (len(packs), total / 1048576, out))
     for one in packs:

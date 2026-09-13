@@ -171,10 +171,14 @@ The recipes are `glisteel/tracks/*.toml`, read by `glisteel-bake --recipe`.
    describe content that was never made. Six packs: the cars (base), the art,
    and four tracks each naming the art in `needs`.
 
-   Still open: publishing the registry as a **bundle** — the JSON and the
-   thumbnails zipped — so a later set of tracks can be offered to an installed
-   game by pointing it at a URL rather than by shipping a new version. The
-   engine reads one; nothing builds one yet.
+   The registry is also published as a **bundle** — `glisteel-registry.zip`,
+   the JSON and the four thumbnails, 89 KB against the 88 MB it describes. That
+   is what an installed game is pointed at to be offered content it never
+   shipped with: fetching one gives a chooser every pack's title, size, terms
+   and picture while downloading none of the content, so a later set of tracks
+   reaches a game already on somebody's disk without shipping a new version of
+   it. Built here, read back by the engine's `load_bundle`, and the round trip
+   is a case rather than an assumption.
 5. ✅ **The download screen**, on the engine's `FetchJob`, reached by **Get
    more** from the track chooser. It fetches the whole set a choice pulls in
    rather than the one pack named, since a track without its art arrives as

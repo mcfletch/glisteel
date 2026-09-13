@@ -189,3 +189,51 @@ class TestWhatAFirstRunDoes:
         with open(os.path.join(root, pack.marker), 'w') as handle:
             handle.write('x')
         assert content.art_directory(store=store) == root
+
+
+class TestTheRegistryAsOneFile:
+    """What an installed game is pointed at to be offered content it never
+    shipped with.
+
+    A document and some thumbnails -- 89 KB against the 88 MB it describes --
+    so fetching one gives a chooser every pack's title, size, terms and picture
+    while downloading none of the content. Attached to the same release as the
+    archives, which is what lets a later set of tracks reach a game that is
+    already installed.
+    """
+
+    def bundle(self, tmp_path):
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), 'tools'))
+        from release_content import bundle_registry
+        return bundle_registry(content.CATALOG_PATH, str(tmp_path))
+
+    def test_it_holds_the_registry_and_its_pictures(self, tmp_path) -> None:
+        import zipfile
+        inside = zipfile.ZipFile(self.bundle(tmp_path)).namelist()
+        assert 'packs.json' in inside
+        assert sum(one.endswith('.jpg') for one in inside) == \
+            len(content.track_packs())
+
+    def test_the_engine_reads_back_what_this_writes(self, tmp_path) -> None:
+        """The property that matters: built here, read there."""
+        from OpenGLContext.contentpacks import catalog
+        packs = catalog.load_bundle(self.bundle(tmp_path),
+                                    str(tmp_path / 'unpacked'))
+        assert [one.key for one in packs] == \
+            [one.key for one in content.registry()]
+
+    def test_and_the_pictures_come_back_resolved(self, tmp_path) -> None:
+        from OpenGLContext.contentpacks import catalog
+        packs = catalog.load_bundle(self.bundle(tmp_path),
+                                    str(tmp_path / 'unpacked'))
+        shown = [one for one in packs if one.preview]
+        assert len(shown) == len(content.track_packs())
+        for one in shown:
+            assert os.path.isfile(one.preview), one.key
+
+    def test_it_is_small_enough_to_be_worth_fetching_first(self,
+                                                           tmp_path) -> None:
+        """A bundle the size of the content would be no saving at all."""
+        assert os.path.getsize(self.bundle(tmp_path)) < 1024 * 1024
