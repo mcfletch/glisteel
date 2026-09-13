@@ -1,8 +1,9 @@
 # Tracks as downloads, and more than one of them
 
-**Status: §1 has landed — `glisteel-bake --recipe` and every scalar knob, with
-the four launch recipes in `glisteel-editor/tracks/`. All four bake, and the
-figures below are measured rather than projected. §2–§7 are open.**
+**Status: §1 and §2 have landed — `glisteel-bake --recipe` with every scalar
+knob, the four launch recipes in `glisteel-editor/tracks/`, and `--art-pack`.
+All four bake into one 113.7 MB release carrying a single copy of the art, and
+every figure below is measured rather than projected. §3–§7 are open.**
 
 A release should offer a player several tracks that feel unlike each other,
 without any of them being in the wheel. This plan covers what a track costs,
@@ -36,12 +37,16 @@ The default breaks down as:
 Compression gains little — 57 MB to 48 MB — because PNG and GLB are already
 compressed.
 
-**26 MB of every `field` bake is the same 26 MB.** Baking seed 11 and seed 99
-gives byte-identical `trees/` directories; only `trees.npz`, the tiles and the
-terrain maps differ. So four tracks is not 4 × 57 MB. It is one shared art pack
-and four track packs of roughly 31 MB each at full extent, which is the same
-map-pack-plus-texture-pack split twig-bb already uses for Unvanquished maps and
-their `companions`.
+**25.5 MB of every `field` bake is the same 25.5 MB.** `trees/` and `gantry/`
+are byte-identical across all four launch tracks — the banked oval and the hill
+climb included — while `trees.npz`, the tiles, the terrain maps and the road
+surface are this track's own. So four tracks is not 4 × 57 MB: it is one shared
+art pack and four track packs, which is the same map-pack-plus-texture-pack
+split twig-bb already uses for Unvanquished maps and what they `need`.
+
+`signs/` is **not** shared, which is worth knowing before anything assumes it
+is: the signs carry each circuit's own posted limits, so they differ per track.
+They are 24–41 KB, so they simply stay in the track pack.
 
 ### How the shared art is carried
 
@@ -148,11 +153,15 @@ The recipes are `glisteel/tracks/*.toml`, read by `glisteel-bake --recipe`.
 
 ## Work
 
-1. **`glisteel-bake --recipe`**, and pass-through for every scalar
-   `ProceduralWorld` parameter. Tests: a recipe round-trips to the world it
-   describes; an unknown key is refused rather than ignored.
-2. **`--art-pack`** — write the shared art to a separate directory instead of
-   into the track, so one bake produces the pack and the rest reference it.
+1. ✅ **`glisteel-bake --recipe`**, and every scalar `ProceduralWorld`
+   parameter, declared once in `glisteel_editor.recipe` and read by both the
+   command line and a recipe. An unknown key is refused rather than ignored.
+2. ✅ **`--art-pack`** — the first track moves `trees/` and `gantry/` into the
+   pack; the rest find them there, and are **refused** if what they wrote is not
+   the same art, since the split rests on that and keeping the first copy
+   silently would put one track's art under another's tiles. Nothing about a
+   path changes: both unpack into the same directory, so `trees/...` in a tile
+   resolves as it always did.
 3. **Track pictures.** `glisteel <tileset> --picture` already drives a lap and
    photographs it; the release build runs it per track, and the result is the
    pack's `preview`. The engine resolves a preview against the registry, so a
