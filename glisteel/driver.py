@@ -81,10 +81,17 @@ PASS_SLOWER_BY = 4.0
 PASS_WITHIN = 70.0
 
 #: How far in front of what it passed a driver has to be before it comes back
-#: in, in metres -- the whole of the other car and a length of road besides. A
-#: driver that came back in the moment its own nose was ahead would come back
-#: in across the other car's bonnet.
-PASSED_BY = 12.0
+#: in, in metres -- the whole of the other car and a length of road besides,
+#: and further than the room asked for behind it in the lane it is returning
+#: to, so the car just passed is not what makes that lane un-clear. A driver
+#: that came back in the moment its own nose was ahead would come back in
+#: across the other car's bonnet.
+#:
+#: One constant, because there were two: this name was bound again two hundred
+#: lines further down, so the 12.0 written here was overwritten at import and
+#: never reached the code it was written for. Both readings want the same
+#: number and this is the one that was in force.
+PASSED_BY = 18.0
 
 #: The longest a pass may take before it is not worth starting, in seconds.
 #:
@@ -271,28 +278,73 @@ class Autopilot:
         first = session.car_ahead(PASS_WITHIN)
         if first is None or making - float(first.speed) <= PASS_SLOWER_BY:
             return
-        if speed - float(first.speed) <= 0.0:
-            # Not gaining on it yet: there is nothing to be past, and a pass
-            # that has not started cannot be sized.
-            return
         room = self._pass_room(session, speed, making, first)
         if room is None:
             return
         if session.lane_clear(other, ahead=room):
             self.lane, self.passing = other, first
 
-    @staticmethod
-    def _pass_room(session: SessionLike, speed: float, making: float,
+    def pass_seconds(self, speed: float, gap: float, other: float,
+                     quick: float | None = None) -> float:
+        """How long getting by something in front would take, in seconds.
+
+        The overtaking sum. The relative distance to cover is the gap, the two
+        cars' lengths and the room to leave behind; the rate is the difference
+        in speed -- and that difference *grows*, because a pass is driven
+        rather than coasted. The car pulls at
+        :attr:`DriverStyle.pull` until it reaches ``quick``, the speed the road
+        allows, and holds it from there.
+
+        Taken at the speed the car happens to be doing, a standing start
+        behind something stopped never closes at all: the sum divides by
+        nothing and answers half a minute, and a race car that reaches a
+        hundred in five seconds is told it is too slow to get by a parked one.
+
+        ``quick`` left out is a car already at the speed it will pass at.
+        :data:`PASS_ACROSS` is added for the two lane changes, which happen at
+        each end of it.
+        """
+        room = float(gap) + PASSED_BY + CAR_LENGTHS
+        now = float(speed) - float(other)
+        top = (now if quick is None else float(quick) - float(other))
+        pull = max(self.style.pull, 1e-6)
+        if top <= now:                           # nothing left to gain
+            return PASS_ACROSS + room / max(now, 1e-3)
+        # Accelerating: cover what can be covered before the speed tops out,
+        # and the rest at the difference that is left.
+        winding = (top - max(now, 0.0)) / pull
+        gained = max(now, 0.0) * winding + 0.5 * pull * winding * winding
+        if gained >= room:
+            return PASS_ACROSS + (math.sqrt(max(now, 0.0) ** 2
+                                            + 2.0 * pull * room)
+                                  - max(now, 0.0)) / pull
+        return PASS_ACROSS + winding + (room - gained) / max(top, 1e-3)
+
+    def _pass_room(self, session: SessionLike, speed: float, making: float,
                    other: Any) -> Any:
         """How much of the other side of the road a pass needs, in metres.
 
         Two different speeds go into it, and using one for both is what makes a
         pass look cheap and turn out expensive:
 
-        **How long it takes** is the speed this car has *now* against the car in
-        front. A driver crawling behind a stopped queue cannot conjure the
-        speed to be past in half a second, and sizing the pass as though it
-        could asks for forty metres of road and then uses four hundred.
+        **How long it takes** is what this car *averages* over the pass against
+        the car in front: it is not doing its follow speed by the end, and it is
+        not doing the road's speed at the start, so neither of those alone is
+        the answer.
+
+        Taking the speed it has now is what a driver that never overtakes is
+        made of. A driver keeps a time gap, so within seconds of catching
+        something it is doing precisely what that thing is doing -- and a pass
+        sized on the difference between the two is then a pass of infinite
+        length, refused for ever. Watched on a recorded lap: the car pulled up
+        behind one van and drove the rest of the circuit at its speed.
+
+        Taking the speed the road allows is the opposite mistake, and the
+        reason the first one was made. A driver crawling behind a stopped queue
+        cannot conjure the speed to be past in half a second, and sizing the
+        pass as though it could asks for forty metres of road and then uses
+        four hundred. The mean of the two is what a car accelerating from one
+        to the other actually covers the road at.
 
         **How much road that consumes** is the speed things close on that
         stretch at, which on a two-way road is this car at the speed the road
@@ -301,10 +353,8 @@ class Autopilot:
         None for a pass that would take longer than :data:`PASS_SECONDS`, which
         is a pass to stay in and wait for.
         """
-        gain = float(speed) - float(other.speed)
-        if gain <= 0.0:
-            return None
-        taking = (max(float(session.along(other)), 0.0) + PASSED_BY) / gain
+        taking = self.pass_seconds(speed, max(float(session.along(other)), 0.0),
+                                   float(other.speed), quick=making)
         if taking > PASS_SECONDS:
             return None
         return 2.0 * float(making) * taking
@@ -623,11 +673,6 @@ SETTLED = 1.0
 RACING_KPH = 200.0
 
 #: How far behind a stand-in wants what it pulled out for before it comes back
-#: in, in metres. Further than the room it asks for behind it in the lane it is
-#: returning to, so the car it has just passed is not what makes that lane
-#: un-clear.
-PASSED_BY = 18.0
-
 #: How much more room than the lane change strictly needs a driver wants
 #: before pulling out, as a multiple. The crossing time is what a comfortable
 #: change takes; leaving exactly that is arriving in the other lane at the
@@ -1228,39 +1273,8 @@ class StandIn:
 
     def pass_seconds(self, speed: float, gap: float, other: float,
                      quick: float | None = None) -> float:
-        """How long getting by something in front would take, in seconds.
-
-        The overtaking sum. The relative distance to cover is the gap, the two
-        cars' lengths and the room to leave behind; the rate is the difference
-        in speed -- and that difference *grows*, because a pass is driven
-        rather than coasted. The car pulls at
-        :attr:`DriverStyle.pull` until it reaches ``quick``, the speed the road
-        allows, and holds it from there.
-
-        Taken at the speed the car happens to be doing, a standing start
-        behind something stopped never closes at all: the sum divides by
-        nothing and answers half a minute, and a race car that reaches a
-        hundred in five seconds is told it is too slow to get by a parked one.
-
-        ``quick`` left out is a car already at the speed it will pass at.
-        :data:`PASS_ACROSS` is added for the two lane changes, which happen at
-        each end of it.
-        """
-        room = float(gap) + PASSED_BY + CAR_LENGTHS
-        now = float(speed) - float(other)
-        top = (now if quick is None else float(quick) - float(other))
-        pull = max(self.pilot.style.pull, 1e-6)
-        if top <= now:                           # nothing left to gain
-            return PASS_ACROSS + room / max(now, 1e-3)
-        # Accelerating: cover what can be covered before the speed tops out,
-        # and the rest at the difference that is left.
-        winding = (top - max(now, 0.0)) / pull
-        gained = max(now, 0.0) * winding + 0.5 * pull * winding * winding
-        if gained >= room:
-            return PASS_ACROSS + (math.sqrt(max(now, 0.0) ** 2
-                                            + 2.0 * pull * room)
-                                  - max(now, 0.0)) / pull
-        return PASS_ACROSS + winding + (room - gained) / max(top, 1e-3)
+        """The pilot's own overtaking sum; see :meth:`Autopilot.pass_seconds`."""
+        return self.pilot.pass_seconds(speed, gap, other, quick=quick)
 
     def room_to_finish(self, session: SessionLike, seconds: float,
                        margin: float = PASS_MARGIN) -> bool:

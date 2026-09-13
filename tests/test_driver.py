@@ -611,6 +611,44 @@ class TestGettingPastSomethingSlower:
                                 crawling._ahead) > 300.0
         assert asked == pytest.approx(-1.8)
 
+    def test_it_passes_a_car_it_has_settled_in_behind(self) -> None:
+        """The case every other test here misses, and the one a lap is made of.
+
+        A driver keeps a time gap, so within a few seconds of catching
+        something it is doing exactly what that thing is doing -- and a pass
+        that may only start while *already* gaining can then never start at
+        all. Watched on a recorded lap: the car pulled up behind one van and
+        drove the rest of the circuit at its speed.
+        """
+        pilot = self._pilot()
+        matched = _Road(self._car(18.0), ahead=_Ahead(40.0, 18.0))
+        pilot.controls(matched, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8), 'sat behind it for ever'
+        assert pilot.passing is not None
+
+    def test_and_sizes_that_pass_on_more_than_the_speed_it_is_doing(self
+                                                                   ) -> None:
+        """Matched, the difference between the two cars is nought, and a pass
+        measured on that is a pass of infinite length."""
+        pilot = self._pilot()
+        matched = _Road(self._car(18.0), ahead=_Ahead(40.0, 18.0))
+        room = pilot._pass_room(matched, 18.0, DriverStyle().maximum_speed,
+                                matched._ahead)
+        assert room is not None and room > 0.0
+
+    def test_but_not_on_a_speed_it_cannot_reach_yet(self) -> None:
+        """The other half of the trade. A pass is run at neither the speed the
+        car is doing nor the one the road allows, but at what it averages
+        getting from one to the other -- so crawling behind a stopped queue
+        still asks for a lot of road rather than a little."""
+        pilot = self._pilot()
+        crawling = _Road(_Car(position=(1.8, 0.0, -100.0), speed=3.0),
+                         ahead=_Ahead(9.0, 0.0))
+        top = DriverStyle().maximum_speed
+        crawl = pilot._pass_room(crawling, 3.0, top, crawling._ahead)
+        flying = pilot._pass_room(crawling, top, top, crawling._ahead)
+        assert crawl > flying * 1.5, 'sized as though it were already up to speed'
+
     def test_it_comes_back_in_if_the_way_through_closes(self) -> None:
         """Being on the wrong side of a road is the one place not to wait and
         see."""
