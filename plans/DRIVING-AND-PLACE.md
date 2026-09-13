@@ -116,21 +116,38 @@ display.
 
 Two questions wearing one coat, and they have different answers.
 
-**The lanes are there.** `CIRCUIT_PROFILE` is `lane_width=3.6, lanes=2`, with a
-0.7 m shoulder and a 1.0 m verge, and `CLIMBING_LANE` adds a third 3.6 m lane on
-any sustained climb — `CLIMBING_LANE_GRADE` 0.04 over `CLIMBING_LANE_RUN` 400 m.
-Both reach the baked geometry of every track in the launch set. So the question
-is not "was it built" but **"why can nobody see it"**, and that is a
-measurement, not a redesign:
+**The lanes are there, and the paint does not say so.** Measured rather than
+read: `CIRCUIT_PROFILE` is `lane_width=3.6, lanes=2`, and `CLIMBING_LANE` adds a
+third 3.6 m lane wherever the grade sustains 4% over 400 m. Ashdown earns
+**1183 m of it** across its 7.19 km — 16.4%, in one run of 597 m and others —
+and Beacon 686 m of 3.03 km. It reaches the baked geometry: the tarmac is
+10.8 m wide there against the ordinary 7.2 m.
 
-- [ ] How much of each shipped circuit actually earns a climbing lane? A world
-      whose gradients never sustain 4% over 400 m has the feature and no
-      occasion to use it, and the answer decides whether this is a rendering
-      problem or a world-generation one.
-- [ ] Are lane markings drawn at all? Two lanes with no line between them read
-      as one wide road, which would explain the whole complaint on its own.
-- [ ] A capture of a climbing lane, from the road and from above, so the next
-      person can see what is there.
+**What is missing is the marking.** `road.road_texture` paints a fixed
+cross-section — two edge lines, and one dashed centre at `across == 0.5` of the
+image — and `profile.section_u` maps `u = 0.5` to `across = 0` for the widened
+profile exactly as for the plain one. So the single centre line is drawn at the
+carriageway's *geometric centre whatever its width*: widen the road by a lane
+and the line moves out with it. A three-lane stretch comes out as a very wide
+two-lane road with the paint down the middle, which is what a player sees and
+why the work reads as missing.
+
+For it to read as a passing lane, two things have to change, and both are in
+the engine's road texture rather than in any world:
+
+- [ ] The centre line stays where the *original* carriageway's centre was, so
+      the extra lane is plainly on one side rather than the road being fatter
+      about the middle.
+- [ ] A lane line between the two lanes on the widened side — a road with three
+      lanes and one line painted on it is not marked, it is merely wide.
+
+The texture is one image stretched along the whole road, so this is a change to
+how `section_u` unwraps a widened cut rather than a second image: the extra
+lane has to occupy its own span of `u`, and the paint then lands where the
+lanes are.
+
+- [x] A capture of a climbing lane from the road, and one from 30 m straight
+      down, which is where the single centre line is unmistakable.
 
 **Intersections were never built.** Nothing in `OpenGLContext_editor` mentions a
 road junction; the only `junction` in the tree is `hydrology`, where rivers
