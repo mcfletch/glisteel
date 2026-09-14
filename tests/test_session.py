@@ -16,6 +16,7 @@ from glisteel.session import (
     MAXIMUM_CATCHUP,
     PHYSICS_STEP,
     RACE_LAPS,
+    STUCK_SECONDS,
     Session,
 )
 
@@ -729,3 +730,48 @@ class TestACarAheadIsACarRatherThanAWall:
         assert float(np.linalg.norm(
             np.asarray(session.world.traffic.node_of(other).translation)
             - drawn)) < 0.1
+
+
+class TestACarThatIsNotGoingAnywhereIsRecovered:
+    """A car that has stopped and cannot start again ends the game for whoever
+    is in it, however correct the physics was on the way there.
+
+    The rule used to ask whether the car was *off course or upside down*, so a
+    car stopped dead on the carriageway, right way up, was never recovered at
+    all. Found on a recorded lap of the 7.2 km circuit: at station 3640 the car
+    stopped against the world, sat there with the throttle at 1.00 for the
+    remaining five hundred seconds of the run, and the traffic queued into the
+    back of it. A player meeting that has no way out but to restart.
+    """
+
+    def held(self, session, seconds, throttle=1.0, brake=0.0):
+        """Hold the car still for that long, asking for what it is asked for.
+
+        The velocity is put back to nothing each step because what is being
+        tested is the rule, not a way of wedging a car: a car held against
+        something reads exactly like this.
+        """
+        moved = []
+        session.return_to_track = lambda: moved.append(True)   # type: ignore
+        for _ in range(int(seconds / FRAME)):
+            session.car.control(throttle=throttle, brake=brake)
+            session.world.physics.linear_velocity[session.car.body] = 0.0
+            session._recover_if_stuck(FRAME)
+        return moved
+
+    def test_stopped_on_the_road_with_the_power_on(self) -> None:
+        assert self.held(_session(), STUCK_SECONDS * 2.0)
+
+    def test_and_not_before_it_has_had_a_moment(self) -> None:
+        """A car that stops for an instant -- a kerb, a nudge, a bad landing --
+        is a car driving, not a car stuck."""
+        assert not self.held(_session(), STUCK_SECONDS * 0.5)
+
+    def test_but_a_car_held_on_the_brake_is_left_alone(self) -> None:
+        """Somebody who has stopped on purpose is not stuck, and teleporting
+        them onto the road would be the game taking their car away."""
+        assert not self.held(_session(), STUCK_SECONDS * 2.0,
+                             throttle=0.0, brake=1.0)
+
+    def test_and_so_is_one_simply_sitting_there(self) -> None:
+        assert not self.held(_session(), STUCK_SECONDS * 2.0, throttle=0.0)

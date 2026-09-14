@@ -210,6 +210,7 @@ def passable_count(length: float, racing: float = RACING_SPEED,
     return max(int(float(length) / needs) * 2, 1)
 
 
+
 def cars_for(seconds: float = MEETING_SECONDS, racing: float = RACING_SPEED,
              limit: float = SPEED_LIMIT, reach: float = REACH,
              two_way: bool = False, length: float | None = None) -> int:

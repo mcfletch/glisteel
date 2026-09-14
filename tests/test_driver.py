@@ -745,3 +745,48 @@ class TestGettingBackOnTheRoad:
         car = _Car(position=at, forward=(0, 0, -1), speed=2.0)
         throttle, brake, _steer = pilot.update(car)
         assert brake == 0.0 and throttle > 0.0
+
+
+class TestWhatIsComingTheOtherWayDrivesTheLimit:
+    """A pass consumes the oncoming lane at the speed the two close on it, and
+    what is coming the other way is *traffic*, doing the road's posted limit --
+    not another racer doing what this car does.
+
+    Measured before this: on the 3 km circuit the driver asked for a median of
+    630 m of clear oncoming lane, which on a road whose oncoming cars sit 500 m
+    apart is a pass that never comes. Sized on the limit those cars actually
+    drive, the same pass asks for a fifth less road.
+    """
+
+    def _pilot(self, posted=80):
+        course = _straight(points=400, spacing=5.0)
+        course.posted = posted
+        return Autopilot(course, lane=1.8)
+
+    def _road(self, speed=40.0):
+        return _Road(_Car(position=(1.8, 0.0, -100.0), speed=speed),
+                     ahead=_Ahead(40.0, 18.0))
+
+    def test_a_posted_road_asks_for_less_than_a_racer_coming_at_it(self) -> None:
+        posted = self._pilot(posted=80)
+        silent = self._pilot(posted=0)
+        road, top = self._road(), DriverStyle().maximum_speed
+        assert posted._pass_room(road, 40.0, top, road._ahead) \
+            < silent._pass_room(road, 40.0, top, road._ahead)
+
+    def test_a_road_that_says_nothing_assumes_the_worst(self) -> None:
+        """No posted limit is no promise about what is coming, so the pass is
+        sized as though it were another car doing what this one does."""
+        silent = self._pilot(posted=0)
+        road, top = self._road(), DriverStyle().maximum_speed
+        room = silent._pass_room(road, 40.0, top, road._ahead)
+        taking = silent.pass_seconds(40.0, 40.0, 18.0, quick=top)
+        assert room == pytest.approx(2.0 * top * taking)
+
+    def test_and_the_room_still_grows_with_how_long_it_takes(self) -> None:
+        near = self._pilot()
+        road, top = self._road(), DriverStyle().maximum_speed
+        far = _Road(_Car(position=(1.8, 0.0, -100.0), speed=40.0),
+                    ahead=_Ahead(120.0, 18.0))
+        assert near._pass_room(far, 40.0, top, far._ahead) \
+            > near._pass_room(road, 40.0, top, road._ahead)

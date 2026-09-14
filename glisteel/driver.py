@@ -347,8 +347,17 @@ class Autopilot:
         to the other actually covers the road at.
 
         **How much road that consumes** is the speed things close on that
-        stretch at, which on a two-way road is this car at the speed the road
-        allows and whatever is coming down it at the same.
+        stretch at: this car at the speed the road allows, and whatever is
+        coming down it at *its* speed. What is coming the other way is traffic,
+        and traffic drives the posted limit -- so a road that posts one is a
+        road where the pass is shorter than it would be against another racer.
+        A road that says nothing makes no promise about what is on it, and is
+        sized for something as fast as this car.
+
+        Measured on the 3 km circuit before this: the driver asked for a median
+        630 m of clear oncoming lane, on a road whose oncoming cars sit about
+        500 m apart -- a pass that never comes. Against the limit those cars
+        actually drive it asks for a fifth less.
 
         None for a pass that would take longer than :data:`PASS_SECONDS`, which
         is a pass to stay in and wait for.
@@ -357,7 +366,17 @@ class Autopilot:
                                    float(other.speed), quick=making)
         if taking > PASS_SECONDS:
             return None
-        return 2.0 * float(making) * taking
+        return (float(making) + self.oncoming_speed(making)) * taking
+
+    def oncoming_speed(self, making: float) -> float:
+        """How fast whatever is coming the other way is going, in m/s.
+
+        The road's posted limit, which is what :class:`~glisteel.traffic.Traffic`
+        drives at. Falls back to this car's own speed where the road posts
+        nothing, which is the conservative answer rather than an optimistic one.
+        """
+        posted = float(getattr(self.course, 'posted', 0) or 0.0)
+        return posted / 3.6 if posted > 0.0 else float(making)
 
     def update(self, car: CarLike) -> tuple[float, float, float]:
         """The throttle, brake and steer this driver would use right now.
