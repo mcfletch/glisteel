@@ -90,6 +90,10 @@ class Options:
     #: How hard it drives itself, as a fraction of what the road allows, where
     #: it is driving through the controls (:class:`~glisteel.driver.StandIn`).
     pace: float = PACE
+    #: Where to write this run's journal, '' for the default place, or None
+    #: to record nothing. What the game knows and the engine cannot -- why a
+    #: run ended, what it hit, every pass it took or wanted -- goes in it.
+    telemetry: str | None = None
     #: Which view the run starts in, one of :data:`glisteel.camera.VIEWS`.
     view: str = VIEWS[0]
     #: The window, in pixels.

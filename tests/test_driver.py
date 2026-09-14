@@ -12,7 +12,7 @@ import pytest
 from omi_physics.world import PhysicsWorld
 
 from glisteel.car import Car
-from glisteel.driver import Autopilot, DriverStyle
+from glisteel.driver import ALONGSIDE, PASSED_BY, Autopilot, DriverStyle
 from glisteel.world import Course, static_ground
 
 STEP = 1.0 / 120.0
@@ -552,8 +552,30 @@ class _Road:
         return self._within(reach)
 
     def lane_clear(self, across, ahead=24.0, behind=14.0):
+        """Whether that lane can be moved into.
+
+        ``_clear`` is about the lane being *pulled out into*; the car's own
+        side answers for itself, from where the car it is passing has got to.
+        One flag for both lanes said a driver giving up a pass could always
+        come back, whatever was beside it -- which is exactly the case that
+        wanted testing.
+        """
         self.asked.append(across)
+        if across * self.lane > 0.0:             # the lane it started in
+            beside = self._ahead
+            if beside is None:
+                return True
+            return not (-float(behind) <= beside.gap <= float(ahead))
         return self._clear
+
+    def lane_ahead(self, across, reach=140.0):
+        """What is up that lane: how far, and how fast. The car's own side
+        answers from what it is following; the far side is empty unless a test
+        says otherwise."""
+        if across * self.lane <= 0.0:
+            return None
+        found = self._within(reach)
+        return None if found is None else (found.gap, found.speed)
 
     def along(self, other):
         return other.gap
@@ -649,9 +671,9 @@ class TestGettingPastSomethingSlower:
         flying = pilot._pass_room(crawling, top, top, crawling._ahead)
         assert crawl > flying * 1.5, 'sized as though it were already up to speed'
 
-    def test_it_comes_back_in_if_the_way_through_closes(self) -> None:
+    def test_it_gives_the_pass_up_if_the_way_through_closes(self) -> None:
         """Being on the wrong side of a road is the one place not to wait and
-        see."""
+        see -- so the pass is over at once, whatever the car does next."""
         pilot = self._pilot()
         slow = _Ahead(40.0, 18.0)
         road = _Road(self._car(40.0), ahead=slow)
@@ -659,8 +681,25 @@ class TestGettingPastSomethingSlower:
         assert pilot.lane == pytest.approx(-1.8)
         road._clear = False
         pilot.controls(road, 1 / 60)
-        assert pilot.lane == pytest.approx(1.8)
         assert pilot.passing is None
+
+    def test_and_comes_back_at_once_rather_than_waiting_for_room(self) -> None:
+        """Even into a lane it will arrive in too fast.
+
+        Measured both ways on the 7.2 km circuit: made to wait for road enough
+        to shed its speed into, the driver stayed in the oncoming lane 3.4 s
+        and met a car head-on at 44.8 m/s of closing speed; coming back at once
+        cost a same-direction contact at 10.3. There is nothing on a two-way
+        road worse than being on the wrong side of it, so how fast it arrives
+        is the brakes' problem and not this decision's.
+        """
+        pilot = self._pilot()
+        slow = _Ahead(40.0, 18.0)                # too near to slot in behind
+        road = _Road(self._car(40.0), ahead=slow)
+        pilot.controls(road, 1 / 60)
+        road._clear = False
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8), 'stayed out on the wrong side'
 
     def test_it_stays_in_for_something_a_long_way_off(self) -> None:
         pilot = self._pilot()
@@ -790,3 +829,170 @@ class TestWhatIsComingTheOtherWayDrivesTheLimit:
                     ahead=_Ahead(120.0, 18.0))
         assert near._pass_room(far, 40.0, top, far._ahead) \
             > near._pass_room(road, 40.0, top, road._ahead)
+
+
+class TestGivingUpOnAPassDoesNotDriveIntoTheCarBeingPassed:
+    """Abandoning a pass is a manoeuvre too, and it has somewhere to go wrong.
+
+    The way through closes and the driver comes back to its own side -- but its
+    own side is where the car it was overtaking is, and alongside that car
+    there is nothing to come back to. Watched on the 3 km circuit: out in the
+    oncoming lane at 136 km/h, the pass given up, and the car cut back across
+    the crown into a car 7 m ahead of it doing 78. The run ended `HIT A CAR`
+    after 27.9 s, every time.
+
+    The branch above this one -- the one for a pass that *finished* -- has
+    always asked `lane_clear` before coming back in. This is the same question.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def started(self, pilot):
+        """A pass under way in the oncoming lane, and the car it is passing."""
+        slow = _Ahead(40.0, 18.0)
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=40.0), ahead=slow)
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8), 'never pulled out'
+        return road, slow
+
+    def test_it_stays_out_while_the_other_car_is_beside_it(self) -> None:
+        pilot = self._pilot()
+        road, slow = self.started(pilot)
+        slow.gap = ALONGSIDE + 6.0               # given up, not yet past
+        road._clear = False                      # the way through has closed
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8), 'cut back across it'
+
+    def test_and_comes_back_in_once_there_is_room(self) -> None:
+        """Room means the car it was passing is no longer beside it -- it has
+        dropped back behind it, or got by."""
+        pilot = self._pilot()
+        road, slow = self.started(pilot)
+        slow.gap = ALONGSIDE + 6.0               # still beside its own lane
+        road._clear = False
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8), 'came back too early'
+        slow.gap = 120.0                         # dropped well back behind it
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8)
+
+    def test_and_the_pass_is_over_either_way(self) -> None:
+        """Given up is given up: it is not still overtaking that car, whichever
+        side of the road it is finishing on.
+
+        Far enough in front to be given up at all -- beside it there is no
+        giving up left to do (:class:`TestAPassCommittedToIsFinished`) -- and
+        still near enough that its own lane is not clear to return to.
+        """
+        pilot = self._pilot()
+        road, slow = self.started(pilot)
+        slow.gap = ALONGSIDE + 6.0
+        road._clear = False
+        pilot.controls(road, 1 / 60)
+        assert pilot.passing is None
+        assert pilot.lane == pytest.approx(-1.8), 'cut back across it'
+        assert road.asked[-1] == pytest.approx(1.8), 'never asked its own side'
+
+
+class TestAPassCommittedToIsFinished:
+    """Once the two cars are alongside there is no giving up left to do.
+
+    Recorded on the 3 km circuit: `pass-started x25, pass-given-up x23,
+    pass-done x2`. The driver pulled out twenty-five times and abandoned
+    twenty-three of them, spending the run dithering on the wrong side of the
+    road -- because it re-decided from scratch every frame and the moment
+    anything appeared in the oncoming lane it bailed, however far past the car
+    it already was.
+
+    :data:`ALONGSIDE` has always said where that line is, and
+    :class:`StandIn` has always honoured it. Beside the car being passed,
+    finishing is the only way out.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def started(self, pilot, gap=40.0):
+        slow = _Ahead(gap, 18.0)
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=40.0), ahead=slow)
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8), 'never pulled out'
+        return road, slow
+
+    def test_it_finishes_one_it_is_already_beside(self) -> None:
+        pilot = self._pilot()
+        road, slow = self.started(pilot)
+        slow.gap = ALONGSIDE / 2.0               # level with it
+        road._clear = False                      # and the way through closes
+        pilot.controls(road, 1 / 60)
+        assert pilot.passing is not None, 'gave up beside the car it was passing'
+        assert pilot.lane == pytest.approx(-1.8)
+
+    def test_but_gives_one_up_while_it_is_still_behind(self) -> None:
+        """Back there the lane it came from is still its own to return to,
+        and the wrong side of a road is no place to wait and see."""
+        pilot = self._pilot()
+        road, slow = self.started(pilot)
+        slow.gap = ALONGSIDE * 3.0               # still well in front
+        road._clear = False
+        pilot.controls(road, 1 / 60)
+        assert pilot.passing is None
+
+    def test_and_a_committed_pass_still_ends_when_it_is_past(self) -> None:
+        """Committed is not for ever: past the car, it comes back in."""
+        pilot = self._pilot()
+        road, slow = self.started(pilot)
+        slow.gap = ALONGSIDE / 2.0
+        road._clear = False
+        pilot.controls(road, 1 / 60)
+        slow.gap = -PASSED_BY - 5.0              # past it now
+        road._ahead = None
+        pilot.controls(road, 1 / 60)
+        assert pilot.passing is None
+        assert pilot.lane == pytest.approx(1.8)
+
+
+class TestComingBackInLooksAsFarAsItIsGoing:
+    """A lane is clear enough to return to when there is road to shed the
+    speed being carried into it, not when a fixed window happens to be empty.
+
+    Read off a recorded lap of the 7.2 km circuit: the pass was given up at
+    134.5 km/h, its own lane was judged clear, and 1.2 s later the car hit
+    something in that lane going the same way at the same speed. ``lane_clear``
+    looks a fixed 24 m ahead -- at 37 m/s that is two thirds of a second, and
+    the car covered 45 m before it arrived.
+
+    :meth:`StandIn.room_in` has always asked it the other way round, and says
+    why in its own docstring: a window is a fixed time only at one speed.
+    """
+
+    def _pilot(self, **style):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8,
+                         style=DriverStyle(**style))
+
+    def test_a_lane_with_a_car_just_beyond_the_window_is_not_clear(self) -> None:
+        """30 m ahead at 37 m/s, which the fixed window never saw."""
+        pilot = self._pilot()
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=37.0),
+                     ahead=_Ahead(30.0, 14.0))
+        assert not pilot.room_in(road, 1.8)
+
+    def test_and_the_same_car_is_fine_at_a_crawl(self) -> None:
+        """Thirty metres is plenty when there is nothing to shed."""
+        pilot = self._pilot()
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=15.0),
+                     ahead=_Ahead(30.0, 14.0))
+        assert pilot.room_in(road, 1.8)
+
+    def test_an_empty_lane_is_always_clear(self) -> None:
+        pilot = self._pilot()
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=37.0), ahead=None)
+        assert pilot.room_in(road, 1.8)
+
+    def test_and_a_car_going_as_fast_is_nothing_to_shed(self) -> None:
+        """What matters is the speed being carried *into* it, not the speed."""
+        pilot = self._pilot()
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=37.0),
+                     ahead=_Ahead(30.0, 37.0))
+        assert pilot.room_in(road, 1.8)

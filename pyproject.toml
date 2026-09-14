@@ -45,6 +45,7 @@ Repository = "https://github.com/mcfletch/glisteel"
 
 [project.scripts]
 glisteel = "glisteel.game:main"
+glisteel-diagnose = "glisteel.diagnose:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "glisteel.__version__" }

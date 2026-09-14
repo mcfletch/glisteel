@@ -43,7 +43,7 @@ import numpy as np
 os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')
 os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')
 
-from OpenGLContext import quaternion, testingcontext  # noqa: E402
+from OpenGLContext import quaternion, telemetry, testingcontext  # noqa: E402
 from OpenGLContext.events.systemtime import systemTime  # noqa: E402
 from OpenGLContext.scenegraph.scenegraph import SceneGraph  # noqa: E402
 from OpenGLContext.ui.overlay import OverlayMixin  # noqa: E402
@@ -171,6 +171,10 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         # replaces it with one that advances a frame at a time, and the car has
         # to move on that same clock or the video is not what was driven.
         self._clock = systemTime()
+        if self.config.telemetry is not None:
+            # Started before anything is built, so what a world was generated
+            # from is in the journal along with what happened in it.
+            telemetry.start(self, self.config.telemetry or None)
         self.records = Records()
         self.preferences = Preferences()
         # What was chosen last time, unless this run asked for something. The
@@ -224,6 +228,12 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
                                view=self.config.view,
                                laps=self.config.laps,
                                assist=self.config.assist)
+        # The session marks what the engine cannot know, and those marks go
+        # nowhere unless somebody is listening. One recorder for the window,
+        # shared with whatever run is in it: a player who restarts is still in
+        # the session that was being recorded.
+        if self.telemetry:
+            self.session.telemetry = self.telemetry
         self.session.driver = self._driver()
         self._told = False
         # The engine's own sky and light rig, rather than one written here: a
@@ -815,6 +825,15 @@ def build_parser() -> argparse.ArgumentParser:
                              'often a racer should meet somebody, bounded by '
                              'whether there is room to get past them '
                              '(default: the road decides)')
+    parser.add_argument('--telemetry', nargs='?', const='', default=None,
+                        metavar='PATH',
+                        help='record this run to PATH, so a race that went '
+                             'wrong can be read back afterwards: why it ended '
+                             'and where, what it hit and how hard, and every '
+                             'pass the driver took or wanted and could not '
+                             'have. With no PATH it goes somewhere dated under '
+                             'your own directory. `glisteel-diagnose` drives a '
+                             'world and prints the same thing without a window')
     parser.add_argument('--autopilot', action='store_true',
                         help='let the car drive itself round the circuit. With '
                              'a --control that steers for the driver it drives '

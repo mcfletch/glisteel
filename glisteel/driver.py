@@ -198,6 +198,12 @@ class Autopilot:
         self.own_side = float(lane)
         #: What it pulled out for, while it is getting by it, or None.
         self.passing: Any = None
+        #: How long this pass has been under way, in seconds, for the record it
+        #: writes when the pass ends one way or the other.
+        self.passing_for = 0.0
+        self._refusing = ''
+        self._refused_for = 0.0
+        self._refused_with: dict[str, Any] = {}
 
     def following(self, gap: float | None, speed: float = 0.0) -> None:
         """Say what is in front: how far, and how fast it is going."""
@@ -219,13 +225,13 @@ class Autopilot:
         """
         speed = float(session.car.speed())
         index, _distance = self.course.nearest(session.car.position)
-        self.choose_lane(session, speed, self.road_speed(index, speed))
+        self.choose_lane(session, speed, self.road_speed(index, speed), dt)
         found = session.traffic_ahead()
         self.following(*(found if found is not None else (None, 0.0)))
         return self.update(session.car)
 
     def choose_lane(self, session: SessionLike, speed: float,
-                    allowed: float) -> None:
+                    allowed: float, dt: float = 0.0) -> None:
         """Pull out for something slower, and come back in once past it.
 
         A driver that only ever follows spends the lap behind the first slow
@@ -259,30 +265,175 @@ class Autopilot:
             return
         other = -self.own_side
         making = max(float(speed), float(allowed))
+        if self.passing is None and abs(self.lane - self.own_side) > 1e-6:
+            # Out of its own lane and not passing anything: a pass given up
+            # leaves the car here, and here is the wrong side of the road. Back
+            # as soon as there is room, and no further decision until there is
+            # -- a driver on the wrong side does not start a second pass.
+            if self.coming_back(session):
+                self.lane = self.own_side
+            return
         if self.passing is not None:
             if session.along(self.passing) < -PASSED_BY:
                 # Past it. Back in as soon as there is room to, and out here
                 # until there is: coming back across the car just passed is the
                 # one way a pass ends worse than not taking it.
-                if session.lane_clear(self.own_side):
+                if self.coming_back(session):
+                    self.note(session, 'pass-done',
+                              seconds=round(self.passing_for, 1))
                     self.lane, self.passing = self.own_side, None
+                    self.passing_for = 0.0
                 return
+            self.passing_for += float(dt)
             room = self._pass_room(session, speed, making, self.passing)
-            if room is None or not session.lane_clear(other, ahead=room):
-                # The way through has closed, or the pass has stopped being one
-                # that finishes. Being on the wrong side of a road is the one
-                # place not to wait and see: back to our own side, and follow
-                # whatever we came up behind.
-                self.lane, self.passing = self.own_side, None
+            if (room is None or not session.lane_clear(other, ahead=room)) \
+                    and session.along(self.passing) > ALONGSIDE:
+                # The way through has closed, or the pass has stopped being
+                # one that finishes, *and* there is still giving up to do:
+                # beside the car being passed there is not. :data:`ALONGSIDE`
+                # is where that line falls, and finishing is the only way out
+                # past it -- re-deciding from scratch every frame and bailing
+                # at whatever appeared put twenty-three of twenty-five passes
+                # on one recorded run into the wrong side of the road and out
+                # again.
+                #
+                # Back there the lane it came from is still its own to return
+                # to, and the wrong side of a road is no place to wait and see.
+                #
+                # **Back to a lane that is there to go back to.** Alongside the
+                # car being passed there is nothing to come back to, and a
+                # driver that crosses the crown anyway crosses it into them --
+                # which is the same question the finished-pass branch above has
+                # always asked, and this one did not. Out here is the wrong
+                # side of the road and it is still the safer of the two until
+                # the lane is clear.
+                self.note(session, 'pass-given-up',
+                          why='no room to finish' if room is None
+                              else 'the way through closed',
+                          seconds=round(self.passing_for, 1),
+                          wanted=None if room is None else round(room),
+                          stranded=not self.coming_back(session))
+                self.passing, self.passing_for = None, 0.0
+                if self.coming_back(session):
+                    self.lane = self.own_side
             return
         first = session.car_ahead(PASS_WITHIN)
-        if first is None or making - float(first.speed) <= PASS_SLOWER_BY:
+        if first is None:
+            self.refused(session, 'nothing in front', dt)
+            return
+        if making - float(first.speed) <= PASS_SLOWER_BY:
+            self.refused(session, 'not enough slower', dt)
             return
         room = self._pass_room(session, speed, making, first)
         if room is None:
+            self.refused(session, 'would take too long', dt)
             return
-        if session.lane_clear(other, ahead=room):
-            self.lane, self.passing = other, first
+        if not session.lane_clear(other, ahead=room):
+            self.refused(session, 'other lane not clear', dt, wanted=round(room))
+            return
+        self.note(session, 'pass-started',
+                  wanted=round(room), theirs=round(float(first.speed) * 3.6, 1),
+                  gap=round(max(float(session.along(first)), 0.0), 1))
+        self.lane, self.passing = other, first
+        self.passing_for = 0.0
+
+    def looking(self, speed: float) -> float:
+        """How far up the road to watch for traffic, in metres.
+
+        As far as it would take to stop from here, and the road covered while
+        deciding to. A fixed number is a speed limit in disguise: stopping
+        from two hundred kilometres an hour takes a quarter of a kilometre,
+        and a driver watching a hundred metres of road meets a stopped car
+        with no room left to stop in however early it starts braking.
+
+        Never less than :data:`PASSING_REACH`, which is the road a pass is
+        decided over rather than the road it is stopped in.
+        """
+        speed = max(float(speed), 0.0)
+        braking = max(self.style.braking, 1e-6)
+        return max(PASSING_REACH,
+                   speed * speed / (2.0 * braking) + speed * THINKING)
+
+    def room_in(self, session: SessionLike, across: float) -> bool:
+        """Whether the lane at that offset can be moved into *and held*.
+
+        Not "is there anything within a window": a window is a fixed time only
+        at one speed, and twenty-four metres is a second and a half at forty
+        km/h and half a second at a hundred and sixty. What decides it is
+        whether there is road enough in that lane to shed the speed being
+        carried into it and still sit behind whatever is in it.
+
+        ``across`` is metres to the road's own right, so this asks about the
+        lane being pulled out into and, afterwards, about the one being
+        returned to.
+        """
+        speed = float(session.car.speed())
+        found = session.lane_ahead(across, reach=self.looking(speed))
+        if found is None:
+            return True
+        gap, theirs = found
+        losing = max(speed - float(theirs), 0.0)
+        braking = max(self.style.braking, 1e-6)
+        return bool(float(gap) > losing * losing / (2.0 * braking) + PASSING_GAP)
+
+    def coming_back(self, session: SessionLike) -> bool:
+        """Whether its own side is there to come back to.
+
+        Nothing beside it, and nothing else asked. **Being on the wrong side
+        of a road is worse than arriving in the right one too fast**, and that
+        is a measured comparison rather than an opinion: made to wait for road
+        enough to shed its speed into as well, the driver stayed out for 3.4 s
+        and met a car head-on at 44.8 m/s of closing speed, where coming back
+        at once had cost a same-direction contact at 10.3. Four times the
+        severity, to avoid arriving too quickly behind something.
+
+        So the room to hold a lane decides how hard to *brake* once in it --
+        the following rule does that from the car's own position, which after
+        this is its own lane -- and never whether to be in it. A driver that
+        will not come back is a driver in the oncoming lane, and there is
+        nothing on the road worse to be.
+        """
+        return bool(session.lane_clear(self.own_side))
+
+    def note(self, session: SessionLike, name: str, **fields: Any) -> None:
+        """Write one moment of the drive into the session's record.
+
+        Goes nowhere until somebody records the session
+        (:mod:`OpenGLContext.telemetry`), so it is marked unconditionally
+        rather than guarded -- and the guarded calls are exactly the ones that
+        would have explained the failure nobody could reproduce.
+        """
+        getattr(session, 'telemetry', NOT_RECORDING).mark(
+            name, at=round(self.station(session), 1),
+            speed=round(float(session.car.speed()) * 3.6, 1), **fields)
+
+    def refused(self, session: SessionLike, why: str, dt: float = 0.0,
+                **fields: Any) -> None:
+        """Note that a pass was not on, the first time each reason is.
+
+        Once per reason rather than once a frame: a reason that has not changed
+        is one already written down, and sixty a second is a file nobody reads.
+        What a reader wants is the *stretch* -- it wanted to pass from here to
+        there and the other lane was never clear -- so the mark carries where
+        it started wanting and the next one carries where it stopped.
+        """
+        if why != self._refusing:
+            if self._refusing:
+                self.note(session, 'pass-wanted', why=self._refusing,
+                          seconds=round(self._refused_for, 1),
+                          **self._refused_with)
+            self._refusing, self._refused_for = why, 0.0
+            self._refused_with = fields
+        self._refused_for += max(float(dt), 0.0)
+
+    def station(self, session: SessionLike) -> float:
+        """How far along the course the car is, in metres."""
+        course = self.course
+        index, _off = course.nearest(session.car.position)
+        stations = getattr(course, 'stations', None)
+        if stations is None:                     # pragma: no cover - a double
+            return 0.0
+        return float(stations[int(np.clip(index, 0, len(stations) - 1))])
 
     def pass_seconds(self, speed: float, gap: float, other: float,
                      quick: float | None = None) -> float:
@@ -923,23 +1074,6 @@ class StandIn:
         """
         return self.looking(float(session.car.speed()))
 
-    def looking(self, speed: float) -> float:
-        """How far up the road to watch for traffic, in metres.
-
-        As far as it would take to stop from here, and the road covered while
-        deciding to. A fixed number is a speed limit in disguise: stopping
-        from two hundred kilometres an hour takes a quarter of a kilometre,
-        and a driver watching a hundred metres of road meets a stopped car
-        with no room left to stop in however early it starts braking.
-
-        Never less than :data:`PASSING_REACH`, which is the road a pass is
-        decided over rather than the road it is stopped in.
-        """
-        speed = max(float(speed), 0.0)
-        braking = max(self.pilot.style.braking, 1e-6)
-        return max(PASSING_REACH,
-                   speed * speed / (2.0 * braking) + speed * THINKING)
-
     def keeping_back(self, wanted: float, gap: float, speed: float) -> float:
         """The speed to aim for, given what is in front and how far off it is.
 
@@ -1218,28 +1352,6 @@ class StandIn:
         quick = self.pilot.pace_over(index, seconds * quick)
         return self.pass_seconds(now, gap, speed, quick=quick), quick
 
-    def room_in(self, session: SessionLike, across: float) -> bool:
-        """Whether the lane at that offset can be moved into *and held*.
-
-        Not "is there anything within a window": a window is a fixed time only
-        at one speed, and twenty-four metres is a second and a half at forty
-        km/h and half a second at a hundred and sixty. What decides it is
-        whether there is road enough in that lane to shed the speed being
-        carried into it and still sit behind whatever is in it.
-
-        ``across`` is metres to the road's own right, so this asks about the
-        lane being pulled out into and, afterwards, about the one being
-        returned to.
-        """
-        speed = float(session.car.speed())
-        found = session.lane_ahead(across, reach=self.looking(speed))
-        if found is None:
-            return True
-        gap, theirs = found
-        losing = max(speed - float(theirs), 0.0)
-        braking = max(self.pilot.style.braking, 1e-6)
-        return bool(float(gap) > losing * losing / (2.0 * braking) + PASSING_GAP)
-
     def room_to_cross(self, session: SessionLike, gap: float,
                       speed: float) -> bool:
         """Whether the lane change finishes before the gap in front does.
@@ -1273,6 +1385,14 @@ class StandIn:
         at = np.asarray(session.car.position, dtype='d').reshape(-1)[:3]
         index, _distance = course.nearest(at)
         return float(np.dot(at - course.point(index), course.across(index)))
+
+    def looking(self, speed: float) -> float:
+        """The pilot's own reach; see :meth:`Autopilot.looking`."""
+        return self.pilot.looking(speed)
+
+    def room_in(self, session: SessionLike, across: float) -> bool:
+        """The pilot's own answer; see :meth:`Autopilot.room_in`."""
+        return self.pilot.room_in(session, across)
 
     def worth_passing(self, session: SessionLike) -> bool:
         """Whether what is in front is slow enough to be worth the other lane.

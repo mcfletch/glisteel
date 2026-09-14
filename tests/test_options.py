@@ -136,3 +136,28 @@ class TestWhatIsRefused:
         assert Options(world='x', assist=0.0).assist == 0.0
         assert Options(world='x', assist=1.0).assist == 1.0
         assert Options(world='x', laps=0).laps == 0
+
+
+class TestRecordingARunToExplainIt:
+    """``--telemetry`` writes down what the game knows and the engine cannot.
+
+    The marks were always there -- `drive-ended` with where and why, `crash`
+    with the closing speed and whether it was oncoming, every pass the driver
+    took or wanted -- and nothing in the game ever attached a recorder to catch
+    them, so `Session.telemetry` was `NOT_RECORDING` for every run anybody ever
+    played. A failure then had to be chased with a script written afterwards to
+    ask one question, which is the opposite of what a journal is for.
+    """
+
+    def test_a_run_records_nothing_unless_it_is_asked_to(self) -> None:
+        assert Options.from_namespace(_parsed()).telemetry is None
+
+    def test_and_a_path_is_carried_through(self) -> None:
+        found = Options.from_namespace(_parsed(['--telemetry', 'run.jsonl']))
+        assert found.telemetry == 'run.jsonl'
+
+    def test_asking_for_it_with_no_path_still_records(self) -> None:
+        """Somewhere dated under the user's own directory, since the session
+        worth reading is rarely the one that has just finished."""
+        found = Options.from_namespace(_parsed(['--telemetry']))
+        assert found.telemetry == ''
