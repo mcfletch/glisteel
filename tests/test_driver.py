@@ -1490,3 +1490,50 @@ class TestTheEdgeIsWhereTheRoadActuallyEnds:
         beside = pilot.passing_lane(0)
         assert beside is not None
         assert pilot.rejoining(abs(beside), 40.0, 0) == pytest.approx(40.0)
+
+
+class TestADriverTooCloseFallsBack:
+    """Matching the speed of the car in front holds whatever gap it arrived
+    with, which is not the same as keeping a following distance.
+
+    Read off a recorded Tidewater lap: 4.3 m behind a car at 77 km/h, held
+    there for a kilometre. A fifth of a second. The rule asked for *the
+    leader's speed* as soon as the gap closed inside the following distance,
+    and a car doing exactly the speed of the thing in front never gets back
+    the room it lost getting there.
+
+    So being too close asks for less than the leader, by enough to bleed the
+    shortfall off over the same time the gap is measured in, and the gap opens
+    up again instead of being frozen wherever the driver arrived.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def test_at_its_following_distance_it_matches_the_car_in_front(self) -> None:
+        pilot = self._pilot()
+        pilot.following(pilot.following_gap(30.0), 25.0)
+        assert pilot._room(30.0) == pytest.approx(25.0, abs=0.5)
+
+    def test_further_back_it_may_go_quicker(self) -> None:
+        pilot = self._pilot()
+        pilot.following(pilot.following_gap(30.0) + 60.0, 25.0)
+        assert pilot._room(30.0) > 25.0
+
+    def test_but_too_close_it_asks_for_less(self) -> None:
+        pilot = self._pilot()
+        pilot.following(4.3, 21.5)
+        assert pilot._room(21.5) < 21.5, 'it would sit there for ever'
+
+    def test_and_never_for_less_than_a_standstill(self) -> None:
+        """Nose to tail behind something stopped is a stop, not a reverse."""
+        pilot = self._pilot()
+        pilot.following(0.5, 0.0)
+        assert pilot._room(2.0) >= 0.0
+
+    def test_the_fall_back_is_gentle_rather_than_a_stop(self) -> None:
+        """A driver a little close lifts; it does not stand on the brakes."""
+        pilot = self._pilot()
+        gap = pilot.following_gap(30.0)
+        pilot.following(gap - 2.0, 25.0)
+        assert 20.0 < pilot._room(30.0) < 25.0

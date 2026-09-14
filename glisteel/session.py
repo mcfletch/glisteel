@@ -780,6 +780,7 @@ class Session:
         self._sampled = 0.0
         index, off = self.course.nearest(self.car.position)
         driver = self.driver
+        ahead = self.traffic_ahead()
         throttle, brake, steer = wanted
         self.telemetry.mark(
             'driving',
@@ -790,6 +791,11 @@ class Session:
             speed=round(self.car.speed_kph(), 1),
             steer=round(float(steer), 3), throttle=round(float(throttle), 2),
             brake=round(float(brake), 2),
+            # What it is keeping station on. A car stopped on an open road is
+            # either waiting for something or stuck, and without this the
+            # record cannot tell the two apart.
+            gap=_rounded(ahead[0] if ahead else None, 1),
+            theirs=_rounded((ahead[1] * 3.6) if ahead else None, 1),
             bank=_rounded(self.course.bank_at(index), 3)
             if hasattr(self.course, 'bank_at') else None,
             width=round(float(self.course.width_at(index)), 2)

@@ -149,6 +149,13 @@ LANE_RATE = 2.5
 #: one does. That difference is the whole of what a climbing lane is for.
 ABREAST = 2.4
 
+#: The shortest time a driver is allowed to take recovering a following
+#: distance it has lost, in seconds. Only reached by a way of driving that
+#: asks for no following seconds at all (:class:`StandIn` part-way past
+#: something), where dividing by the time the gap is measured in would
+#: otherwise divide by nothing.
+MINIMUM_FALL_BACK = 0.5
+
 #: How much of the road's speed a driver gives up while crossing it, as a
 #: fraction, and the width of crossing that asks for all of it, in metres.
 #:
@@ -1001,13 +1008,23 @@ class Autopilot:
         ``v = sqrt(2 a s)`` in the room it has, plus whatever the car ahead is
         doing: the braking distance read backwards. The same rule the traffic
         uses on itself, so a queue behaves the same way whoever is in it.
+
+        **Too close asks for less than the car in front.** Matching its speed
+        holds whatever gap the driver arrived with, which is not the same as
+        keeping a following distance: read off a recorded Tidewater lap, 4.3 m
+        behind a car at 77 km/h -- a fifth of a second -- held there for a
+        kilometre. So a driver inside its distance bleeds the shortfall off
+        over the same time the gap is measured in, and the room comes back.
         """
         if self.ahead is None:
             return self.style.maximum_speed
         gap, ahead = self.ahead
-        room = max(gap - self.following_gap(speed), 0.0)
+        wanted = self.following_gap(speed)
+        if gap < wanted:
+            seconds = max(float(self.style.following_seconds), MINIMUM_FALL_BACK)
+            return max(float(ahead) - (wanted - gap) / seconds, 0.0)
         return float(max(ahead, 0.0)
-                     + math.sqrt(2.0 * self.style.braking * room))
+                     + math.sqrt(2.0 * self.style.braking * (gap - wanted)))
 
     def pulling_out_from(self, speed: float) -> float:
         """How far back a pass may be decided from, in metres.

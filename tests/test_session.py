@@ -993,3 +993,47 @@ class TestADriveThatIsFinishedCannotBeFailed:
         session.advance(FRAME)
         session.watch.ended = 'mired off the road'
         assert session.ended == 'mired off the road'
+
+
+class TestTheSampleSaysWhatTheCarIsFollowing:
+    """A car stopped on an open road is either waiting for something or stuck,
+    and the sample could not tell the two apart.
+
+    Read off a recorded Ashdown lap: station 3191.8, in its own lane, on the
+    road, zero throttle and zero brake, for ten seconds and counting. Nothing
+    in the record said whether there was a car in front of it. So the sample
+    carries what the driver is keeping station on -- how far, and how fast.
+    """
+
+    @staticmethod
+    def _sample(session):
+        kept: list = []
+
+        class Keeping:
+            @staticmethod
+            def mark(name, **fields):
+                if name == 'driving':
+                    kept.append(fields)
+
+        session.telemetry = Keeping()
+        return kept
+
+    def test_an_open_road_says_there_is_nothing(self) -> None:
+        session = _session()
+        kept = self._sample(session)
+        for _ in range(int(1.0 / FRAME)):
+            session.advance(FRAME)
+        assert kept and kept[-1]['gap'] is None
+        assert kept[-1]['theirs'] is None
+
+    def test_and_a_car_in_front_is_how_far_and_how_fast(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        _traffic_at(session, session.across(), station=60.0, speed=10.0)
+        kept = self._sample(session)
+        for _ in range(int(1.0 / FRAME)):
+            session.advance(FRAME)
+        found = [one for one in kept if one['gap'] is not None]
+        assert found, 'the car in front was never written down'
+        assert 0.0 < found[-1]['gap'] < 140.0
+        assert found[-1]['theirs'] == pytest.approx(36.0, abs=5.0)
