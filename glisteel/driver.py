@@ -407,7 +407,8 @@ class Autopilot:
                 # Past it. Back in as soon as there is room to, and out here
                 # until there is: coming back across the car just passed is the
                 # one way a pass ends worse than not taking it.
-                if self.coming_back(session):
+                if self.coming_back(session) \
+                        and self.room_in(session, self.own_side):
                     self.note(session, 'pass-done',
                               seconds=round(self.passing_for, 1))
                     self.lane, self.passing = self.own_side, None
@@ -535,8 +536,16 @@ class Autopilot:
     def coming_back(self, session: SessionLike) -> bool:
         """Whether its own side is there to come back to.
 
-        Nothing beside it, and nothing else asked. **Being on the wrong side
-        of a road is worse than arriving in the right one too fast**, and that
+        Nothing beside it, and nothing else asked, *for a pass given up*.
+        Finishing one asks :meth:`room_in` as well -- out there it is already
+        past what it overtook and going faster, so waiting costs nothing, where
+        a driver that has abandoned a pass is sitting on the wrong side of the
+        road with something coming. The Ashdown journal has the difference in
+        it: a pass completed at 137 km/h, back to its own lane, and a third of
+        a second later the back of a car doing 32 in it.
+
+        **Being on the wrong side of a road is worse than arriving in the right
+        one too fast**, and that
         is a measured comparison rather than an opinion: made to wait for road
         enough to shed its speed into as well, the driver stayed out for 3.4 s
         and met a car head-on at 44.8 m/s of closing speed, where coming back

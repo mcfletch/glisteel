@@ -532,9 +532,13 @@ class _Ahead:
 class _Road:
     """The bit of a session a driver asks about traffic and lanes."""
 
-    def __init__(self, car, ahead=None, clear=True, lane=1.8):
+    def __init__(self, car, ahead=None, clear=True, lane=1.8, own_lane=None):
         self.car = car
         self._ahead = ahead
+        #: What is up the car's *own* lane, where that is a different thing
+        #: from what it is following -- which it is once a pass is past the car
+        #: it pulled out for.
+        self._own_lane = own_lane
         self._clear = clear
         self.lane = lane
         self.asked: list = []
@@ -584,11 +588,12 @@ class _Road:
         asking after. The car's own side holds whatever it is following; the
         far side is empty unless a test says otherwise.
         """
-        if across * self.lane <= 0.0 or self._ahead is None:
+        found = self._own_lane if self._own_lane is not None else self._ahead
+        if across * self.lane <= 0.0 or found is None:
             return None
-        if self._ahead.gap > float(reach):
+        if found.gap > float(reach):
             return None
-        return (self._ahead.gap, self._ahead.speed)
+        return (found.gap, found.speed)
 
     def along(self, other):
         return other.gap
@@ -1229,3 +1234,43 @@ class TestALaneChangeIsEasedRatherThanStepped:
         pilot.lane = -1.8
         pilot.ease(1.0 / 60.0)
         assert pilot.lane == pytest.approx(-1.8)
+
+
+class TestFinishingAPassWaitsForRoomToSitIn:
+    """Being past a car is not the same as having somewhere to go.
+
+    Read off the Ashdown journal: a pass completed at 137 km/h, back to its own
+    lane, and a third of a second later the back of a car doing 32 in it --
+    `lane_clear` looks a fixed 24 m, which at 38 m/s is two thirds of a second
+    of road. The car was still crossing the crown when it arrived.
+
+    Out there it is already past what it overtook and going faster than it, so
+    waiting is safe -- which is what makes this different from *abandoning* a
+    pass, where staying out means sitting on the wrong side of the road with
+    something coming (:class:`TestGivingUpOnAPassDoesNotDriveIntoTheCarBeingPassed`).
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def passed(self, pilot, ahead):
+        """A pass taken and finished, with ``ahead`` up its own lane."""
+        slow = _Ahead(40.0, 18.0)
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=38.0), ahead=slow)
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8), 'never pulled out'
+        slow.gap = -PASSED_BY - 10.0             # past it now
+        road._own_lane = _Ahead(*ahead)
+        return road
+
+    def test_it_stays_out_for_something_it_cannot_slot_in_behind(self) -> None:
+        pilot = self._pilot()
+        road = self.passed(pilot, ahead=(24.0, 9.0))
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8), 'came back onto it'
+
+    def test_and_takes_the_lane_when_there_is_road_to_hold_it(self) -> None:
+        pilot = self._pilot()
+        road = self.passed(pilot, ahead=(200.0, 9.0))
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8)
