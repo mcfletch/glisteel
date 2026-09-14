@@ -952,3 +952,44 @@ class TestARunSaysWhenTheCarHitTheWorld:
         for _ in range(60):
             session._note_a_bump(18.0)
         assert len(kept) == 1
+
+
+class TestADriveThatIsFinishedCannotBeFailed:
+    """A car that has crossed the line has done the thing the run was for.
+
+    A hill climb finishes at the end of its road, so the car crosses the line
+    at racing speed with nothing in front of it but scenery: it is brought to
+    a stop (:meth:`glisteel.run.Run.allow`) and the stopping takes a couple of
+    hundred metres it has not got. Read off a recorded Beacon climb -- the lap
+    complete, `drive-ended why='off the road' lap=1` eight tenths of a second
+    later, and a finished climb written down as a failure.
+
+    So the rules that end a run stop applying once the run is over. They are
+    about the race, and there is no race left to lose.
+    """
+
+    def _finished(self):
+        session = _session(scenarios.circuit())
+        session.advance(FRAME)
+        session.timing.laps.append(object())     # the flag has fallen
+        session.run.update(FRAME, laps=len(session.timing.laps))
+        return session
+
+    def test_the_run_is_over_once_the_laps_are_done(self) -> None:
+        assert self._finished().run.over
+
+    def test_leaving_the_road_afterwards_does_not_fail_it(self) -> None:
+        session = self._finished()
+        session.watch.ended = 'mired off the road'
+        assert session.ended is None
+
+    def test_and_neither_does_touching_something(self) -> None:
+        session = self._finished()
+        session.crashes.ended = 'HIT A CAR'
+        assert session.ended is None
+
+    def test_but_a_run_still_going_is_ended_by_either(self) -> None:
+        session = _session(scenarios.circuit())
+        session.advance(FRAME)
+        session.watch.ended = 'mired off the road'
+        assert session.ended == 'mired off the road'

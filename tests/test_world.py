@@ -787,6 +787,35 @@ class TestNeitherWritingModeIsPacedByADisplay:
         assert os.environ.get('OPENGLCONTEXT_NO_VSYNC') == '0'
 
 
+class TestNeitherWritingModeDrawsTheDeveloperOverlay:
+    """A file written to be looked at is a picture of the game, not of its
+    frame counters.
+
+    The developer overlay is up by default and fills the left third of the
+    window, so every reference recording made so far carries the renderer's
+    row of numbers across the road. `OPENGLCONTEXT_DISABLE_FPS_DISPLAY` is
+    what the engine's capture harness has always set for a clean frame, and a
+    recording wants the same thing for the same reason.
+    """
+
+    @pytest.mark.parametrize('mode', ['capture', 'record'])
+    def test_it_asks_for_a_clean_frame(self, monkeypatch, mode) -> None:
+        import os
+        monkeypatch.delenv('OPENGLCONTEXT_DISABLE_FPS_DISPLAY', raising=False)
+        _run_writing_setup(monkeypatch, mode)
+        assert os.environ.get('OPENGLCONTEXT_DISABLE_FPS_DISPLAY') == '1'
+
+    @pytest.mark.parametrize('mode', ['capture', 'record'])
+    def test_and_somebody_who_wants_the_numbers_keeps_them(self, monkeypatch,
+                                                           mode) -> None:
+        """Recording a run to show what the counters did is a real thing to
+        want, and saying so has to keep working."""
+        import os
+        monkeypatch.setenv('OPENGLCONTEXT_DISABLE_FPS_DISPLAY', '')
+        _run_writing_setup(monkeypatch, mode)
+        assert os.environ.get('OPENGLCONTEXT_DISABLE_FPS_DISPLAY') == ''
+
+
 def _run_writing_setup(monkeypatch, mode='capture'):
     """`_capture` or `_record` up to the window, and no further."""
     from glisteel import game

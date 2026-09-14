@@ -33,7 +33,7 @@ from glisteel.camera import VIEWS, CameraPose, ChaseCamera
 from glisteel.car import Car, CarSpec
 from glisteel.race import Collisions, OffRoad, RaceTiming, off_course
 from glisteel.reflections import Reflections
-from glisteel.run import COUNTDOWN, Run
+from glisteel.run import COUNTDOWN, FINISHED, Run
 from glisteel.sound import Soundtrack
 from glisteel.traffic import IN_THE_WAY
 
@@ -272,7 +272,22 @@ class Session:
 
     @property
     def ended(self) -> str | None:
-        """Why the run is over, or None while it is not."""
+        """Why the run **failed**, or None -- finishing included.
+
+        The rules that end a run stop applying once it has been *finished*,
+        because they are about the race and there is no race left to lose. A
+        run ended by one of them is still ended by it -- that is what put the
+        race in that state.
+
+        A hill climb finishes at the end of its road, so the car crosses the
+        line at racing speed with nothing in front of it but scenery; it is
+        brought to a stop and the stopping takes a couple of hundred metres it
+        has not got. Read off a recorded Beacon climb: the lap complete,
+        ``drive-ended why='off the road' lap=1`` eight tenths of a second
+        later, and a finished climb written down as a failure.
+        """
+        if self.run.phase == FINISHED:
+            return None
         for watcher in (self.watch, self.crashes):
             if watcher.ended:
                 return str(watcher.ended)

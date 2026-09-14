@@ -941,19 +941,32 @@ def _run(options: Any, width: int, height: int) -> int:  # pragma: no cover
 
 
 def _unpaced() -> None:
-    """Stop a display deciding how fast this run goes, or whether it goes.
+    """Set up a run that draws a fixed number of frames and writes a file.
 
-    A mode that draws a fixed number of frames and writes a file must not be
-    paced by a display, and there are two of those: :func:`_capture` and
-    :func:`_record`. A compositor throttles the swap to its own frame callback,
-    and a window it is not presenting never gets one -- ``swap_buffers`` then
-    blocks for ever and the first frame never finishes. No error, no output, a
-    run that simply never ends.
+    Two of those -- :func:`_capture` and :func:`_record` -- and what they need
+    is the same twice, so it is written down once.
 
-    ``setdefault``, so ``OPENGLCONTEXT_NO_VSYNC=0`` still asks for a paced run
-    on a machine where that is wanted.
+    **A clean frame.** What comes out is a picture of the game, looked at by
+    somebody who is not running it. The developer overlay is up by default and
+    fills the left third of the window, and
+    ``OPENGLCONTEXT_DISABLE_FPS_DISPLAY`` is what the engine's capture harness
+    has always set to get rid of it; a recording wants the same thing for the
+    same reason. A key still brings it up, and recording a run *to show what
+    the counters did* is a real thing to want, so this is a default rather
+    than a rule.
+
+    **No pacing.** A compositor throttles the buffer swap to its own frame
+    callback, and a window it is not presenting never gets one --
+    ``swap_buffers`` then blocks for ever and the first frame never finishes.
+    No error, no output, a run that simply never ends. The first fix for that
+    went into ``--capture`` alone and left ``--record`` with it, which is why
+    both of these live here rather than at either call site.
+
+    ``setdefault`` on both, so a machine that wants the pacing, or a run that
+    wants the numbers, still says so and is listened to.
     """
     os.environ.setdefault('OPENGLCONTEXT_NO_VSYNC', '1')
+    os.environ.setdefault('OPENGLCONTEXT_DISABLE_FPS_DISPLAY', '1')
 
 
 def _record(options: Any, width: int, height: int) -> None:  # pragma: no cover
