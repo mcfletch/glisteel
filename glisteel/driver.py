@@ -119,6 +119,23 @@ REJOIN_SPEED = 8.0
 CRAWLING = 0.35
 CRAWL_HOLDS = 1.0
 
+#: How far back a pass is decided from, as **seconds** of road at the speed
+#: being driven, and the least that is worth in metres.
+#:
+#: A time, because being on a bumper is a time rather than a length: ten metres
+#: behind something at eighty is on its paintwork, and ten metres behind a
+#: stopped car while crawling is three seconds of room and a perfectly ordinary
+#: place to pull out from. Not the whole following distance either, which at
+#: speed is the better part of a hundred metres and would refuse every pass
+#: there is -- this is only about the bumper.
+#:
+#: What comes of not asking is on the Beacon journal: `pass-started gap=10.6`
+#: at 80 km/h, given up a tenth of a second later and stranded on the wrong
+#: side, then another declared `pass-done` in 0.1 s, and the car off the road
+#: at the next station.
+PASS_FROM_SECONDS = 0.8
+PASS_FROM_LEAST = 6.0
+
 #: How fast the line a car follows crosses the road, in metres a second.
 #:
 #: A lane change is a manoeuvre rather than an instant: a second or so for a
@@ -453,6 +470,15 @@ class Autopilot:
             return
         if making - float(first.speed) <= PASS_SLOWER_BY:
             self.refused(session, 'not enough slower', dt)
+            return
+        if float(session.along(first)) < self.pulling_out_from(speed):
+            # Inside its own following distance there is nowhere to pull out
+            # from and nothing to see past: the room a driver keeps to follow
+            # is the room a pass is decided from. Pulling out off a bumper is
+            # what put the car across the crown and off the road on the Beacon
+            # run -- `pass-started gap=10.6`, given up a tenth of a second
+            # later and stranded, then another `pass-done` in 0.1 s.
+            self.refused(session, 'too close to pull out', dt)
             return
         room = self._pass_room(session, speed, making, first)
         if room is None:
@@ -916,6 +942,14 @@ class Autopilot:
         room = max(gap - self.following_gap(speed), 0.0)
         return float(max(ahead, 0.0)
                      + math.sqrt(2.0 * self.style.braking * room))
+
+    def pulling_out_from(self, speed: float) -> float:
+        """How far back a pass may be decided from, in metres.
+
+        :data:`PASS_FROM_SECONDS` of road at this speed, never less than
+        :data:`PASS_FROM_LEAST`.
+        """
+        return max(abs(float(speed)) * PASS_FROM_SECONDS, PASS_FROM_LEAST)
 
     def following_gap(self, speed: float) -> float:
         """How far back to sit from whatever is in front, in metres.

@@ -12,8 +12,7 @@ import pytest
 from omi_physics.world import PhysicsWorld
 
 from glisteel.car import Car
-from glisteel.driver import (ALONGSIDE, PASSED_BY, REJOIN_SPEED, Autopilot,
-                             DriverStyle)
+from glisteel.driver import ALONGSIDE, PASSED_BY, REJOIN_SPEED, Autopilot, DriverStyle
 from glisteel.world import Course, static_ground
 
 STEP = 1.0 / 120.0
@@ -1274,3 +1273,52 @@ class TestFinishingAPassWaitsForRoomToSitIn:
         road = self.passed(pilot, ahead=(200.0, 9.0))
         pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(1.8)
+
+
+class TestAPassStartsFromBehindTheCarNotOffItsBumper:
+    """A driver sitting inside its own following distance has nowhere to pull
+    out from and nothing to see past.
+
+    Read off a recorded run of the shipped Beacon road: `pass-started gap=10.6`
+    at 80 km/h, given up a tenth of a second later and stranded on the wrong
+    side; then another begun and declared `pass-done` in 0.1 s. The car thrashed
+    across the crown and put itself off the road at the next station.
+
+    A pass is decided *from* the following distance -- the room a driver keeps
+    precisely so there is somewhere to go and something to see -- so being
+    nearer than that is a reason to wait, not a reason to pull out.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def road(self, gap, speed=38.0, theirs=21.0):
+        return _Road(_Car(position=(1.8, 0.0, -100.0), speed=speed),
+                     ahead=_Ahead(gap, theirs))
+
+    def test_it_does_not_pull_out_off_a_bumper(self) -> None:
+        pilot = self._pilot()
+        road = self.road(gap=10.6)
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8), 'pulled out from 10 m behind'
+        assert pilot.passing is None
+
+    def test_but_does_from_a_settled_distance_back(self) -> None:
+        pilot = self._pilot()
+        road = self.road(gap=pilot.pulling_out_from(38.0) + 12.0)
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(-1.8)
+        assert pilot.passing is not None
+
+    def test_and_a_crawl_behind_a_stopped_car_is_not_on_a_bumper(self) -> None:
+        """Ten metres at eighty is paintwork; ten metres at a crawl is three
+        seconds of road and an ordinary place to pull out from."""
+        pilot = self._pilot()
+        pilot.controls(self.road(gap=9.0, speed=3.0, theirs=0.0), 1 / 60)
+        assert pilot.passing is not None
+
+    def test_just_inside_it_is_still_too_close(self) -> None:
+        pilot = self._pilot()
+        pilot.controls(self.road(gap=pilot.pulling_out_from(38.0) * 0.9),
+                       1 / 60)
+        assert pilot.passing is None
