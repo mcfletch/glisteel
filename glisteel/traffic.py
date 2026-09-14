@@ -30,7 +30,7 @@ from glisteel import models
 from glisteel.geometry import yaw_to_face
 
 __all__ = ['TrafficCar', 'Traffic', 'CRUISING', 'SLOWING', 'PULLING_OFF',
-           'EVADING',
+           'EVADING', 'passable_count', 'PASSING_SECONDS',
            'DEFAULT_TRAFFIC', 'SPEED_LIMIT', 'MEETING_SECONDS', 'RETIRE',
            'EDGE_BAND',
            'cars_for']
@@ -182,10 +182,43 @@ MEETING_SECONDS = 10.0
 RACING_SPEED = 120.0 / 3.6
 
 
+#: How long a pass on a two-way road takes, in seconds, for sizing how much of
+#: it may be occupied.
+#:
+#: The driver's own ceiling -- :data:`glisteel.driver.PASS_SECONDS` -- named
+#: here because a road is laid out before anybody drives it, and held to that
+#: value by ``tests/test_traffic.py``. A pass longer than this is one the driver
+#: refuses, so a road that never offers this much is a road nobody overtakes on.
+PASSING_SECONDS = 9.0
+
+
+def passable_count(length: float, racing: float = RACING_SPEED,
+                   limit: float = SPEED_LIMIT,
+                   seconds: float = PASSING_SECONDS) -> int:
+    """How many cars a two-way road of ``length`` can carry and stay passable.
+
+    A pass needs a stretch of the **oncoming** lane clear for as long as it
+    takes, and the two cars close on that stretch at both their speeds at once
+    -- so it is ``(racing + limit) * seconds`` of road, around five hundred
+    metres at the speeds these roads are driven at. Round a closed circuit the
+    oncoming cars end up about ``length / oncoming`` apart, so that spacing has
+    to be the larger of the two or there is nowhere to go.
+
+    Doubled at the end because only half the traffic comes the other way.
+    """
+    needs = max(float(racing) + float(limit), 1e-6) * max(float(seconds), 1e-6)
+    return max(int(float(length) / needs) * 2, 1)
+
+
 def cars_for(seconds: float = MEETING_SECONDS, racing: float = RACING_SPEED,
              limit: float = SPEED_LIMIT, reach: float = REACH,
-             two_way: bool = False) -> int:
+             two_way: bool = False, length: float | None = None) -> int:
     """How many cars put one in front of a racer every ``seconds``.
+
+    ``length`` is the road's own, and bounds the answer on a two-way road:
+    see :func:`passable_count`. Sized on the reach alone, a circuit shorter
+    than a driver can see gets a reach's worth of traffic spread round the
+    whole of it and becomes a road nobody can overtake on.
 
     A car exists from where it joins the road to where it is retired, and one
     is put out the moment one goes -- so the road is a queue: how many are
@@ -220,7 +253,10 @@ def cars_for(seconds: float = MEETING_SECONDS, racing: float = RACING_SPEED,
         kinds = [(0.25, in_front / catching), (0.25, behind / catching),
                  (0.25, in_front / meeting), (0.25, behind / meeting)]
     passed, alive = kinds[0][0], sum(share * lasts for share, lasts in kinds)
-    return max(int(round(alive / passed / max(float(seconds), 1e-3))), 1)
+    wanted = max(int(round(alive / passed / max(float(seconds), 1e-3))), 1)
+    if not two_way or length is None:
+        return wanted
+    return max(min(wanted, passable_count(length, racing, limit)), 1)
 
 
 DEFAULT_TRAFFIC = cars_for(two_way=True)

@@ -77,7 +77,6 @@ from glisteel.preferences import Preferences  # noqa: E402
 from glisteel.records import Records  # noqa: E402
 from glisteel.session import RACE_LAPS, Session  # noqa: E402
 from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel  # noqa: E402
-from glisteel.traffic import DEFAULT_TRAFFIC  # noqa: E402
 from glisteel.world import RaceWorld  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -808,12 +807,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--laps', type=int, default=RACE_LAPS, metavar='N',
                         help='how many laps the race is; 0 drives on with no '
                              'finish (default: %(default)s)')
-    parser.add_argument('--traffic', type=int, default=DEFAULT_TRAFFIC,
-                        metavar='CARS',
+    parser.add_argument('--traffic', type=int, default=None, metavar='CARS',
                         help='how many other cars are on the road at once. '
                              'Traffic is what makes one lap different from the '
                              'last; 0 is an empty circuit, which is what a '
-                             'timed lap is (default: %(default)s)')
+                             'timed lap is. Left out, the road decides: how '
+                             'often a racer should meet somebody, bounded by '
+                             'whether there is room to get past them '
+                             '(default: the road decides)')
     parser.add_argument('--autopilot', action='store_true',
                         help='let the car drive itself round the circuit. With '
                              'a --control that steers for the driver it drives '

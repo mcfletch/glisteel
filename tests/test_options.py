@@ -16,7 +16,6 @@ import pytest
 
 from glisteel import schemes
 from glisteel.options import Options, window_size
-from glisteel.traffic import DEFAULT_TRAFFIC
 
 
 def _parsed(argv=()):
@@ -55,15 +54,18 @@ class TestTheSizeOfTheWindow:
 class TestWhatTheWindowReads:
     def test_it_carries_the_parsers_own_defaults(self) -> None:
         found = Options.from_namespace(_parsed())
-        assert found.traffic == DEFAULT_TRAFFIC
+        assert found.traffic is None
         assert found.hud is True
         assert found.view
 
     def test_the_traffic_default_is_the_one_the_parser_promises(self) -> None:
         # It was six in the parser and zero at the point that read it, so
-        # --traffic's documented default was not the one a player got.
+        # --traffic's documented default was not the one a player got. It is
+        # None at both now -- nobody's number, because how many cars make a
+        # good lap depends on how long the lap is and only the world knows
+        # that (`RaceWorld.cars_the_road_carries`).
         assert Options.from_namespace(_parsed()).traffic == \
-            _parsed().traffic == DEFAULT_TRAFFIC
+            _parsed().traffic is None
 
     def test_what_was_asked_for_survives(self) -> None:
         found = Options.from_namespace(

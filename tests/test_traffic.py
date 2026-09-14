@@ -23,6 +23,7 @@ from glisteel.traffic import (
     PULLING_OFF,
     REACTION,
     SLOWING,
+    SPEED_LIMIT,
     Traffic,
     TrafficCar,
 )
@@ -740,9 +741,16 @@ class TestTheRoadIsNotEmpty:
         """Traffic is what makes one lap different from the last one."""
         assert DEFAULT_TRAFFIC > 0
 
-    def test_and_the_game_starts_with_that_much(self):
+    def test_and_the_game_leaves_how_much_to_the_road(self):
+        """Not a number decided at import: how many cars make a good lap
+        depends on how long the lap is, and only the world knows that."""
         from glisteel.game import build_parser
-        assert build_parser().parse_args(['w.json']).traffic == DEFAULT_TRAFFIC
+        assert build_parser().parse_args(['w.json']).traffic is None
+
+    def test_and_the_road_answers_with_something(self):
+        from glisteel import scenarios
+        world = scenarios.circuit().world(traffic=None)
+        assert world.traffic is not None and world.traffic.count > 0
 
     def test_an_empty_circuit_is_still_askable_for(self):
         from glisteel.game import build_parser
@@ -1097,3 +1105,60 @@ class TestGettingOutOfTheWay:
         for _ in range(60 * 4):
             car.advance(1.0 / 60.0)
         assert not self.off_the_road(car)
+
+
+class TestARoadHasToBePassable:
+    """How many cars a road carries is bounded by the road, not only by how
+    often a racer should meet one.
+
+    :func:`cars_for` sizes traffic against :data:`REACH` -- how far a driver can
+    see -- which is right for a road longer than that and wrong for a circuit
+    shorter than it. Steelbowl is 1695 m and was given sixteen cars: one every
+    106 m, with eight of them coming the other way. A pass on a two-way road
+    needs a stretch of the *oncoming* lane clear for as long as the pass takes,
+    which at these speeds is around five hundred metres -- so on that circuit no
+    such stretch existed and the autopilot spent 21% of a lap refusing passes it
+    could never take. Measured before this: 59.5 s a lap, 41% of it held up.
+    """
+
+    def test_a_long_road_is_sized_by_how_often_a_racer_meets_somebody(self
+                                                                     ) -> None:
+        """The reach rule still decides, where the road is long enough."""
+        from glisteel.traffic import cars_for
+        assert cars_for(two_way=True, length=20000.0) == cars_for(two_way=True)
+
+    def test_a_short_circuit_carries_fewer(self) -> None:
+        from glisteel.traffic import cars_for
+        assert cars_for(two_way=True, length=1695.0) < cars_for(two_way=True)
+
+    def test_and_leaves_room_for_a_pass_between_the_oncoming_ones(self) -> None:
+        """Which is the whole point: the gap between cars coming the other way
+        has to be longer than the road a pass crosses."""
+        from glisteel.traffic import PASSING_SECONDS, RACING_SPEED, cars_for
+        length = 1695.0
+        count = cars_for(two_way=True, length=length)
+        oncoming = count / 2.0
+        needs = (RACING_SPEED + SPEED_LIMIT) * PASSING_SECONDS
+        assert length / oncoming >= needs
+
+    def test_a_one_way_road_is_not_capped_this_way(self) -> None:
+        """There is no oncoming lane to find a gap in; what limits a pass there
+        is a different question and not this one."""
+        from glisteel.traffic import cars_for
+        assert cars_for(length=1695.0) == cars_for()
+
+    def test_there_is_always_at_least_one_car(self) -> None:
+        """A road so short that the sum says none is still a road with traffic
+        on it -- an empty one is what ``--traffic 0`` is for."""
+        from glisteel.traffic import cars_for
+        assert cars_for(two_way=True, length=50.0) >= 1
+
+    def test_the_pass_it_allows_for_is_the_one_the_driver_will_take(self
+                                                                    ) -> None:
+        """A road laid out for a nine-second pass and a driver who refuses
+        anything over eight would be a road with traffic nobody gets by. The
+        two numbers live apart because a road is laid out before anybody drives
+        it; this is what keeps them the same number."""
+        from glisteel.driver import PASS_SECONDS
+        from glisteel.traffic import PASSING_SECONDS
+        assert PASSING_SECONDS == PASS_SECONDS

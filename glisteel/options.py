@@ -24,7 +24,6 @@ from glisteel.assist import STRENGTH
 from glisteel.camera import VIEWS
 from glisteel.driver import PACE
 from glisteel.session import RACE_LAPS
-from glisteel.traffic import DEFAULT_TRAFFIC
 
 __all__ = ['Options', 'window_size']
 
@@ -81,8 +80,11 @@ class Options:
     assist: float = STRENGTH
     #: How many laps a race is; 0 drives on with no finish.
     laps: int = RACE_LAPS
-    #: How many other cars are on the road at once.
-    traffic: int = DEFAULT_TRAFFIC
+    #: How many other cars are on the road at once, or None to let the road
+    #: decide -- see :meth:`glisteel.world.RaceWorld.cars_the_road_carries`,
+    #: which sizes it by how long the lap is as well as by how often a racer
+    #: should meet somebody.
+    traffic: int | None = None
     #: Whether the car drives itself.
     autopilot: bool = False
     #: How hard it drives itself, as a fraction of what the road allows, where
@@ -124,7 +126,8 @@ class Options:
         self.assist = _within('assist', float(self.assist), 0.0, 1.0)
         self.pace = _within('pace', float(self.pace), 0.05, 2.0)
         self.laps = _at_least('laps', int(self.laps), 0)
-        self.traffic = _at_least('traffic', int(self.traffic), 0)
+        if self.traffic is not None:
+            self.traffic = _at_least('traffic', int(self.traffic), 0)
         self.sse = _at_least('sse', float(self.sse), 0.0)
         if self.control not in schemes.available():
             raise ValueError(

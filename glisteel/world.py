@@ -885,7 +885,7 @@ class RaceWorld:
 
     def __init__(self, tileset_path: str = '', memory: int = DEFAULT_MEMORY,
                  max_sse: float = DEFAULT_SSE, gravity: float = 9.81,
-                 traffic: int = 0, _nothing_to_stream: bool = False) -> None:
+                 traffic: int | None = 0, _nothing_to_stream: bool = False) -> None:
         # A world built from a course has nothing to read and nothing to
         # stream, and says so here rather than by being constructed around
         # ``__init__`` -- which left two places that had to agree about what a
@@ -928,7 +928,8 @@ class RaceWorld:
 
     @classmethod
     def from_course(cls, courses: Any, field: Any = None, props: Any = (),
-                    traffic: int = 0, gravity: float = 9.81) -> RaceWorld:
+                    traffic: int | None = 0,
+                    gravity: float = 9.81) -> RaceWorld:
         """A world made of a road and its ground, with no tiles to stream.
 
         Everything a car meets is here -- the carriageway swept from the
@@ -948,7 +949,8 @@ class RaceWorld:
         return world
 
     def _assemble(self, courses: list[Course], field: Any, props: list,
-                  traffic: int, gravity: float, luminaires: Any = None) -> None:
+                  traffic: int | None, gravity: float,
+                  luminaires: Any = None) -> None:
         """Stand up the physics, the surfaces, the obstacles and the traffic."""
         self.physics = PhysicsWorld(gravity=model.Gravity(gravity=abs(gravity)))
         self.courses = courses
@@ -986,10 +988,31 @@ class RaceWorld:
         self.luminaires = Luminaires(luminaires)
         #: The other cars using the road, or None for a world with no course.
         self.traffic: Any = None
+        if traffic is None and self.course is not None:
+            traffic = self.cars_the_road_carries()
         if traffic and self.course is not None:
             from glisteel.traffic import Traffic
             self.traffic = Traffic(self.course, count=int(traffic),
                                    physics=self.physics)
+
+    def cars_the_road_carries(self) -> int:
+        """How much traffic this road takes when nobody says a number.
+
+        Asked of the road rather than written down, because how many cars make
+        a good lap depends on how long the lap is. Sized on how often a racer
+        should meet somebody, and then bounded by whether there is room to get
+        *past* them: a circuit shorter than a driver can see otherwise gets a
+        whole reach's worth of traffic spread round the whole of it, with
+        nowhere between the oncoming cars for a pass to fit. The 1695 m circuit
+        was given sixteen and could not be overtaken on; it takes six.
+        """
+        from glisteel.traffic import SPEED_LIMIT, cars_for
+        course = self.course
+        if course is None:                       # pragma: no cover - no road
+            return 0
+        posted = float(getattr(course, 'posted', 0) or 0.0)
+        return cars_for(limit=posted / 3.6 if posted > 0.0 else SPEED_LIMIT,
+                        two_way=True, length=float(course.length))
 
     def _bores(self) -> Any:
         """Where the ground is not there, because a road runs inside it.
