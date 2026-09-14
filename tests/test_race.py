@@ -401,3 +401,46 @@ class TestAnOpenRoadIsDrivenToItsEnd:
         for point in line[:60]:
             timing.update(point, 1.0 / 60.0)
         assert not timing.laps
+
+
+class TestAWidenedStretchIsStillRoad:
+    """A climbing lane is carriageway, and a car passing in one is on the road.
+
+    Measured against the road's ordinary width, the pass that lane exists for
+    sits a car's width outside it: the watch calls the car off the road, the
+    wheels are given verge grip, and the run is mired in a lane built to be
+    overtaken in.
+    """
+
+    def _course(self, widening=0.0, width=7.2, total=14.2):
+        from glisteel.world import Course
+        line = np.stack([np.arange(60) * 8.0, np.zeros(60), np.zeros(60)],
+                        axis=-1)
+        return Course(name='r', centreline=line, carriageway_width=width,
+                      total_width=total, closed=False, length=472.0,
+                      widening=np.full(60, float(widening)))
+
+    def _watch(self, widening=0.0):
+        from glisteel.race import OffRoad
+        return OffRoad(self._course(widening=widening))
+
+    def test_the_ordinary_road_ends_where_it_always_did(self) -> None:
+        watch = self._watch()
+        watch.update((100.0, 0.0, 4.2), 0.1)
+        assert watch.off
+
+    def test_a_widened_one_carries_the_car_out_there(self) -> None:
+        watch = self._watch(widening=3.6)
+        assert watch.update((100.0, 0.0, 4.2), 0.1) is None
+        assert not watch.off
+
+    def test_and_the_wheels_are_still_on_tarmac(self) -> None:
+        from glisteel.race import TARMAC
+        watch = self._watch(widening=3.6)
+        watch.update((100.0, 0.0, 4.2), 0.1)
+        assert watch.surface() == TARMAC
+
+    def test_past_the_wider_edge_it_is_off_the_road_again(self) -> None:
+        watch = self._watch(widening=3.6)
+        watch.update((100.0, 0.0, 5.8), 0.1)
+        assert watch.off

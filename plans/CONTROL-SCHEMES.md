@@ -708,6 +708,36 @@ wants either a threshold measured against what the *bend* allows rather than
 against what the sign advises, or to be shown only where the car would actually
 run out of road. That is the next thing to decide about it.
 
+**Events are not enough on their own.** A journal of decisions says a run went
+off the road and not what the car was doing on the way there, and the two
+questions a failed run asks are *where was it* and *what hit it*. So a run also
+writes:
+
+- **`driving`**, every `SAMPLE_SECONDS` (0.5 s): station, `across`, the `lane`
+  chosen and the `line` being eased towards, speed, steer, throttle, brake, the
+  road's bank and width, and whether it is off the road. The decision, the
+  manoeuvre and the result are three different numbers, and only together do
+  they say whether a car two metres wide of its lane meant to be there. Half a
+  second is twenty metres of road at racing speed and five hundred lines in a
+  four-minute run.
+- **`hit-the-world`**, for a blow against a parapet, a portal or a tree —
+  anything that is not another car. What ends a run is still other cars, so this
+  is a note rather than a rule; a car that clipped a parapet and drove on has
+  driven on. The wheels are on the road every step and the body is not, so a
+  blow to the *body* is something beside the road.
+
+`--telemetry [PATH]` turns it on from the game; `glisteel-diagnose --marks`
+prints it for a drive with nothing drawn.
+
+**What those two found on Beacon, which the event marks alone could not.** The
+run went off at station 2141 in every recording, and the journal said only
+`pass-done` at 143.6 km/h and then a wheel on the verge. The sample said the car
+lost 51 km/h in 0.23 s — six times what the brakes can do — and `hit-the-world`
+named the place and the blow: `closing=14.3 station=2125.4 across=1.6`. Across
+1.6 m is the middle of the car's own lane, on a dead-straight stretch of deck.
+Nothing should be there, and what is there is a hillside the deck was built
+through (§8.1.5).
+
 ### 8.1.4 A road you can pass on
 
 Passing is a decision about *road*, so a world with no road to take it on has
@@ -745,6 +775,50 @@ On the 3.4 km world that bakes:
 The tightest corner is still under the 315 m a 200 km/h design speed asks for,
 because `hold_corners` shortens a fillet where two corners share a leg. That is
 the next thing to fix about the generator.
+
+### 8.1.5 A structure only takes ground it can carry
+
+The terrain under a bridge or a bore is deliberately left undisturbed —
+`conform_terrain` reshapes the land to meet the road everywhere else, and a
+structure is the road *not* meeting the land. So a run that takes in a stretch
+where the ground is on the wrong side of the road takes in a stretch nobody has
+cut away, and the hill stands up through the carriageway.
+
+`_close_gaps` did exactly that. It gives a short stretch of road between two
+structures to the structure before it, so a deck lands on the portal it runs
+into rather than leaving an island of embankment inside an untouched hillside —
+and it had no opinion about the ground in the stretch. On Beacon that put a
+seven-metre cutting inside a 626 m bridge run:
+
+| Measured on the shipped world | |
+|---|---|
+| ground over the road at station 2131–2141 | up to 1.4 m |
+| what the car met, in its own lane | a 2.4 m ramp over 10 m of road |
+| how fast | 117 km/h |
+| `hit-the-world closing=` | 14.3 m/s |
+
+A structure now takes in only ground it can carry: above the road for a deck,
+below it for a bore, level either way because that is where a deck lands and
+where a portal opens. A stretch it cannot carry stays the road it is, however
+short, and the terrain is conformed to it as to any other road. Re-baked,
+Beacon has no structure standing on the wrong side of the ground, Tidewater
+loses 42 m of bore driven through open air, and Ashdown is byte-identical.
+
+**What it is worth, over five sets of traffic** (`glisteel-diagnose --seeds 5`).
+Beacon had never completed a run:
+
+| | finished | mean |
+|---|---|---|
+| before | 0 of 5 | never reached the end |
+| driver fixes, old bake | 1 of 5 | 94–110 km/h |
+| driver fixes, re-baked | **4 of 5** | 96–113 km/h, 4–6 passes |
+
+The one that still fails ends against another car rather than off the road.
+
+**What is left, and is not a defect.** Beacon is still 91% structure. That is
+the recipe rather than the rule: `relief = 2.2` in a 2048 m box is alpine, and
+the bores through it run 176 m below the natural ground. A road through
+mountains is mostly tunnel.
 
 ### 8.2 A written-down drive, scheme by scheme
 

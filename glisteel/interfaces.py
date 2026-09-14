@@ -150,6 +150,15 @@ class CourseLike(Protocol):
     def lane_point(self, index: int, offset: float = 0.0) -> np.ndarray:
         ...                                      # pragma: no cover - a protocol
 
+    def width_at(self, index: int) -> float:
+        """How far across the carriageway is there, in metres.
+
+        The road's own width plus whatever a stretch built to be overtaken on
+        adds to it, so the edge a driver measures from is the edge the road
+        has at that point rather than the one it has on average.
+        """
+        ...                                      # pragma: no cover - a protocol
+
 
 @runtime_checkable
 class PhysicsLike(Protocol):

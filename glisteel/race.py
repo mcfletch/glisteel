@@ -226,6 +226,9 @@ class OffRoad:
     time_off: float = 0.0
     #: Set once the run is over, and the reason why.
     ended: str | None = None
+    #: Half the carriageway where the car last was, in metres. A stretch built
+    #: to be overtaken in is wider than the road's ordinary width.
+    _edge: float = 0.0
 
     def update(self, position: Any, dt: float) -> str | None:
         """Read where the car is; return the reason the run ended, once.
@@ -235,9 +238,12 @@ class OffRoad:
         """
         if self.ended is not None:
             return None
-        _index, self.distance = self.course.nearest(
+        index, self.distance = self.course.nearest(
             np.asarray(position, dtype='d'))
-        self.off = self.distance > self.course.carriageway_width / 2.0
+        # The carriageway *there*: a stretch built to be overtaken in is wider
+        # than the road's ordinary width, and a car using it is on the road.
+        self._edge = self.course.width_at(index) / 2.0
+        self.off = self.distance > self._edge
         if not self.off:
             self.time_off = 0.0
             return None
@@ -254,8 +260,7 @@ class OffRoad:
             return TARMAC
         beside = max(self.course.total_width - self.course.carriageway_width,
                      1e-6) / 2.0
-        edge = self.course.carriageway_width / 2.0
-        return VERGE if self.distance <= edge + beside else ROUGH
+        return VERGE if self.distance <= self._edge + beside else ROUGH
 
     def restart(self) -> None:
         """The car has been put back on the grid: the run is on again."""

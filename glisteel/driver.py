@@ -149,6 +149,20 @@ LANE_RATE = 2.5
 #: one does. That difference is the whole of what a climbing lane is for.
 ABREAST = 2.4
 
+#: How much of the road's speed a driver gives up while crossing it, as a
+#: fraction, and the width of crossing that asks for all of it, in metres.
+#:
+#: A lane change at the absolute limit has nothing left to correct with. From
+#: the Beacon journal: a pass finished at 143.6 km/h where the road allows
+#: 145.7, flat out and on the wrong side, and the car had to cross back with no
+#: margin at all -- two metres wide of its line in six tenths of a second on a
+#: straight, a wheel on the grip-0.45 verge, mired twenty metres off the road.
+#: A tenth of the speed, given up only while the line is still moving, buys the
+#: grip to arrive on the lane rather than past it and costs a pass a fraction
+#: of a second.
+CROSSING_LIFT = 0.12
+CROSSING_SPAN = 2.4
+
 #: How much of the carriageway's own edge a driver treats as the edge, in
 #: metres. Wide enough to be easing while the wheels are still on the tarmac,
 #: narrow enough that the middle of the road is untouched.
@@ -432,8 +446,13 @@ class Autopilot:
                     self.passing_for = 0.0
                 return
             self.passing_for += float(dt)
-            room = self._pass_room(session, speed, making, self.passing)
-            if (room is None or not session.lane_clear(other, ahead=room)) \
+            # About the lane it is actually in: a pass in a climbing lane is
+            # given up or finished on what is in *that* lane, and asking the
+            # oncoming road about it answers a question nobody asked.
+            same_side = self.lane * self.own_side > 0.0
+            room = self._pass_room(session, speed, making, self.passing,
+                                   oncoming=not same_side)
+            if (room is None or not session.lane_clear(self.lane, ahead=room)) \
                     and session.along(self.passing) > ALONGSIDE:
                 # The way through has closed, or the pass has stopped being
                 # one that finishes, *and* there is still giving up to do:
@@ -480,6 +499,17 @@ class Autopilot:
             # later and stranded, then another `pass-done` in 0.1 s.
             self.refused(session, 'too close to pull out', dt)
             return
+        # A lane on this car's own side first, where the road has one: a pass
+        # made without crossing the crown asks nothing of the oncoming road,
+        # needs a little over half the clear lane, and cannot end head-on.
+        beside = self.passing_lane(
+            self.course.nearest(session.car.position)[0])
+        if beside is not None:
+            room = self._pass_room(session, speed, making, first,
+                                   oncoming=False)
+            if room is not None and session.lane_clear(beside, ahead=room):
+                self._pull_out(session, beside, first, room)
+                return
         room = self._pass_room(session, speed, making, first)
         if room is None:
             self.refused(session, 'would take too long', dt)
@@ -487,10 +517,16 @@ class Autopilot:
         if not session.lane_clear(other, ahead=room):
             self.refused(session, 'other lane not clear', dt, wanted=round(room))
             return
+        self._pull_out(session, other, first, room)
+
+    def _pull_out(self, session: SessionLike, lane: float, first: Any,
+                  room: float) -> None:
+        """Take ``lane`` to get past ``first``, and say so in the journal."""
         self.note(session, 'pass-started',
                   wanted=round(room), theirs=round(float(first.speed) * 3.6, 1),
-                  gap=round(max(float(session.along(first)), 0.0), 1))
-        self.lane, self.passing = other, first
+                  gap=round(max(float(session.along(first)), 0.0), 1),
+                  side='beside' if lane * self.own_side > 0.0 else 'across')
+        self.lane, self.passing = lane, first
         self.passing_for = 0.0
 
     def looking(self, speed: float) -> float:
@@ -663,7 +699,7 @@ class Autopilot:
         return PASS_ACROSS + winding + (room - gained) / max(top, 1e-3)
 
     def _pass_room(self, session: SessionLike, speed: float, making: float,
-                   other: Any) -> Any:
+                   other: Any, oncoming: bool = True) -> Any:
         """How much of the other side of the road a pass needs, in metres.
 
         Two different speeds go into it, and using one for both is what makes a
@@ -701,6 +737,12 @@ class Autopilot:
         500 m apart -- a pass that never comes. Against the limit those cars
         actually drive it asks for a fifth less.
 
+        ``oncoming`` is what makes a climbing lane worth having: a lane going
+        the same way has nothing closing down it, so what has to be clear is
+        the length of the pass rather than that length closed at two cars'
+        speeds at once -- on a road posting a hundred, a little over half as
+        much.
+
         None for a pass that would take longer than :data:`PASS_SECONDS`, which
         is a pass to stay in and wait for.
         """
@@ -708,7 +750,8 @@ class Autopilot:
                                    float(other.speed), quick=making)
         if taking > PASS_SECONDS:
             return None
-        return (float(making) + self.oncoming_speed(making)) * taking
+        closing = self.oncoming_speed(making) if oncoming else 0.0
+        return (float(making) + closing) * taking
 
     def oncoming_speed(self, making: float) -> float:
         """How fast whatever is coming the other way is going, in m/s.
@@ -734,11 +777,13 @@ class Autopilot:
         speed = float(car.speed())
         position = np.asarray(car.position, dtype='d')
         index, off = self.course.nearest(position)
-        return (*self._pedals(speed, self.rejoining(off,
-                                                    self.target_speed(index, speed))),
+        return (*self._pedals(speed,
+                              self.rejoining(off,
+                                             self.target_speed(index, speed),
+                                             index)),
                 self.steering(car, index=index, position=position, speed=speed))
 
-    def rejoining(self, off: float, wanted: float) -> float:
+    def rejoining(self, off: float, wanted: float, index: int = 0) -> float:
         """The speed to aim for, given how near the edge of the road the car is.
 
         :data:`REJOIN_SPEED` once a wheel is off, which is a lift rather than a
@@ -758,8 +803,13 @@ class Autopilot:
         the air. Measured on the shipped Ashdown circuit, six excursions in a
         lap, every one at 3.68 m against a 3.60 m edge -- a tenth of a metre
         wide of the road, each time.
+
+        The edge is **where the road actually ends at that point**: a widened
+        stretch has more of it, and a driver measuring from the ordinary width
+        treats a climbing lane as a verge -- which would leave the pass that
+        lane exists for crawling along it at :data:`REJOIN_SPEED`.
         """
-        edge = self.course.carriageway_width / 2.0
+        edge = float(self.course.width_at(index)) / 2.0
         near = max(float(off) - (edge - EDGE_BAND), 0.0) / max(EDGE_BAND, 1e-6)
         if near <= 0.0:
             return float(wanted)
@@ -927,7 +977,23 @@ class Autopilot:
         Whatever is in front of the car holds it back as well as the corners do
         -- see :meth:`following`.
         """
-        return min(self.road_speed(index, speed), self._room(speed))
+        return self.crossing_speed(
+            min(self.road_speed(index, speed), self._room(speed)))
+
+    def crossing_speed(self, wanted: float) -> float:
+        """``wanted`` less whatever a lane change under way wants held back.
+
+        Settled in a lane this is what was asked for. While the line is still
+        moving across it is :data:`CROSSING_LIFT` less, in proportion to how
+        much of the crossing is left, so the lift comes off as the car arrives:
+        a driver changing lanes lifts, and a driver that does not has nothing
+        in hand when the back steps out.
+        """
+        left = abs(self.lane - self.line)
+        if left < 1e-6:
+            return float(wanted)
+        share = min(left / CROSSING_SPAN, 1.0)
+        return float(wanted) * (1.0 - CROSSING_LIFT * share)
 
     def _room(self, speed: float = 0.0) -> float:
         """The fastest this driver may go for whatever is in front of it.

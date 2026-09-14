@@ -539,6 +539,8 @@ class _Road:
         #: it pulled out for.
         self._own_lane = own_lane
         self._clear = clear
+        #: Whether a passing lane beside this car's own can be moved into.
+        self.beside_clear = True
         self.lane = lane
         self.asked: list = []
 
@@ -572,12 +574,24 @@ class _Road:
         wanted testing.
         """
         self.asked.append(across)
-        if across * self.lane > 0.0:             # the lane it started in
+        if self._is_own(across):                 # the lane it started in
             beside = self._ahead
             if beside is None:
                 return True
             return not (-float(behind) <= beside.gap <= float(ahead))
+        if across * self.lane > 0.0:             # a passing lane beside it
+            return self.beside_clear
         return self._clear
+
+    def _is_own(self, across):
+        """Whether that offset names the lane this car drives in.
+
+        By where it is across the road, not by which side of the crown it is
+        on: a climbing lane is on the car's own side and is not its lane, and
+        a double that cannot tell the two apart says a car being passed is
+        parked in the lane being passed in.
+        """
+        return abs(float(across) - self.lane) < 1.2
 
     def lane_ahead(self, across, reach=140.0):
         """What is up the lane *named*, wherever the car itself happens to be.
@@ -588,10 +602,10 @@ class _Road:
         far side is empty unless a test says otherwise.
         """
         found = self._own_lane if self._own_lane is not None else self._ahead
-        if across * self.lane <= 0.0 or found is None:
+        if not self._is_own(across) or found is None:
             return None
-        if found.gap > float(reach):
-            return None
+        if not 0.0 <= found.gap <= float(reach):
+            return None                          # behind is not ahead
         return (found.gap, found.speed)
 
     def along(self, other):
@@ -1322,3 +1336,157 @@ class TestAPassStartsFromBehindTheCarNotOffItsBumper:
         pilot.controls(self.road(gap=pilot.pulling_out_from(38.0) * 0.9),
                        1 / 60)
         assert pilot.passing is None
+
+
+class TestItHoldsSomethingBackWhileCrossingTheRoad:
+    """Changing lanes at the absolute limit leaves nothing to correct with.
+
+    Read off a recorded Beacon run: the pass completed at 143.6 km/h where the
+    road allows 145.7 -- flat out, in the oncoming lane -- and the car then had
+    to cross back with no margin. It diverged two metres from its line in six
+    tenths of a second on a straight, put a wheel on the verge, and was mired
+    twenty metres off the road.
+
+    So while the line is still moving across, the driver asks for a little less
+    than the road would give it. It costs a fraction of a second on a pass and
+    buys the grip to arrive on the line rather than past it.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def test_settled_in_its_lane_it_asks_for_everything(self) -> None:
+        pilot = self._pilot()
+        assert pilot.crossing_speed(40.0) == pytest.approx(40.0)
+
+    def test_but_less_while_it_is_moving_across(self) -> None:
+        pilot = self._pilot()
+        pilot.lane = -1.8                        # a change under way
+        pilot.ease(1.0 / 60.0)
+        assert pilot.crossing_speed(40.0) < 40.0
+
+    def test_and_everything_again_once_it_has_arrived(self) -> None:
+        pilot = self._pilot()
+        pilot.lane = -1.8
+        for _ in range(240):
+            pilot.ease(1.0 / 60.0)
+        assert pilot.crossing_speed(40.0) == pytest.approx(40.0)
+
+    def test_it_is_a_lift_and_not_a_stop(self) -> None:
+        """Most of the speed, not a fraction of it: a pass still has to be a
+        pass."""
+        pilot = self._pilot()
+        pilot.lane = -1.8
+        pilot.ease(1.0 / 60.0)
+        assert pilot.crossing_speed(40.0) > 40.0 * 0.8
+
+
+class TestAPassingLaneIsPreferredToTheOncomingOne:
+    """Where the carriageway widens the pass can be made without using the
+    other side of the road at all, and that is the pass to make.
+
+    :meth:`Autopilot.passing_lane` could find the lane; nothing asked it. So
+    on the shipped Ashdown circuit the driver spent between two and five
+    fifths of every run refusing passes for want of a clear *oncoming* lane
+    while 1183 m of climbing lane stood empty beside it.
+
+    A pass on its own side also needs less room: what has to be clear is the
+    length of the pass, not that length closed at the sum of two cars' speeds.
+    """
+
+    def road(self, widening=3.6):
+        course = _straight(points=400, spacing=5.0)
+        course.widening = np.full(len(course.centreline), float(widening))
+        return course
+
+    def _pilot(self, widening=3.6):
+        return Autopilot(self.road(widening), lane=1.8)
+
+    def _session(self, **named):
+        return _Road(_Car(position=(1.8, 0.0, -100.0), speed=40.0),
+                     ahead=_Ahead(40.0, 18.0), **named)
+
+    def test_it_passes_on_its_own_side_with_the_far_side_busy(self) -> None:
+        pilot, road = self._pilot(), self._session(clear=False)
+        pilot.controls(road, 1 / 60)
+        assert pilot.passing is not None, 'refused a pass it had room for'
+        assert pilot.lane > 1.8, 'used the oncoming lane, or stayed in'
+
+    def test_an_ordinary_road_still_refuses_it(self) -> None:
+        pilot, road = self._pilot(widening=0.0), self._session(clear=False)
+        pilot.controls(road, 1 / 60)
+        assert pilot.passing is None
+        assert pilot.lane == pytest.approx(1.8)
+
+    def test_the_passing_lane_comes_first_when_both_are_open(self) -> None:
+        pilot, road = self._pilot(), self._session()
+        pilot.controls(road, 1 / 60)
+        assert pilot.lane > 1.8, 'crossed the crown with a lane beside it'
+
+    def test_a_passing_lane_with_something_in_it_is_no_use(self) -> None:
+        pilot, road = self._pilot(), self._session(clear=False)
+        road.beside_clear = False
+        pilot.controls(road, 1 / 60)
+        assert pilot.passing is None
+        assert pilot.lane == pytest.approx(1.8)
+
+    def test_it_asks_for_less_room_than_a_pass_across_the_crown(self) -> None:
+        """Nothing is coming the other way in a lane going the same way."""
+        pilot, road = self._pilot(), self._session()
+        first = road.car_ahead()
+        beside = pilot._pass_room(road, 40.0, 40.0, first, oncoming=False)
+        across = pilot._pass_room(road, 40.0, 40.0, first)
+        assert beside is not None and across is not None
+        assert beside < across
+
+    def test_and_it_comes_back_in_afterwards(self) -> None:
+        pilot, road = self._pilot(), self._session(clear=False)
+        pilot.controls(road, 1 / 60)
+        taken = pilot.lane
+        road._ahead.gap = -30.0                  # by it now
+        for _ in range(120):
+            pilot.controls(road, 1 / 60)
+        assert pilot.lane == pytest.approx(1.8), f'sat out in {taken}'
+
+
+class TestTheEdgeIsWhereTheRoadActuallyEnds:
+    """A widened stretch has its edge further out, and a driver that measures
+    from the road's ordinary width lifts a lane early on it.
+
+    Which would make a climbing lane unusable by the driver that needs it: the
+    pass sits a car's width outside the ordinary carriageway, so measured
+    against the ordinary edge it reads as a wheel already off the road and
+    :meth:`Autopilot.rejoining` holds the car at walking pace for the length of
+    the lane.
+    """
+
+    def _road(self, widening=0.0):
+        course = _straight(points=400, spacing=5.0)
+        course.widening = np.full(len(course.centreline), float(widening))
+        return course
+
+    def test_the_ordinary_road_is_unchanged(self) -> None:
+        pilot = Autopilot(self._road(), lane=1.8)
+        half = pilot.course.carriageway_width / 2.0
+        assert pilot.rejoining(half + 0.5, 40.0, 0) == pytest.approx(
+            REJOIN_SPEED)
+
+    def test_a_widened_one_is_still_road_out_there(self) -> None:
+        pilot = Autopilot(self._road(widening=3.6), lane=1.8)
+        half = pilot.course.carriageway_width / 2.0
+        assert pilot.rejoining(half + 0.5, 40.0, 0) == pytest.approx(40.0)
+
+    def test_and_it_eases_at_the_wider_edge_instead(self) -> None:
+        pilot = Autopilot(self._road(widening=3.6), lane=1.8)
+        edge = pilot.course.width_at(0) / 2.0
+        assert pilot.rejoining(edge - 0.3, 40.0, 0) < 40.0
+        assert pilot.rejoining(edge + 0.5, 40.0, 0) == pytest.approx(
+            REJOIN_SPEED)
+
+    def test_a_pass_in_a_climbing_lane_is_driven_at_road_speed(self) -> None:
+        """The whole point of the lane: the car sits a width outside the
+        ordinary carriageway and is not crawling while it is there."""
+        pilot = Autopilot(self._road(widening=3.6), lane=1.8)
+        beside = pilot.passing_lane(0)
+        assert beside is not None
+        assert pilot.rejoining(abs(beside), 40.0, 0) == pytest.approx(40.0)

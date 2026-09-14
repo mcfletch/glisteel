@@ -40,8 +40,8 @@ from glisteel.traffic import IN_THE_WAY
 log = logging.getLogger(__name__)
 
 __all__ = ['Controller', 'Readings', 'Result', 'Session', 'AHEAD_REACH',
-           'MAXIMUM_CATCHUP', 'PHYSICS_STEP', 'RACE_LAPS', 'STUCK_SECONDS',
-           'STUCK_SPEED']
+           'BUMPED', 'BUMP_AGAIN', 'MAXIMUM_CATCHUP', 'PHYSICS_STEP',
+           'RACE_LAPS', 'SAMPLE_SECONDS', 'STUCK_SECONDS', 'STUCK_SPEED']
 
 #: The physics step. Fixed, and finer than a frame: a vehicle held up by
 #: springs is stiff, and integrating it at whatever the display manages makes
@@ -82,6 +82,28 @@ STUCK_SPEED = 1.0
 #: the car not moving is one the world is holding.
 STUCK_THROTTLE = 0.05
 
+#: How hard the car has to meet the world before a run writes it down, in
+#: metres per second of closing speed, and how long one bump keeps the next
+#: from being written, in seconds.
+#:
+#: A parapet, a portal, a tree: what a run hits that is not another car. Read
+#: off a shipped Beacon run, at the same place twice, 117 km/h to 66 in 0.23 s
+#: -- six times what the brakes can do -- with nothing in the journal between
+#: that and the car already off the road. Above a scrape, because kerbs and
+#: hedges happen all lap; held off for a moment afterwards, because a car
+#: wedged against a wall is closing on it on every step.
+BUMPED = 2.0
+BUMP_AGAIN = 0.5
+
+#: How often a run writes down what the car is doing, in seconds.
+#:
+#: A journal of events alone says a run went off the road and not what the car
+#: was doing on the way there. Half a second is close enough to watch a line
+#: diverge from the lane it was asked for -- at racing speed that is twenty
+#: metres of road -- and far enough apart that a four-minute run is five
+#: hundred lines rather than thirty thousand.
+SAMPLE_SECONDS = 0.5
+
 #: How high over the grid a car is put before it is dropped onto it, in metres,
 #: and the longest it is left to settle. The player is handed a car that is
 #: already standing on its wheels rather than one still falling; the settle
@@ -108,6 +130,16 @@ RACE_LAPS = 1
 #: The viewport a session assumes until it is told otherwise. Streaming needs a
 #: height to measure screen-space error against and an aspect to cull with.
 VIEWPORT = (1280, 720)
+
+
+def _rounded(value: Any, places: int = 2) -> float | None:
+    """``value`` to ``places``, or None where there is nothing to round.
+
+    A driver need not have a lane or a line -- the keyboard has neither -- and
+    a journal saying so is better than one that leaves the field out on some
+    lines and not others.
+    """
+    return None if value is None else round(float(value), places)
 
 
 @runtime_checkable
@@ -232,6 +264,8 @@ class Session:
         #: hands over a recording, so the drive marks unconditionally and a
         #: run nobody asked to record pays a call.
         self.telemetry: Any = NOT_RECORDING
+        self._sampled = 0.0
+        self._bumped = 0.0
         self._settle()
 
     # -- the state of the run --------------------------------------------------
@@ -353,19 +387,31 @@ class Session:
         return float(self.course.sight_ahead(index))
 
     def car_ahead(self, reach: float = AHEAD_REACH) -> Any:
-        """The nearest car in front in this lane, or None for an open road.
+        """The nearest car in front **going the same way**, or None.
 
         The car itself rather than a distance to it, for a driver that has to
         keep track of *which* one: somebody part-way past a car has nothing in
         front of them any more -- what they pulled out for is beside them, and
         whether they may come back in is a question about that car and no
         other.
+
+        Something head-on is not in front in the sense anybody drives by. This
+        is what a driver keeps station on and what it decides to overtake, and
+        a car coming the other way is neither: the gap to it shuts at the sum
+        of both speeds, so a driver sitting behind it brakes for a gap that
+        closes however hard it brakes, in a lane the other car is entitled to.
+        What that question wants is :meth:`oncoming`, which answers as a
+        closing speed.
         """
         if self.world.traffic is None:
             return None
-        ahead = self.world.traffic.ahead_of(self.car.position,
-                                            self.car.forward(), reach=reach)
-        return ahead[0] if ahead else None
+        forward = self.car.forward()
+        ahead = self.world.traffic.ahead_of(self.car.position, forward,
+                                            reach=reach)
+        for car in ahead:
+            if float(np.dot(car.forward(), forward)) > 0.0:
+                return car
+        return None
 
     def along(self, other: Any) -> float:
         """How far up the road something is from the car, in metres.
@@ -504,6 +550,8 @@ class Session:
             # steps. Asked once a frame instead, a crash registers or does not
             # according to where the frames happened to fall.
             self._watch_for_a_crash()
+            self._watch_for_a_bump(PHYSICS_STEP)
+            self._sample_the_drive(PHYSICS_STEP, wanted)
             self._accumulated -= PHYSICS_STEP
         self.car.follow(elapsed)
         # After the steps, so it hears the car as the frame leaves it, and on
@@ -660,6 +708,78 @@ class Session:
             return 0.0, 0.0, 0.0
         throttle, brake, steer = self.driver.controls(self, dt)
         return float(throttle), float(brake), self.assist.steer(self, steer)
+
+    def _watch_for_a_bump(self, dt: float) -> None:
+        """Note the car meeting the world: a parapet, a portal, a tree.
+
+        :meth:`_watch_for_a_crash` asks about the traffic, because what ends a
+        run is other cars. This asks about everything else, and only writes it
+        down: a car that clipped a parapet and drove on has driven on, and a
+        journal that said nothing at all left the reader of a failed run with
+        a car that lost fifty km/h in a fifth of a second and no line saying
+        why.
+
+        The wheels are on the road on every step and the body is not, so a
+        blow to the body is something beside the road rather than the road.
+        """
+        self._bumped = max(self._bumped - float(dt), 0.0)
+        if self.run.over:
+            return
+        traffic = self.world.traffic
+        struck = self.world.physics.impact_on(self.car.body, above=BUMPED)
+        if struck is None:
+            return
+        body, closing = struck
+        if traffic is not None and body in traffic.bodies:
+            return                               # _watch_for_a_crash's question
+        self._note_a_bump(closing)
+
+    def _note_a_bump(self, closing: float) -> None:
+        """Write down one blow against the world, at most one a moment."""
+        if float(closing) < BUMPED or self._bumped > 0.0:
+            return
+        self._bumped = BUMP_AGAIN
+        index, off = self.course.nearest(self.car.position)
+        self.telemetry.mark(
+            'hit-the-world', closing=round(float(closing), 1),
+            station=round(float(self.course.stations[index]), 1),
+            across=round(self.across(), 2), off=round(float(off), 2),
+            speed=round(self.car.speed_kph(), 1))
+
+    def _sample_the_drive(self, dt: float,
+                          wanted: tuple[float, float, float]) -> None:
+        """Write down what the car is doing, every :data:`SAMPLE_SECONDS`.
+
+        Where it is across the road against the lane it chose and the line it
+        is on the way to, and what it is asking of the road: the decision, the
+        manoeuvre and the result, which are three different numbers and only
+        together say whether a car two metres wide of its lane meant to be
+        there.
+
+        Inside the fixed step, so the sample is on the drive's own clock and a
+        slow frame does not thin it out.
+        """
+        self._sampled += float(dt)
+        if self._sampled < SAMPLE_SECONDS:
+            return
+        self._sampled = 0.0
+        index, off = self.course.nearest(self.car.position)
+        driver = self.driver
+        throttle, brake, steer = wanted
+        self.telemetry.mark(
+            'driving',
+            station=round(float(self.course.stations[index]), 1),
+            across=round(self.across(), 2), off=round(float(off), 2),
+            lane=_rounded(getattr(driver, 'lane', None)),
+            line=_rounded(getattr(driver, 'line', None)),
+            speed=round(self.car.speed_kph(), 1),
+            steer=round(float(steer), 3), throttle=round(float(throttle), 2),
+            brake=round(float(brake), 2),
+            bank=_rounded(self.course.bank_at(index), 3)
+            if hasattr(self.course, 'bank_at') else None,
+            width=round(float(self.course.width_at(index)), 2)
+            if hasattr(self.course, 'width_at') else None,
+            off_road=bool(self.watch.off))
 
     def _read_the_ground(self, dt: float) -> None:
         """What the wheels are on, and whether the run is over.

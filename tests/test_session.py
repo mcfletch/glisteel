@@ -560,12 +560,18 @@ class TestWritingDownACrash:
 
     @staticmethod
     def _kept(session):
+        """What a run writes down, the periodic sample aside.
+
+        These are about the *events*, and a run also says what the car was
+        doing every half second (:data:`glisteel.session.SAMPLE_SECONDS`).
+        """
         kept: list = []
 
         class Keeping:
             @staticmethod
             def mark(name, **fields):
-                kept.append((name, fields))
+                if name != 'driving':
+                    kept.append((name, fields))
 
         session.telemetry = Keeping()
         return kept
@@ -775,3 +781,174 @@ class TestACarThatIsNotGoingAnywhereIsRecovered:
 
     def test_and_so_is_one_simply_sitting_there(self) -> None:
         assert not self.held(_session(), STUCK_SECONDS * 2.0, throttle=0.0)
+
+
+class TestTheRunSaysWhereTheCarWasGoing:
+    """A journal of nothing but events says a run went off the road and not
+    what the car was doing on the way there.
+
+    Read off the shipped Beacon run: the same station, twice, `across` gone
+    from a lane to two metres outside the carriageway in twenty-four metres of
+    dead-straight road -- and nothing in the record between the pass finishing
+    and the wheel on the verge. What answers that is a sample: where the car
+    is across the road, the lane it has chosen and the line it is on the way
+    to, what it is asking of the road and what the road is giving it.
+
+    Often enough to see a divergence build, rarely enough that a run of a few
+    minutes is a few hundred lines rather than twenty thousand.
+    """
+
+    @staticmethod
+    def _kept(session):
+        kept: list = []
+
+        class Keeping:
+            @staticmethod
+            def mark(name, **fields):
+                kept.append((name, fields))
+
+        session.telemetry = Keeping()
+        return kept
+
+    def _driven(self, seconds=3.0):
+        session = _session()
+        kept = self._kept(session)
+        for _ in range(int(seconds / FRAME)):
+            session.advance(FRAME)
+        return [fields for name, fields in kept if name == 'driving']
+
+    def test_it_writes_one_down_as_it_goes(self) -> None:
+        assert self._driven(), 'nothing said what the car was doing'
+
+    def test_it_is_a_sample_and_not_every_step(self) -> None:
+        """Three seconds is 180 steps; a sample is single figures."""
+        assert len(self._driven()) < 20
+
+    def test_it_says_where_across_the_road_the_car_is(self) -> None:
+        found = self._driven()[-1]
+        assert found['across'] == pytest.approx(0.0, abs=6.0)
+        assert found['station'] > 0.0
+
+    def test_and_the_lane_it_chose_and_the_line_it_is_on(self) -> None:
+        """The decision and the manoeuvre are different numbers, and a car two
+        metres wide of its lane is told apart from one that chose to be there
+        only by having both."""
+        found = self._driven()[-1]
+        assert 'lane' in found and 'line' in found
+
+    def test_and_what_it_is_asking_of_the_road(self) -> None:
+        found = self._driven()[-1]
+        assert found['speed'] >= 0.0
+        assert 'steer' in found and 'throttle' in found
+
+
+class TestSomethingComingTheOtherWayIsNotSomethingToFollow:
+    """:meth:`Session.traffic_ahead` and :meth:`Session.car_ahead` are what a
+    driver keeps station on, and a car coming the other way is not that.
+
+    The gap to it shuts at the sum of both speeds, so a driver that treats it
+    as something to sit behind brakes for a gap that closes however hard it
+    brakes -- and it does so in the lane the other car is entitled to.
+
+    Read off a shipped Beacon run: a pass finished at 143 km/h and the car,
+    still physically in the lane it was leaving, found an oncoming car in
+    front of it. Full brake and full lock together at a hundred and forty; two
+    metres wide of the road in a second, twenty metres off it in four. What
+    :meth:`oncoming` is for is that question, and it answers it as a closing
+    speed rather than as a gap to keep.
+    """
+
+    def _both_ways(self):
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        return session
+
+    def test_it_does_not_answer_with_one_head_on(self) -> None:
+        session = self._both_ways()
+        _traffic_at(session, session.across(), station=90.0, speed=30.0,
+                    heading=-1)
+        assert session.traffic_ahead() is None
+        assert session.car_ahead() is None
+
+    def test_but_it_still_answers_with_one_going_my_way(self) -> None:
+        session = self._both_ways()
+        _traffic_at(session, session.across(), station=90.0, speed=30.0)
+        assert session.traffic_ahead() is not None
+        assert session.car_ahead() is not None
+
+    def test_and_the_head_on_is_still_there_to_be_asked_about(self) -> None:
+        """Not followed is not unseen: it is a closing speed, and
+        :meth:`oncoming` is where a driver asks."""
+        session = self._both_ways()
+        _traffic_at(session, session.across(), station=90.0, speed=30.0,
+                    heading=-1)
+        assert session.oncoming(reach=200.0) is not None
+
+
+class TestARunSaysWhenTheCarHitTheWorld:
+    """A run says what it hit when what it hit was another car, and says
+    nothing at all when it was a parapet, a portal or a tree.
+
+    Which leaves the reader of a failed run with a car that lost fifty km/h in
+    a fifth of a second and no line in the journal saying why. Read off a
+    shipped Beacon run, twice, at the same place: 117 km/h to 66 in 0.23 s --
+    six times what the brakes can do -- and the next mark is the car already
+    off the road.
+
+    What ends a run is still other cars: this is a note, not a rule.
+    """
+
+    @staticmethod
+    def _kept(session):
+        kept: list = []
+
+        class Keeping:
+            @staticmethod
+            def mark(name, **fields):
+                if name != 'driving':
+                    kept.append((name, fields))
+
+        session.telemetry = Keeping()
+        return kept
+
+    def test_a_hard_one_is_written_down(self) -> None:
+        session = _session()
+        kept = self._kept(session)
+        session.advance(FRAME)
+        session._note_a_bump(18.0)
+        assert [name for name, _ in kept] == ['hit-the-world']
+        assert kept[0][1]['closing'] == pytest.approx(18.0)
+
+    def test_and_it_says_where_on_the_road_that_was(self) -> None:
+        session = _session()
+        kept = self._kept(session)
+        session.advance(FRAME)
+        session._note_a_bump(18.0)
+        fields = kept[0][1]
+        assert 'station' in fields and 'across' in fields
+        assert fields['speed'] >= 0.0
+
+    def test_a_scrape_is_not_one(self) -> None:
+        """Kerbs, verges and a wing brushing a hedge happen all lap."""
+        session = _session()
+        kept = self._kept(session)
+        session.advance(FRAME)
+        session._note_a_bump(0.4)
+        assert kept == []
+
+    def test_it_does_not_end_the_run(self) -> None:
+        """What ends a run is other cars and the road's own edge. A car that
+        clipped a parapet and drove on has driven on."""
+        session = _session()
+        session.advance(FRAME)
+        session._note_a_bump(30.0)
+        assert session.ended is None
+
+    def test_one_bump_is_one_line_and_not_sixty_a_second(self) -> None:
+        """A car wedged against a wall is closing on it on every step."""
+        session = _session()
+        kept = self._kept(session)
+        session.advance(FRAME)
+        for _ in range(60):
+            session._note_a_bump(18.0)
+        assert len(kept) == 1
