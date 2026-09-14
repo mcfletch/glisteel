@@ -113,6 +113,30 @@ PASS_SECONDS = 9.0
 #: the grass lifts off and comes back on; this is the speed that is.
 REJOIN_SPEED = 8.0
 
+#: Below this fraction of what the road allows, a driver is crawling rather
+#: than driving, and something is holding it. How long that has to last before
+#: it is worth a line in the journal, in seconds.
+CRAWLING = 0.35
+CRAWL_HOLDS = 1.0
+
+#: How fast the line a car follows crosses the road, in metres a second.
+#:
+#: A lane change is a manoeuvre rather than an instant: a second or so for a
+#: whole lane, which is what a driver moving over deliberately takes and slow
+#: enough that the car settles on the new line instead of overrunning it.
+LANE_RATE = 2.5
+
+#: How far apart two cars sit to pass on one side of the crown, in metres.
+#: A car is 1.85 m across the mirrors and wants a little air beside it, which
+#: on an ordinary 3.6 m half-carriageway does not fit and on a widened 5.4 m
+#: one does. That difference is the whole of what a climbing lane is for.
+ABREAST = 2.4
+
+#: How much of the carriageway's own edge a driver treats as the edge, in
+#: metres. Wide enough to be easing while the wheels are still on the tarmac,
+#: narrow enough that the middle of the road is untouched.
+EDGE_BAND = 0.6
+
 #: What to assume about a car that will not say: an ordinary saloon's wheelbase
 #: in metres, and a front-wheel angle at full lock in radians. Only reached for
 #: something that is not a raycast vehicle, which is a test double.
@@ -196,6 +220,10 @@ class Autopilot:
         #: past something. :attr:`lane` is where it is *now*, which is the
         #: other side while a pass is on.
         self.own_side = float(lane)
+        #: Where the car is across the road on its way to :attr:`lane`, in
+        #: metres right of the crown. The lane is the decision; this is the
+        #: manoeuvre, and :meth:`ease` is what moves it.
+        self.line = float(lane)
         #: What it pulled out for, while it is getting by it, or None.
         self.passing: Any = None
         #: How long this pass has been under way, in seconds, for the record it
@@ -204,16 +232,54 @@ class Autopilot:
         self._refusing = ''
         self._refused_for = 0.0
         self._refused_with: dict[str, Any] = {}
+        self._crawled_for = 0.0
+        self._crawling: dict[str, Any] = {}
 
     def following(self, gap: float | None, speed: float = 0.0) -> None:
         """Say what is in front: how far, and how fast it is going."""
         self.ahead = None if gap is None else (float(gap), float(speed))
 
     def line_at(self, index: int) -> np.ndarray:
-        """The point of the line this driver is following, there."""
-        found: np.ndarray = (self.course.point(index) if not self.lane
-                             else self.course.lane_point(index, self.lane))
+        """The point of the line this driver is following, there.
+
+        :attr:`line` rather than :attr:`lane`: the lane is the decision and the
+        line is where the car actually is on its way to it.
+        """
+        found: np.ndarray = (self.course.point(index) if not self.line
+                             else self.course.lane_point(index, self.line))
         return found
+
+    def hold(self, line: float) -> None:
+        """Follow this line from now, with no crossing to be done.
+
+        For a caller naming where the car *is* to be rather than deciding to
+        move: a driving aid holding a line (:class:`glisteel.assist.Straighten`)
+        is saying "this is the line", not "change lanes". :meth:`ease` is the
+        manoeuvre; this is a placement, and it moves both at once so the next
+        step steers at what was asked for rather than at where a lane change
+        had got to.
+        """
+        self.lane = self.line = float(line)
+
+    def ease(self, dt: float) -> float:
+        """Move the line this car follows towards the lane it has chosen.
+
+        A lane is a **decision** and a lane change is a **manoeuvre**, and the
+        two are not the same length of time. Moved in one step, the line the
+        car is following jumps its whole width sideways, the steering darts at
+        it, and the car arrives past it: on the shipped Beacon road that put
+        the car at -3.8 m against a 3.6 m carriageway edge, on the last stretch
+        of a bridge, in every one of five runs -- two metres wide of the lane
+        it had been told to hold, on a straight where the corner speed never
+        entered into it. Twenty-one metres off the road, every time.
+
+        :data:`LANE_RATE` is how fast it crosses, which is a second or so for a
+        whole lane -- what a considered move across a road takes, and slow
+        enough to arrive on the line rather than past it.
+        """
+        step = LANE_RATE * max(float(dt), 0.0)
+        self.line += max(-step, min(step, self.lane - self.line))
+        return self.line
 
     def controls(self, session: SessionLike, dt: float
                  ) -> tuple[float, float, float]:
@@ -226,9 +292,72 @@ class Autopilot:
         speed = float(session.car.speed())
         index, _distance = self.course.nearest(session.car.position)
         self.choose_lane(session, speed, self.road_speed(index, speed), dt)
-        found = session.traffic_ahead()
+        self.ease(dt)
+        found = self.what_to_follow(session, speed)
         self.following(*(found if found is not None else (None, 0.0)))
+        self.held_back(session, speed, self.road_speed(index, speed), dt)
         return self.update(session.car)
+
+    def held_back(self, session: SessionLike, speed: float, allowed: float,
+                  dt: float) -> None:
+        """Note a stretch spent far below what the road would allow.
+
+        A driver crawling where the road offers a hundred and forty is a
+        driver something is wrong with, and the journal should say so without
+        anybody having to go and look: what it was following, how far off, how
+        fast that was going -- and, the line that settles it, what the driver
+        was *asking* for at the time. Asking for a hundred and forty at three
+        km/h is not a driver being cautious, it is a car the world is holding,
+        and the two want telling apart from the journal rather than from a
+        script written afterwards. One mark per stretch, timed, as
+        :meth:`refused` does -- what a reader wants is that it crawled from
+        here to there, not sixty notes a second saying it still is.
+        """
+        crawling = speed < max(float(allowed), 1e-6) * CRAWLING
+        if not crawling:
+            if self._crawled_for >= CRAWL_HOLDS:
+                self.note(session, 'crawled', seconds=round(self._crawled_for, 1),
+                          **self._crawling)
+            self._crawled_for, self._crawling = 0.0, {}
+            return
+        if not self._crawled_for:
+            gap, theirs = self.ahead if self.ahead is not None else (None, None)
+            self._crawling = {
+                'allowed': round(float(allowed) * 3.6, 1),
+                'asked': round(float(self.target_speed(
+                    self.course.nearest(session.car.position)[0], speed)) * 3.6, 1),
+                'throttle': round(float(getattr(
+                    getattr(session.car, 'vehicle', None), 'throttle', 0.0)), 2),
+                'gap': None if gap is None else round(float(gap), 1),
+                'theirs': None if theirs is None else round(float(theirs) * 3.6, 1)}
+        self._crawled_for += max(float(dt), 0.0)
+
+    def what_to_follow(self, session: SessionLike, speed: float
+                       ) -> tuple[float, float] | None:
+        """What is in front, of here and of where this car is going.
+
+        The nearer of the two, because steering into a lane and braking for
+        what is in it are the same decision a second apart.
+        :meth:`~glisteel.session.Session.traffic_ahead` answers from the car's
+        own position, so a driver crossing back from a pass is following the
+        lane it is *leaving* -- which is empty, that being why it pulled out --
+        and nothing tells it to brake until it has arrived.
+
+        Read off the Ashdown journal: a pass given up at 134.5 km/h, back into
+        its own lane, and 1.2 s later the back of a car doing 50 in it.
+        """
+        here = session.traffic_ahead()
+        # Only ever its **own** side. Out on the far side what governs is the
+        # pass -- finish it or give it up -- and a car coming the other way is
+        # not something to keep station on: the gap to it shuts at the sum of
+        # both speeds, so a driver that follows one brakes to a standstill in
+        # the wrong lane. Which it did: 108 km/h to 3.9 over 112 m, ten seconds
+        # stationary, and mired 8.5 m off the crown.
+        going = (session.lane_ahead(self.own_side, reach=self.looking(speed))
+                 if abs(self.lane - self.own_side) < 1e-6 else None)
+        if here is None or going is None:
+            return here if going is None else going
+        return here if here[0] <= going[0] else going
 
     def choose_lane(self, session: SessionLike, speed: float,
                     allowed: float, dt: float = 0.0) -> None:
@@ -375,6 +504,33 @@ class Autopilot:
         losing = max(speed - float(theirs), 0.0)
         braking = max(self.style.braking, 1e-6)
         return bool(float(gap) > losing * losing / (2.0 * braking) + PASSING_GAP)
+
+    def passing_lane(self, index: int) -> float | None:
+        """A lane on this car's own side to pass in, or None for a road with
+        none.
+
+        Where a carriageway widens -- a climbing lane, a crawler lane, a
+        stretch built to be overtaken on -- there is room for two cars abreast
+        on one side of the crown, and a pass taken there wants nothing of the
+        oncoming road at all. It is the safest pass there is and the driver
+        could not see one: it only ever considered ``-own_side``, so 1183 m of
+        the shipped Ashdown circuit was invisible to it while it spent two
+        fifths of every run refusing passes for want of an oncoming lane.
+
+        Answers the middle of that outer lane, which is a car's width beyond
+        the line this one holds. None where the widened road is not wide enough
+        to put two cars side by side on one half of it -- half a lane of extra
+        tarmac is a wider road, not one to overtake on.
+        """
+        if not self.own_side:
+            return None
+        course = self.course
+        half = float(getattr(course, 'width_at', lambda i: float(
+            course.carriageway_width))(index)) / 2.0
+        wanted = abs(self.own_side) + ABREAST
+        if half < wanted + ABREAST / 2.0:
+            return None
+        return math.copysign(abs(self.own_side) + ABREAST, self.own_side)
 
     def coming_back(self, session: SessionLike) -> bool:
         """Whether its own side is there to come back to.
@@ -548,18 +704,32 @@ class Autopilot:
                 self.steering(car, index=index, position=position, speed=speed))
 
     def rejoining(self, off: float, wanted: float) -> float:
-        """The speed to aim for, given how far off the carriageway the car is.
+        """The speed to aim for, given how near the edge of the road the car is.
 
-        :data:`REJOIN_SPEED` once a wheel is off it, which is a lift rather than
-        a stop: the steering is already pointed back at the line, and what a
+        :data:`REJOIN_SPEED` once a wheel is off, which is a lift rather than a
+        stop: the steering is already pointed back at the line, and what a
         driver adds to that is time for it to work. Held at road speed instead,
         a car that has run wide carries on at road speed in whatever direction
         it is pointing, and a driver who would have rejoined ends up in the
         trees.
+
+        **Eased over the last :data:`EDGE_BAND` of the carriageway rather than
+        cut at its edge.** Running out of road is an approach, not an event,
+        and a rule that holds road speed at 3.59 m and lifts hard at 3.61 is a
+        driver reacting to a wheel that is already off -- and unsettling the
+        car at the one place it has least room to be unsettled. Off a structure
+        that costs a moment on the grass. On one there is no verge: the parapet
+        stands 0.9 m beyond the edge, and a car that reaches it is thrown into
+        the air. Measured on the shipped Ashdown circuit, six excursions in a
+        lap, every one at 3.68 m against a 3.60 m edge -- a tenth of a metre
+        wide of the road, each time.
         """
-        if float(off) <= self.course.carriageway_width / 2.0:
+        edge = self.course.carriageway_width / 2.0
+        near = max(float(off) - (edge - EDGE_BAND), 0.0) / max(EDGE_BAND, 1e-6)
+        if near <= 0.0:
             return float(wanted)
-        return min(float(wanted), REJOIN_SPEED)
+        eased = float(wanted) + (REJOIN_SPEED - float(wanted)) * min(near, 1.0)
+        return min(float(wanted), eased)
 
     def steering(self, car: CarLike, index: int | None = None,
                  position: Any = None, speed: float | None = None) -> float:

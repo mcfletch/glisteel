@@ -152,13 +152,22 @@ class Report:
 
 def drive_it(tileset: str, seconds: float = LONGEST, pace: float = PACE,
              traffic: int | None = None, laps: int = 1,
-             journal: Any = None) -> Report:
+             journal: Any = None, seed: int = 0) -> Report:
     """Drive ``tileset`` with the autopilot and answer a :class:`Report`.
 
     ``traffic`` left out lets the road decide, which is what the game does.
     ``journal`` is somewhere to keep the whole record as well as the summary.
+
+    ``seed`` is which traffic this run meets. **One run says very little**: a
+    lap is chaotic in the ordinary sense -- a car a metre further on at the
+    first corner is a different lap by the third -- so a change judged from a
+    single before-and-after is judged from noise. :func:`over_seeds` is the
+    honest comparison.
     """
-    world = RaceWorld(tileset, traffic=traffic)
+    world = world_for(tileset, traffic)
+    if world.traffic is not None:
+        world.traffic.seed = int(seed)
+        world.traffic._rng = np.random.default_rng(int(seed))
     session = Session(world, laps=laps)
     session.driver = Autopilot(session.course, lane=session.lane,
                                style=DriverStyle(margin=pace))
@@ -175,19 +184,69 @@ def drive_it(tileset: str, seconds: float = LONGEST, pace: float = PACE,
             break
     course = session.course
     return Report(
-        world=str(tileset).rstrip('/').split('/')[-2] or str(tileset),
+        world=(str(tileset) if '/' not in str(tileset)
+               else str(tileset).rstrip('/').split('/')[-2] or str(tileset)),
         seconds=driven, outcome=session.ended, laps=len(session.timing.laps),
         length=float(course.length), closed=bool(course.closed),
         cars=world.traffic.count if world.traffic is not None else 0,
         speeds=np.asarray(speeds, dtype='d'), marks=keeping.marks)
 
 
+def world_for(named: str, traffic: int | None) -> RaceWorld:
+    """A world to drive: a baked tileset, or one of the named scenarios.
+
+    A scenario is a piece of road built in memory with nothing drawn -- the
+    oval, the hairpin, the chicane -- which is what to ask for when the
+    question is about the *driving* rather than about a particular place. They
+    cost a second to build where a baked world costs a bake.
+    """
+    from glisteel import scenarios
+    if named in scenarios.CATALOGUE:
+        piece = scenarios.named(named)
+        made = piece.world(traffic=0)
+        if traffic is None or traffic > 0:
+            from glisteel.traffic import Traffic
+            made.traffic = Traffic(
+                made.course, physics=made.physics,
+                count=(made.cars_the_road_carries() if traffic is None
+                       else int(traffic)))
+        return made
+    return RaceWorld(named, traffic=traffic)
+
+
+def over_seeds(tileset: str, seeds: int = 5, **named: Any) -> list[Report]:
+    """The same world driven against several sets of traffic.
+
+    What a change is actually measured against: how many of them finish, and
+    what the spread of the rest looks like. A single run moving from 560 s to
+    120 s is not a regression and not an improvement -- it is a different lap.
+    """
+    return [drive_it(tileset, seed=seed, **named) for seed in range(seeds)]
+
+
+def summarise(reports: list[Report]) -> str:
+    """How a handful of runs came out, in one line and then in detail."""
+    if not reports:                              # pragma: no cover - no runs
+        return 'nothing was driven'
+    finished = [one for one in reports if one.outcome is None]
+    lines = ['%s: %d of %d finished'
+             % (reports[0].world, len(finished), len(reports))]
+    for report in reports:
+        lines.append('  seed %d: %6.1f s  %-22s %3.0f km/h mean, %d passes'
+                     % (reports.index(report), report.seconds,
+                        report.outcome or 'finished',
+                        report.pace().get('mean', 0.0),
+                        report.kinds().get('pass-done', 0)))
+    return '\n'.join(lines)
+
+
 def main(argv: Any = None) -> int:
     """``glisteel-diagnose``: drive each world named and say what happened."""
     parser = argparse.ArgumentParser(
         prog='glisteel-diagnose', description=__doc__.split('\n\n')[0])
-    parser.add_argument('worlds', nargs='+', metavar='TILESET',
-                        help='the tileset.json of a baked world')
+    parser.add_argument('worlds', nargs='+', metavar='WORLD',
+                        help='the tileset.json of a baked world, or the name '
+                             'of a scenario to build in memory')
     parser.add_argument('--seconds', type=float, default=LONGEST,
                         help='how long to give each run (default: %(default)s)')
     parser.add_argument('--pace', type=float, default=PACE,
@@ -196,8 +255,18 @@ def main(argv: Any = None) -> int:
                         help='how many other cars; the road decides by default')
     parser.add_argument('--marks', action='store_true',
                         help='every mark the run wrote, in order')
+    parser.add_argument('--seeds', type=int, default=0, metavar='N',
+                        help='drive each world against N sets of traffic and '
+                             'report how many finished. One run is noise: a '
+                             'lap is chaotic, so a change judged from a single '
+                             'before-and-after is judged from nothing')
     found = parser.parse_args(argv)
     for world in found.worlds:
+        if found.seeds:
+            print(summarise(over_seeds(
+                world, seeds=found.seeds, seconds=found.seconds,
+                pace=found.pace, traffic=found.traffic)))
+            continue
         report = drive_it(world, seconds=found.seconds, pace=found.pace,
                           traffic=found.traffic)
         print(report)

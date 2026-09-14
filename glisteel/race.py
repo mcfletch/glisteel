@@ -33,6 +33,12 @@ __all__ = ['Collisions', 'Lap', 'OffRoad', 'RaceTiming',
 #: misses one; few enough that a car briefly off the road does not.
 SECTORS = 8
 
+#: How near the far end of an open road counts as having reached it, in metres.
+#: A road ends where its centreline runs out, and a car is a car's length long:
+#: asking it to touch the last point exactly is asking it to drive off the end
+#: before the drive is allowed to have finished.
+FINISH_WITHIN = 12.0
+
 
 @dataclass
 class Lap:
@@ -98,7 +104,17 @@ class RaceTiming:
         return float((index - self.course.start_index) % total) / total
 
     def update(self, position: Any, dt: float) -> Lap | None:
-        """Advance the clock; return a lap if one has just been completed."""
+        """Advance the clock; return a lap if one has just been completed.
+
+        On an **open** road the drive is complete when the far end is reached,
+        because there is no lap in a road that does not come back on itself.
+        Without that a run down one could only ever end by driving off the end
+        of it -- :meth:`~glisteel.world.Course.nearest` clamps at the last
+        point of the centreline, so a car that keeps going reads as drifting
+        sideways, and :class:`OffRoad` calls that leaving the road.
+        """
+        if not self.course.closed:
+            return self._down_the_road(position, dt)
         self.progress = self.round_from_the_line(position)
         sector = int(self.progress * self.sectors)
 
@@ -122,6 +138,23 @@ class RaceTiming:
             self._last_sector = sector
         self.visited.add(sector)
         return finished
+
+    def _down_the_road(self, position: Any, dt: float) -> Lap | None:
+        """One drive from end to end, for a road with no lap in it."""
+        index, _off = self.course.nearest(position)
+        stations = self.course.stations
+        here = float(stations[int(np.clip(index, 0, len(stations) - 1))])
+        self.progress = min(here / max(float(self.course.length), 1e-6), 1.0)
+        if not self.started:
+            self.started = True
+            return None
+        self.current += max(0.0, dt)
+        if self.laps or here < float(self.course.length) - FINISH_WITHIN:
+            return None
+        done = Lap(number=1, seconds=self.current)
+        self.laps.append(done)
+        self.current = 0.0
+        return done
 
     def _complete(self) -> bool:
         """Whether every sector has been visited since the last line crossing."""

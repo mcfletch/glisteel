@@ -12,7 +12,8 @@ import pytest
 from omi_physics.world import PhysicsWorld
 
 from glisteel.car import Car
-from glisteel.driver import ALONGSIDE, PASSED_BY, Autopilot, DriverStyle
+from glisteel.driver import (ALONGSIDE, PASSED_BY, REJOIN_SPEED, Autopilot,
+                             DriverStyle)
 from glisteel.world import Course, static_ground
 
 STEP = 1.0 / 120.0
@@ -539,10 +540,17 @@ class _Road:
         self.asked: list = []
 
     def _within(self, reach):
-        """What a session answers: nothing beyond the reach asked for."""
+        """What a session answers about the lane the car is *in*.
+
+        From the car's own position, as `Session.traffic_ahead` does: a car out
+        in the oncoming lane is not following what is in the lane it left. One
+        answer for wherever the car happened to be said a driver crossing back
+        was already braking for what it was crossing towards, which is the
+        case that wanted testing.
+        """
         if self._ahead is None or self._ahead.gap > float(reach):
             return None
-        return self._ahead
+        return self._ahead if self.car.position[0] * self.lane > 0.0 else None
 
     def traffic_ahead(self, reach=140.0):
         found = self._within(reach)
@@ -569,13 +577,18 @@ class _Road:
         return self._clear
 
     def lane_ahead(self, across, reach=140.0):
-        """What is up that lane: how far, and how fast. The car's own side
-        answers from what it is following; the far side is empty unless a test
-        says otherwise."""
-        if across * self.lane <= 0.0:
+        """What is up the lane *named*, wherever the car itself happens to be.
+
+        Which is the whole difference from :meth:`traffic_ahead`: that one
+        answers about the lane the car is in, and this one about a lane it is
+        asking after. The car's own side holds whatever it is following; the
+        far side is empty unless a test says otherwise.
+        """
+        if across * self.lane <= 0.0 or self._ahead is None:
             return None
-        found = self._within(reach)
-        return None if found is None else (found.gap, found.speed)
+        if self._ahead.gap > float(reach):
+            return None
+        return (self._ahead.gap, self._ahead.speed)
 
     def along(self, other):
         return other.gap
@@ -996,3 +1009,223 @@ class TestComingBackInLooksAsFarAsItIsGoing:
         road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=37.0),
                      ahead=_Ahead(30.0, 37.0))
         assert pilot.room_in(road, 1.8)
+
+
+class TestItBrakesForTheLaneItIsGoingTo:
+    """A driver follows what is in front of where it is *going*, not only what
+    is in front of where it is.
+
+    The Ashdown crash, read off the journal: a pass given up at 134.5 km/h,
+    back into its own lane, and 1.2 s later the back of a car doing 50 in it.
+    While crossing, the driver was following the oncoming lane it was leaving
+    -- `traffic_ahead` asks from the car's own position -- so nothing told it
+    to brake until it had arrived. Steering into a lane and braking for it are
+    the same decision, a second apart.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def test_it_follows_the_slower_of_the_two_lanes(self) -> None:
+        pilot = self._pilot()
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=37.0),
+                     ahead=_Ahead(30.0, 14.0))
+        pilot.controls(road, 1 / 60)
+        assert pilot.ahead is not None, 'following nothing at all'
+        assert pilot.ahead[0] == pytest.approx(30.0)
+
+    def test_and_so_slows_for_a_lane_it_has_not_reached(self) -> None:
+        """The whole point: the brakes come on while it is still crossing.
+
+        The car is out in the oncoming lane and steering home, and what it is
+        steering at is a car doing 14 m/s. From its own position there is
+        nothing in front at all.
+        """
+        pilot = self._pilot()
+        road = _Road(_Car(position=(-1.8, 0.0, -100.0), speed=37.0),
+                     ahead=_Ahead(30.0, 14.0))
+        assert road.traffic_ahead() is None, 'the double is not modelling lanes'
+        pilot.controls(road, 1 / 60)
+        assert pilot.ahead is not None, 'nothing told it to brake'
+        assert pilot._room() < 37.0, 'carried its speed into the lane'
+
+    def test_an_empty_road_is_still_an_empty_road(self) -> None:
+        pilot = self._pilot()
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=37.0), ahead=None)
+        pilot.controls(road, 1 / 60)
+        assert pilot.ahead is None
+
+    def test_but_it_does_not_follow_the_oncoming_lane_it_pulled_into(self
+                                                                     ) -> None:
+        """A car coming the other way is not something to sit behind.
+
+        The gap to it shuts at the sum of both speeds, and a driver that
+        treats it as a car to keep station on brakes to a standstill in the
+        wrong lane. Measured when this rule was first written without the
+        distinction: on the 3 km road the car went from 108 km/h to 3.9 over
+        112 m, sat there ten seconds, and ended mired 8.5 m off the crown.
+
+        Out on the far side, what governs is the pass -- finish it or give it
+        up -- and never a following distance.
+        """
+        pilot = self._pilot()
+        road = _Road(_Car(position=(-1.8, 0.0, -100.0), speed=37.0),
+                     ahead=_Ahead(30.0, 14.0))
+        pilot.lane = -1.8                        # out passing
+        assert pilot.what_to_follow(road, 37.0) is None, \
+            'tried to keep station on oncoming traffic'
+        pilot.lane = pilot.own_side              # and home again
+        assert pilot.what_to_follow(road, 37.0) is not None, \
+            'stopped following its own lane as well'
+
+
+class TestItEasesOffBeforeTheEdgeRatherThanAfterIt:
+    """Running out of road is not an event, it is an approach.
+
+    ``rejoining`` held road speed at 3.59 m from the crown and cut to
+    :data:`REJOIN_SPEED` at 3.61 -- a cliff at the carriageway edge, reacting
+    to a wheel that is *already* off. Off a structure that costs a moment on
+    the grass; on one there is no verge at all, and the parapet standing 0.9 m
+    beyond the edge throws the car into the air. Measured on the shipped
+    Ashdown circuit: six excursions in a lap, every one of them at -3.68 m
+    against a 3.60 m edge, the car a tenth of a metre wide of the road.
+
+    So the driver eases over the last :data:`EDGE_BAND` of it instead, and is
+    already slowing while the wheels are still on the tarmac.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def test_the_middle_of_the_road_is_untouched(self) -> None:
+        pilot = self._pilot()
+        assert pilot.rejoining(0.0, 40.0) == pytest.approx(40.0)
+
+    def test_it_is_already_easing_before_a_wheel_is_off(self) -> None:
+        """Half a metre from the edge, on the tarmac, and coming down."""
+        pilot = self._pilot()
+        half = pilot.course.carriageway_width / 2.0
+        assert pilot.rejoining(half - 0.3, 40.0) < 40.0
+
+    def test_and_is_down_to_the_rejoining_speed_once_it_is_off(self) -> None:
+        pilot = self._pilot()
+        half = pilot.course.carriageway_width / 2.0
+        assert pilot.rejoining(half + 0.5, 40.0) == pytest.approx(REJOIN_SPEED)
+
+    def test_it_never_asks_for_more_than_it_was_going_to(self) -> None:
+        """A lift, not a target: a driver already going slowly stays there."""
+        pilot = self._pilot()
+        half = pilot.course.carriageway_width / 2.0
+        assert pilot.rejoining(half - 0.3, 5.0) == pytest.approx(5.0)
+
+    def test_and_it_comes_down_smoothly_across_the_band(self) -> None:
+        """A cliff is a driver that lifts hard at one wheel's width, which
+        unsettles the car exactly where it has least room to be unsettled."""
+        pilot = self._pilot()
+        half = pilot.course.carriageway_width / 2.0
+        steps = [pilot.rejoining(half - one, 40.0)
+                 for one in (0.6, 0.45, 0.3, 0.15, 0.0)]
+        assert steps == sorted(steps, reverse=True)
+        assert steps[0] > steps[-1]
+
+
+class TestItUsesAPassingLaneWhereTheRoadHasOne:
+    """Where the carriageway widens there is room to get by on this car's own
+    side of the crown, and a pass taken there needs nothing of the oncoming
+    road at all.
+
+    The driver only ever considered ``-own_side`` -- the oncoming lane -- so a
+    climbing lane was invisible to it. On the shipped Ashdown circuit that is
+    1183 m of road, 16% of the lap, and the driver spent 39 to 47 per cent of
+    every run refusing passes because the *oncoming* lane was not clear while a
+    lane beside it stood empty.
+
+    Two cars abreast want about 4.7 m; an ordinary 7.2 m carriageway offers
+    3.6 m a side and a widened one 5.4 m, which is the whole difference.
+    """
+
+    def road(self, widening=0.0):
+        course = _straight(points=400, spacing=5.0)
+        course.widening = np.full(len(course.centreline), float(widening))
+        return course
+
+    def test_an_ordinary_road_offers_none(self) -> None:
+        pilot = Autopilot(self.road(), lane=1.8)
+        assert pilot.passing_lane(0) is None
+
+    def test_a_widened_one_offers_a_lane_on_its_own_side(self) -> None:
+        pilot = Autopilot(self.road(widening=3.6), lane=1.8)
+        found = pilot.passing_lane(0)
+        assert found is not None
+        assert found > 1.8, 'it is not outside the lane the car is in'
+
+    def test_and_that_lane_is_on_the_road(self) -> None:
+        """Outside the lane it is in, inside the tarmac."""
+        course = self.road(widening=3.6)
+        pilot = Autopilot(course, lane=1.8)
+        assert pilot.passing_lane(0) < course.width_at(0) / 2.0
+
+    def test_the_other_way_round_on_the_other_side(self) -> None:
+        pilot = Autopilot(self.road(widening=3.6), lane=-1.8)
+        found = pilot.passing_lane(0)
+        assert found is not None and found < -1.8
+
+    def test_a_little_extra_width_is_not_a_lane(self) -> None:
+        """Half a lane of widening is a wider road, not one to overtake on."""
+        pilot = Autopilot(self.road(widening=1.2), lane=1.8)
+        assert pilot.passing_lane(0) is None
+
+
+class TestALaneChangeIsEasedRatherThanStepped:
+    """Asking for the other lane moves the line the car follows by its whole
+    width, and a car told to be 3.6 m over *now* darts at it and overshoots.
+
+    Which is how the shipped Beacon road failed, in every one of five runs at
+    the same place: passing along the last stretch of a bridge, the car ran to
+    -3.8 m against a carriageway edge of 3.6 -- two metres wide of the -1.8 it
+    had been told to hold -- put a wheel over the edge of the deck, and ended
+    twenty-one metres off the road. The road there is straight and the corner
+    speed never enters into it.
+
+    So the *line* eases across at :data:`LANE_RATE` while the *decision* stays
+    a decision: :attr:`Autopilot.lane` is still the lane it has chosen, and
+    everything that asks which lane it wants gets the same answer as before.
+    """
+
+    def _pilot(self):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+
+    def test_the_line_starts_where_the_car_does(self) -> None:
+        assert self._pilot().line == pytest.approx(1.8)
+
+    def test_asking_for_the_other_lane_does_not_move_it_at_once(self) -> None:
+        pilot = self._pilot()
+        pilot.lane = -1.8
+        pilot.ease(1.0 / 60.0)
+        assert -1.8 < pilot.line < 1.8, 'stepped straight across'
+
+    def test_but_it_gets_there(self) -> None:
+        pilot = self._pilot()
+        pilot.lane = -1.8
+        for _ in range(240):
+            pilot.ease(1.0 / 60.0)
+        assert pilot.line == pytest.approx(-1.8)
+
+    def test_it_takes_about_a_lane_change_to_do_it(self) -> None:
+        """A second or two, which is what a considered move across a road is
+        -- and slow enough that the car arrives on the line instead of past
+        it."""
+        pilot = self._pilot()
+        pilot.lane = -1.8
+        seconds = 0.0
+        while abs(pilot.line - pilot.lane) > 0.05 and seconds < 10.0:
+            pilot.ease(1.0 / 60.0)
+            seconds += 1.0 / 60.0
+        assert 0.8 < seconds < 4.0, 'took %.1f s' % seconds
+
+    def test_the_decision_is_still_the_decision(self) -> None:
+        """Everything that asks which lane it has chosen still gets that."""
+        pilot = self._pilot()
+        pilot.lane = -1.8
+        pilot.ease(1.0 / 60.0)
+        assert pilot.lane == pytest.approx(-1.8)

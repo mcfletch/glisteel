@@ -127,7 +127,10 @@ class Straighten:
         steers by *position* rather than by lock does with its steering
         (:mod:`glisteel.schemes`).
         """
-        self.driver.lane = float(line)
+        # Both the decision and the line, because this is a placement rather
+        # than a manoeuvre: a lane change eases across (:meth:`Autopilot.ease`)
+        # and an aid holding a line is already on the one it names.
+        self.driver.hold(float(line))
         self._hands_on = False
 
     def release(self) -> None:

@@ -668,8 +668,21 @@ class Session:
         forces, and a surface sampled at the frame rate would change under the
         car in jumps on a slow frame.
         """
+        was = self.watch.off
         reason = self.watch.update(self.car.position, dt)
         self.car.vehicle.surface = self.watch.surface()
+        if bool(self.watch.off) != bool(was):
+            # Both edges, because what a reader wants is the *stretch*: it left
+            # the road here and came back there, or did not. A run that ends
+            # mired says only where it stopped, and where it stopped is rarely
+            # where it went wrong.
+            index, off = self.course.nearest(self.car.position)
+            self.telemetry.mark(
+                'left-the-road' if self.watch.off else 'back-on-the-road',
+                station=round(float(self.course.stations[index]), 1),
+                across=round(self.across(), 2), off=round(float(off), 2),
+                speed=round(self.car.speed_kph(), 1),
+                surface=str(self.watch.surface()))
         if reason is not None:
             log.info("run over: %s", reason)
 

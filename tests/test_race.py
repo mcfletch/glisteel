@@ -338,3 +338,66 @@ class TestHittingSomething:
     def test_a_caller_may_set_where_the_line_is(self) -> None:
         watch = self._watch(survivable=40.0)
         assert watch.update(closing=28.0) is None
+
+
+class TestAnOpenRoadIsDrivenToItsEnd:
+    """A road that does not come back on itself has no lap in it, so a drive
+    down one could never be recorded as finished.
+
+    The only way a run on an open road ended was by falling off the far end of
+    it: ``Course.nearest`` clamps at the last point of the centreline, so a car
+    that keeps going past it reads as drifting further and further sideways,
+    and ``OffRoad`` calls that *off the road*. Driven against five sets of
+    traffic, the shipped 3 km Beacon road finished none of them -- four ran out
+    of road and were reported as having left it.
+
+    Reaching the end **is** the drive, and that is what finishes it.
+    """
+
+    def road(self, length=400.0, count=81):
+        z = np.linspace(0.0, length, count)
+        return Course(name='road', centreline=np.stack(
+            [np.zeros(count), np.zeros(count), z], axis=-1),
+            carriageway_width=7.2, total_width=10.6, closed=False,
+            length=length)
+
+    def driven(self, course, to):
+        """Move a car up the road to that station, a step at a time."""
+        timing = RaceTiming(course)
+        done = None
+        for station in np.arange(0.0, to, 4.0):
+            done = timing.update((0.0, 0.0, float(station)), 1.0 / 60.0) or done
+        return timing, done
+
+    def test_reaching_the_end_finishes_the_drive(self) -> None:
+        course = self.road()
+        _timing, done = self.driven(course, course.length)
+        assert done is not None
+
+    def test_and_it_is_the_one_drive_there_was(self) -> None:
+        course = self.road()
+        timing, _done = self.driven(course, course.length)
+        assert len(timing.laps) == 1
+
+    def test_half_way_down_it_is_not_finished(self) -> None:
+        course = self.road()
+        _timing, done = self.driven(course, course.length / 2.0)
+        assert done is None
+
+    def test_and_it_is_timed_like_any_other(self) -> None:
+        course = self.road()
+        timing, done = self.driven(course, course.length)
+        assert done.seconds > 0.0
+        assert timing.best is done
+
+    def test_a_circuit_still_wants_a_whole_lap(self) -> None:
+        """Nothing here changes a closed course, where the end is the start."""
+        angle = np.linspace(0.0, 2.0 * np.pi, 121)
+        line = np.stack([np.cos(angle) * 100.0, np.zeros(121),
+                         np.sin(angle) * 100.0], axis=-1)
+        ring = Course(name='ring', centreline=line, carriageway_width=7.2,
+                      total_width=10.6, closed=True, length=628.0)
+        timing = RaceTiming(ring)
+        for point in line[:60]:
+            timing.update(point, 1.0 / 60.0)
+        assert not timing.laps
