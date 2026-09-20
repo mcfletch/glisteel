@@ -34,6 +34,11 @@ from OpenGLContext.scenegraph.road import (
     cornering_radius,
     sight_distances,
 )
+from OpenGLContext.scenegraph.roadworks import (
+    BORE_APPROACH_CELLS,
+    BORE_INSET,
+    bore_opening,
+)
 from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
 
 from glisteel.geometry import yaw_to_face
@@ -71,9 +76,6 @@ GRID_SETBACK = 12.0
 #: has ninety metres of air under it and has fallen nowhere.
 LOST_BELOW = 500.0
 
-#: How far past a road's own width a bore's opening in the ground reaches, in
-#: metres. Wide enough to clear the lining, and no wider: the opening is a hole
-#: in the ground with the bore's own tube inside it, and one wider than the tube
 #: How far up the road a driver is told about a bend: this much, plus this many
 #: seconds of it at the speed they are doing. The same shape as the distance a
 #: sign is placed at -- what a driver can still act on -- rather than a fixed
@@ -108,14 +110,13 @@ OPEN_SIGHT = 400.0
 #: is at the road's edge, so nothing outside the tube is seen at all.
 BESIDE = {'bridge': OPEN_SIGHT, 'causeway': OPEN_SIGHT, 'tunnel': 3.6}
 
-#: is a trench beside the carriageway.
-BORE_MARGIN = 2.0
-
-#: How far up each approach the opening reaches, in metres. The ground beside a
-#: portal is a cutting sampled on a grid metres wide, and where that meets the
-#: untouched hillside it rides over the carriageway; the road's own surface
-#: carries the car through, so opening the ground early costs nothing.
-BORE_APPROACH = 24.0
+#: How far from the car loose stone is stood up in the physics world, in
+#: metres. Much shorter than a boulder's reach: a stone is not something to be
+#: stopped by from a distance, it is what is under the wheel, and a world of
+#: them is thousands of bodies where a world's boulders are hundreds. Two
+#: seconds of road at the speed a circuit is posted at, which is further than
+#: anything reaches between one update and the next.
+STONE_REACH = 60.0
 
 #: The most lamps a world may declare. A bore has one every twenty-five metres,
 #: so a world of them is thousands rather than millions: past this the number is
@@ -835,6 +836,17 @@ def _baked_props(extras: Any) -> list:
     return [Prop.from_json(one) for one in (extras.get('props') or [])]
 
 
+def _baked_stones(extras: Any) -> list:
+    """The loose stone a world carries, out of its tileset's ``extras``.
+
+    Its own channel rather than the world's ``props``, because the two are held
+    at different reaches: a boulder has to stop a car from a long way off, and
+    a stone is what is under the wheel.
+    """
+    from OpenGLContext.scenegraph.props import Prop
+    return [Prop.from_json(one) for one in (extras.get('stones') or [])]
+
+
 def _baked_luminaires(extras: Any) -> Any:
     """Where the lamps hang in a world's bores, out of its tileset's ``extras``.
 
@@ -917,7 +929,8 @@ class RaceWorld:
         extras = (document.get('extras') or {})
         self._assemble(courses_in(document), field=self.terrain.field,
                        props=_baked_props(extras), traffic=traffic,
-                       gravity=gravity, luminaires=_baked_luminaires(extras))
+                       gravity=gravity, luminaires=_baked_luminaires(extras),
+                       stones=_baked_stones(extras))
         # The same holes the collider got -- the same object, not an equal one
         # -- so the hill a bore runs through is drawn with the opening the car
         # drives through rather than cut down to road level to fake one. Set
@@ -950,7 +963,7 @@ class RaceWorld:
 
     def _assemble(self, courses: list[Course], field: Any, props: list,
                   traffic: int | None, gravity: float,
-                  luminaires: Any = None) -> None:
+                  luminaires: Any = None, stones: list | None = None) -> None:
         """Stand up the physics, the surfaces, the obstacles and the traffic."""
         self.physics = PhysicsWorld(gravity=model.Gravity(gravity=abs(gravity)))
         self.courses = courses
@@ -982,6 +995,13 @@ class RaceWorld:
         #: The ones near the car are in the physics world; the rest are not.
         from OpenGLContext.physics.props import PropColliders
         self.props = PropColliders(self.physics, props)
+        #: The loose stone on the hillsides. Ground rather than obstacles: a
+        #: wheel rides over one and a walker stands on it, so each is a dome
+        #: rather than a block, and they are held only as far out as a car can
+        #: reach before the next update -- a world's stone is thousands of
+        #: bodies where its boulders are hundreds.
+        self.stones = PropColliders(self.physics, stones or (),
+                                    reach=STONE_REACH)
         #: The lamps in this world's bores, and which of them are worth a real
         #: light where the car is (:mod:`glisteel.lighting`).
         from glisteel.lighting import Luminaires
@@ -1017,21 +1037,42 @@ class RaceWorld:
     def _bores(self) -> Any:
         """Where the ground is not there, because a road runs inside it.
 
-        A field terrain is a surface and keeps the hill a tunnel passes through,
-        which is right to look at and a wall to drive into. The bores are cut
-        out of the collider; the bore's own lining, which streams with the tile
-        it is in, is what the car actually drives through.
+        The mouth of every bore in the world, and no more of the hill than that
+        (:func:`~OpenGLContext.scenegraph.roadworks.bore_opening`): the hillside
+        standing where the portal's face stands is what the road comes out
+        through, and the hill closed over the rest of the bore is a hill, drawn
+        and stood on. The lining the car drives along streams with the tile it
+        is in.
+
+        None for a world with no landscape to cut, and for one with nothing
+        tunnelling through it.
         """
-        tunnelled = [road for road in self.courses
-                     if any(one.kind == 'tunnel' for one in road.structures)]
-        if not tunnelled:
+        field = self.field
+        if field is None:
+            return None
+        spacing = float(field.extent) / max(int(field.res) - 1, 1)
+        mouths = []
+        for road in self.courses:
+            for one in road.structures:
+                if one.kind != 'tunnel':
+                    continue
+                # A bore the road carries on one point of its line has no
+                # direction to build a mouth along.
+                run = road.centreline[one.holds(road.stations)]
+                if len(run) > 1:
+                    mouths.append(bore_opening(
+                        run, field.sample, profile=road.road_profile(),
+                        inset=BORE_INSET,
+                        approach=BORE_APPROACH_CELLS * spacing))
+        if not mouths:
             return None
 
         def opened(x: Any, z: Any) -> Any:
-            found = np.zeros(np.shape(np.asarray(x, dtype='d')), dtype=bool)
-            for road in tunnelled:
-                found |= road.inside('tunnel', x, z, margin=BORE_MARGIN,
-                                     along=BORE_APPROACH)
+            shape = np.broadcast_shapes(np.shape(np.asarray(x, dtype='d')),
+                                        np.shape(np.asarray(z, dtype='d')))
+            found = np.zeros(shape, dtype=bool)
+            for mouth in mouths:
+                found |= mouth(x, z)
             return found
         return opened
 
@@ -1055,6 +1096,7 @@ class RaceWorld:
         for road in self.roads:
             road.update(camera)
         self.props.update(camera)
+        self.stones.update(camera)
         if self.terrain is None:
             return None
         return self.terrain.update_for_camera(

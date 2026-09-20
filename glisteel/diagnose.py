@@ -231,9 +231,12 @@ def summarise(reports: list[Report]) -> str:
     finished = [one for one in reports if one.outcome is None]
     lines = ['%s: %d of %d finished'
              % (reports[0].world, len(finished), len(reports))]
-    for report in reports:
+    for seed, report in enumerate(reports):
+        # Numbered by where it is in the list rather than looked up by value:
+        # a report carries its speeds as an array, so asking two of them
+        # whether they are equal is asking an array whether it is true.
         lines.append('  seed %d: %6.1f s  %-22s %3.0f km/h mean, %d passes'
-                     % (reports.index(report), report.seconds,
+                     % (seed, report.seconds,
                         report.outcome or 'finished',
                         report.pace().get('mean', 0.0),
                         report.kinds().get('pass-done', 0)))

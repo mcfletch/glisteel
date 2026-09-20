@@ -229,10 +229,63 @@ class TestTheObstaclesInAWorld:
         assert world.props.standing == []
 
 
+class TestTheStoneUnderfoot:
+    """Loose stone is *ground*, not an obstacle: walk onto one and you stand on
+    it. It travels in its own channel because the two are held at different
+    reaches -- a boulder has to stop a car from a long way off, and a stone
+    matters where a wheel is."""
+
+    def test_a_world_reads_the_stone_it_carries(self, tmp_path) -> None:
+        assert len(_race(_world_with_stones(tmp_path)).stones.props) == 2
+
+    def test_a_world_with_none_is_not_an_error(self, tmp_path) -> None:
+        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+        assert _race(build_sample_tileset(str(tmp_path))).stones.props == []
+
+    def test_streaming_near_one_stands_it_up(self, tmp_path) -> None:
+        world = _race(_world_with_stones(tmp_path))
+        world.stream((0.0, 2.0, 0.0), 1080.0)
+        assert [one.kind for one in world.stones.standing] == ['stone0']
+
+    def test_a_stone_is_held_closer_than_a_boulder(self, tmp_path) -> None:
+        """A world's stone is thousands of bodies where its boulders are
+        hundreds, and what a stone has to be there for is the wheel on it."""
+        world = _race(_world_with_stones(tmp_path))
+        assert world.stones.reach < world.props.reach
+
+    def test_and_it_is_a_dome_rather_than_a_block(self, tmp_path) -> None:
+        world = _race(_world_with_stones(tmp_path))
+        world.stream((0.0, 2.0, 0.0), 1080.0)
+        shape = world.physics.shapes[world.physics.collider_shape[0]]
+        assert shape.type == 'sphere'
+
+    def test_streaming_away_takes_it_down(self, tmp_path) -> None:
+        world = _race(_world_with_stones(tmp_path))
+        world.stream((0.0, 2.0, 0.0), 1080.0)
+        world.stream((4000.0, 2.0, 4000.0), 1080.0)
+        assert world.stones.standing == []
+
+
 def _race(path):
     """A race world on a tileset, torn down by the test that made it."""
     from glisteel.world import RaceWorld
     return RaceWorld(path)
+
+
+def _world_with_stones(directory):
+    """A sample tileset with two stones written into its extras."""
+    import json
+
+    from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+    path = build_sample_tileset(str(directory))
+    document = json.load(open(path))
+    document.setdefault('extras', {})['stones'] = [
+        {'kind': 'stone0', 'at': [0.0, 0.0, 6.0], 'radius': 0.4,
+         'height': 0.45, 'shape': 'dome'},
+        {'kind': 'stone1', 'at': [900.0, 0.0, 900.0], 'radius': 0.3,
+         'height': 0.33, 'shape': 'dome'}]
+    json.dump(document, open(path, 'w'))
+    return path
 
 
 def _world_with_props(directory):
@@ -649,11 +702,8 @@ class TestHowTightABendIsMeasuredOverARealLength:
 class TestTheHillABoreRunsThrough:
     """The ground is drawn with the opening the car drives through.
 
-    A height field is a surface, so a hill a road passes *inside* had nowhere to
-    say it was hollow, and the bake cut it down to road level to fake one -- a
-    bore read as a valley with a lid. The engine's drawn mesh takes the same
-    `holes` the collider has always taken, so the surface seen and the surface
-    driven on are the same surface.
+    The drawn mesh takes the same ``holes`` the collider takes -- the same
+    object, so the surface seen and the surface driven on are the same surface.
     """
 
     def test_the_terrain_is_given_the_holes_the_collider_got(self, tmp_path):
@@ -683,21 +733,25 @@ class TestTheHillABoreRunsThrough:
 
 
 class TestTheMaskThatOpensABore:
-    """What the editor stopped faking: the opening at a portal.
+    """The opening at a portal, and the hill that is left standing.
 
-    The hill a bore runs through is left whole now, so the thing that makes a
-    mouth a mouth is this mask -- handed to the drawn terrain and to the
-    collider alike. It has to cover the bore itself, a margin either side so the
-    opening clears the lining rather than grazing it, and the approach, where a
-    cutting sampled on a grid metres wide meets untouched hillside and rides
-    over the carriageway by the better part of a step.
+    A height field is a surface, so the hill a bore runs inside is drawn as a
+    hill and driven on as one -- which at the portal puts the hillside where the
+    carriageway is. This mask is what comes out of it, and it is handed to the
+    drawn terrain and to the collider alike. What it has to cover is the *mouth*
+    -- the hillside standing where the portal's face stands -- and not the hill
+    over the rest of the bore, which is a hill.
 
-    A real course with a real bore, built here: the sample tileset tunnels
-    through nothing, and a case that skips is a case that says nothing.
+    A real course with a real bore and a real hill over it, built here: the
+    sample tileset tunnels through nothing, and a case that skips is a case that
+    says nothing.
     """
 
-    def bores(self):
-        """The mask a world with one tunnelled road would hand out."""
+    #: Where the bore runs, in metres along a four-kilometre road.
+    BORE = (1000.0, 2000.0)
+
+    def world(self, ground=None):
+        """A world with one tunnelled road and a landscape to cut."""
         import numpy as np
 
         from glisteel.world import Course, RaceWorld, Structure
@@ -705,41 +759,63 @@ class TestTheMaskThatOpensABore:
                          np.zeros(401)], axis=-1)
         course = Course(name='road', centreline=line, carriageway_width=7.0,
                         total_width=12.0, closed=False, length=4000.0,
-                        structures=(Structure(kind='tunnel', start=1000.0,
-                                              end=2000.0),))
+                        structures=(Structure(kind='tunnel', start=self.BORE[0],
+                                              end=self.BORE[1]),))
         world = RaceWorld.__new__(RaceWorld)
         world.courses = [course]
-        found = world._bores()
+        world.field = self.ridge() if ground is None else ground
+        return world
+
+    def ridge(self, res=401, extent=8000.0):
+        """A ridge across the bore: level with the road at each portal, forty
+        metres over the middle of it, and under the road out in the open."""
+        import numpy as np
+        from OpenGLContext.scenegraph.terrain import HeightField
+
+        axis = np.linspace(-extent / 2.0, extent / 2.0, res)
+        x, _z = np.meshgrid(axis, axis)
+        low, high = self.BORE
+        over = np.clip((x - low) / (high - low), 0.0, 1.0)
+        height = 40.0 * np.sin(np.pi * over) - 2.0
+        return HeightField((height + 2.0) / 42.0, extent=extent, relief=42.0,
+                           base=-2.0)
+
+    def bores(self, ground=None):
+        found = self.world(ground)._bores()
         assert found is not None, 'a world with a bore in it needs a mask'
         return found
 
-    def test_it_covers_the_middle_of_a_bore(self) -> None:
+    def test_it_opens_the_mouth_of_a_bore(self) -> None:
+        """Where the ridge stands over the carriageway but not yet over the
+        arch, the ground is inside the bore."""
         import numpy as np
-        assert bool(np.asarray(self.bores()(np.array([1500.0]),
+        at = self.BORE[0] + 40.0
+        assert bool(np.asarray(self.bores()(np.array([at]), np.array([0.0])))[0])
+
+    def test_it_leaves_the_hill_over_the_bore_standing(self) -> None:
+        """Forty metres of hillside is a hill, and the defect this is here for:
+        a mask that took the whole corridor cut a canyon through it."""
+        import numpy as np
+        middle = sum(self.BORE) / 2.0
+        assert not bool(np.asarray(self.bores()(np.array([middle]),
+                                                np.array([0.0])))[0])
+
+    def test_it_clears_the_carriageway_on_the_run_up_to_a_portal(self) -> None:
+        """Where the cutting meets the hillside the ground steps between two
+        samples, and the step is drawn across the road. The carriageway covers
+        what is cleared under it."""
+        import numpy as np
+        at = self.BORE[0] - 30.0
+        assert bool(np.asarray(self.bores()(np.array([at]),
                                             np.array([0.0])))[0])
 
-    def test_it_reaches_out_past_the_mouth(self) -> None:
-        """The straddling cell: a portal's own sample is not enough.
-
-        Where a sampled cutting meets untouched hillside the drawn surface rides
-        over the carriageway, so the opening has to start before the arch does.
-        """
+    def test_and_leaves_the_ground_beside_it_alone(self) -> None:
+        """Past the surfaced width nothing covers a hole, so a hole there is a
+        slot beside the carriageway to see the sky through."""
         import numpy as np
-
-        from glisteel.world import BORE_APPROACH
-        assert BORE_APPROACH > 0.0
-        just_outside = 1000.0 - BORE_APPROACH / 2.0
-        assert bool(np.asarray(self.bores()(np.array([just_outside]),
-                                            np.array([0.0])))[0])
-
-    def test_it_clears_the_lining_rather_than_grazing_it(self) -> None:
-        """Beside the road as well as along it."""
-        import numpy as np
-
-        from glisteel.world import BORE_MARGIN
-        beside = 12.0 / 2.0 + BORE_MARGIN / 2.0
-        assert bool(np.asarray(self.bores()(np.array([1500.0]),
-                                            np.array([beside])))[0])
+        at = self.BORE[0] - 30.0
+        assert not bool(np.asarray(self.bores()(np.array([at]),
+                                                np.array([8.0])))[0])
 
     def test_it_leaves_the_open_road_alone(self) -> None:
         """A mask true everywhere would pass the rest of these and delete the
@@ -750,8 +826,16 @@ class TestTheMaskThatOpensABore:
 
     def test_and_leaves_the_country_either_side_alone(self) -> None:
         import numpy as np
-        assert not bool(np.asarray(self.bores()(np.array([1500.0]),
+        at = self.BORE[0] + 40.0
+        assert not bool(np.asarray(self.bores()(np.array([at]),
                                                 np.array([400.0])))[0])
+
+    def test_a_world_with_no_landscape_asks_for_no_holes(self) -> None:
+        """Nothing to cut, so nothing to say: a scenario's road stands on a
+        field the world was given or on nothing at all."""
+        world = self.world()
+        world.field = None
+        assert world._bores() is None
 
 
 class TestNeitherWritingModeIsPacedByADisplay:
