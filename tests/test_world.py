@@ -714,6 +714,10 @@ class TestTheHillABoreRunsThrough:
         assert world.terrain.holes is world.bores
         if world.ground is not None:
             assert world.ground.holes is world.bores
+        if world.terrain.cover is not None:
+            # What grows on the ground is a reader of it too: seated on the
+            # height field alone, a clump stands in the portal in mid-air.
+            assert world.terrain.cover.holes is world.bores
 
     def test_a_world_with_no_bore_asks_for_no_holes(self, tmp_path):
         """`_bores()` answers None where nothing tunnels, and None is right:
