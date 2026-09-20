@@ -390,8 +390,9 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         """
         from glisteel import content
         panel = menu.download_screen(
-            content.missing(), job=self._fetching,
-            on_fetch=self._on_fetch, on_cancel=self.show_tracks)
+            content.offered(), job=self._fetching,
+            on_fetch=self._on_fetch, on_cancel=self.show_tracks,
+            wanted=content.wanted_for)
         panel.name = 'downloads'
         self.pushOverlay(panel)
 
@@ -405,9 +406,10 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         from OpenGLContext.contentpacks.fetch import FetchJob
 
         from glisteel import content
-        wanted = content.wanted_for(pack)
-        self._fetching = FetchJob(content.missing(wanted), content.store(),
-                                  on_progress=self.triggerRedraw).start()
+        store = content.store()
+        self._fetching = FetchJob(content.wanted_for(pack, store), store,
+                                  on_progress=self.triggerRedraw,
+                                  within=pack).start()
         self.show_downloads()
 
     def pollDownloads(self) -> None:             # pragma: no cover - needs a window

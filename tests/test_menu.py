@@ -295,7 +295,7 @@ if __name__ == '__main__':
 class TestTheDownloadScreen:
     """What is on offer, what it costs, and whose it is.
 
-    A track is 22 MB and the set is 88 MB, so none of it is in the wheel. The
+    A track is 22 MB and the set is 90 MB, so none of it is in the wheel. The
     screen exists because a download is a thing a player agrees to: it says the
     size before it starts, the terms the content carries, and what is already
     here so nobody pays twice.
@@ -320,6 +320,20 @@ class TestTheDownloadScreen:
         panel = menu.download_screen(self.offered())
         assert '23 MB' in _text(panel)
 
+    def test_and_the_cost_is_the_whole_set_the_choice_pulls_in(self):
+        """A track without the art it shares arrives as bare ground, so the
+        art is fetched with it -- and a player who was shown the track's own
+        22 MB and charged 54 was told the wrong number."""
+        packs = self.offered()
+        art = packs[0].__class__(
+            key='glisteel/forest-art', title='Forest art',
+            url='https://example.invalid/art.tar.gz', directory='forest-art',
+            archive='tar', approximate_bytes=32_000_000,
+            copyright='Somebody, CC-BY 4.0', marker='trees')
+        panel = menu.download_screen(packs, wanted=lambda one: [one, art])
+        assert '55 MB' in _text(panel)
+        assert 'Forest art' in _text(panel)
+
     def test_it_says_whose_the_content_is(self):
         """A pack's terms are why `copyright` is required of one."""
         assert 'CC-BY 4.0' in _text(menu.download_screen(self.offered()))
@@ -327,6 +341,19 @@ class TestTheDownloadScreen:
     def test_it_offers_to_fetch_and_to_leave(self):
         found = names(menu.download_screen(self.offered()))
         assert 'fetch' in found and 'cancel' in found
+
+    def test_looking_at_one_does_not_start_fetching_it(self):
+        """Stepping through what is on offer is reading, not agreeing."""
+        asked = []
+        panel = menu.download_screen(
+            self.offered(), on_fetch=lambda pack: asked.append(pack.key),
+            wanted=lambda one: [one])
+        chooser = widget(panel, 'offered')
+        chooser.value = 'glisteel/beacon'
+        if chooser.on_change is not None:
+            chooser.on_change(chooser)
+        assert asked == []
+        assert 'Beacon' in _text(panel)
 
     def test_choosing_one_asks_for_it_and_what_it_needs(self):
         wanted = []

@@ -1,7 +1,7 @@
 """What this game offers to download, and what of it is already here.
 
 glisteel ships its code and fetches its data: a track is 22 MB and the four
-together are 88 MB, which is not a wheel. The facility is the engine's
+together with the art they share are 90 MB, which is not a wheel. The facility is the engine's
 (:mod:`OpenGLContext.contentpacks`); what is here is which registry, which
 namespace, and how a downloaded track reaches the chooser.
 """
@@ -11,6 +11,21 @@ import os
 import pytest
 
 from glisteel import content
+
+
+def release_assets():
+    """``release-assets.py``, as a module.
+
+    The command is spelled with a hyphen, as a command is, so it is loaded by
+    path rather than imported by name.
+    """
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
+        __file__))), 'release-assets.py')
+    spec = importlib.util.spec_from_file_location('release_assets', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class TestTheShippedRegistry:
@@ -112,7 +127,7 @@ class TestTheChooserSeesDownloadedTracks:
 class TestThePicturesAChooserShowsFirst:
     """A pack's own art is inside the archive being chosen, so a screen
     offering one has nothing to show it with unless the registry carries a
-    thumbnail. These ship in the wheel -- 87 KB against the 88 MB they
+    thumbnail. These ship in the wheel -- 87 KB against the 90 MB they
     describe."""
 
     def test_every_track_has_one(self) -> None:
@@ -195,7 +210,7 @@ class TestTheRegistryAsOneFile:
     """What an installed game is pointed at to be offered content it never
     shipped with.
 
-    A document and some thumbnails -- 89 KB against the 88 MB it describes --
+    A document and some thumbnails -- 89 KB against the 90 MB it describes --
     so fetching one gives a chooser every pack's title, size, terms and picture
     while downloading none of the content. Attached to the same release as the
     archives, which is what lets a later set of tracks reach a game that is
@@ -203,11 +218,8 @@ class TestTheRegistryAsOneFile:
     """
 
     def bundle(self, tmp_path):
-        import sys
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), 'tools'))
-        from release_content import bundle_registry
-        return bundle_registry(content.CATALOG_PATH, str(tmp_path))
+        return release_assets().bundle_registry(content.CATALOG_PATH,
+                                                str(tmp_path))
 
     def test_it_holds_the_registry_and_its_pictures(self, tmp_path) -> None:
         import zipfile
@@ -237,3 +249,83 @@ class TestTheRegistryAsOneFile:
                                                            tmp_path) -> None:
         """A bundle the size of the content would be no saving at all."""
         assert os.path.getsize(self.bundle(tmp_path)) < 1024 * 1024
+
+
+class TestATrackAndTheArtItShares:
+    """A world is one directory, and the art is part of the world.
+
+    Every path inside a baked track -- the tree meshes, their impostors, the
+    ground cover -- resolves against the track's own root, so the art the four
+    tracks share unpacks *into* each of them rather than beside them. It is one
+    download either way: what repeats is the extraction.
+    """
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        return content.store(root=str(tmp_path / 'content'))
+
+    def track(self, key='glisteel/ashdown'):
+        from OpenGLContext.contentpacks import catalog
+        return catalog.pack_for_key(key, content.registry())
+
+    def test_choosing_one_fetches_it_and_the_art(self, store) -> None:
+        assert [one.key for one in content.wanted_for(self.track(), store)] == \
+            ['glisteel/ashdown', 'glisteel/forest-art']
+
+    def test_the_art_belongs_under_the_track(self, store) -> None:
+        art = self.track('glisteel/forest-art')
+        assert store.directory_for(art, within=self.track()) == \
+            store.directory_for(self.track())
+
+    def test_and_under_each_track_separately(self, store) -> None:
+        """Having driven Ashdown says nothing about Beacon's trees."""
+        one, two = self.track(), self.track('glisteel/beacon')
+        art = self.track('glisteel/forest-art')
+        os.makedirs(os.path.join(store.directory_for(one), art.marker))
+        assert store.root_for(art, within=one) is not None
+        assert store.root_for(art, within=two) is None
+
+    def test_the_download_screen_does_not_offer_the_art_alone(self,
+                                                              store) -> None:
+        """A player cannot drive the art, and it never reads as arrived: it
+        lives under the tracks rather than in a place of its own."""
+        assert 'glisteel/forest-art' not in [one.key
+                                             for one in content.offered(store)]
+        assert [one.key for one in content.offered(store)] == [
+            one.key for one in content.registry()
+            if one.key != 'glisteel/forest-art']
+
+
+class TestWhatTheRegistrySaysAWorldIsMadeOf:
+    """A baked world's ``CREDITS.txt``, carried into the registry.
+
+    Most of the art in a track is somebody else's under CC-BY, and the
+    condition of using it is that the credit travels with it. The registry is
+    where a player meets that credit -- the download screen reads it out of
+    the entry before they agree to fetch anything -- so what the entry says
+    has to be the whole notice.
+    """
+
+    def credit(self, tmp_path, text):
+        os.makedirs(str(tmp_path), exist_ok=True)
+        with open(os.path.join(str(tmp_path), 'CREDITS.txt'), 'w',
+                  encoding='utf-8') as handle:
+            handle.write(text)
+        return release_assets()._world_credit(str(tmp_path))
+
+    def test_it_is_what_the_bake_wrote(self, tmp_path) -> None:
+        assert self.credit(tmp_path, 'Ground: ambientCG, CC0 1.0.') == \
+            'Ground: ambientCG, CC0 1.0.'
+
+    def test_a_long_notice_arrives_whole(self, tmp_path) -> None:
+        """A credit is as long as the number of people owed one, and the
+        four shipped tracks each owe five. Cutting it leaves an attribution
+        that names a work and not who made it."""
+        said = '; '.join("'Work %d' by Someone, CC-BY 4.0" % (one,)
+                         for one in range(40))
+        assert len(said) > 600
+        assert self.credit(tmp_path, said) == said
+
+    def test_a_bake_that_recorded_none_falls_back_to_the_trees(
+            self, tmp_path) -> None:
+        assert self.credit(tmp_path, '   ') == release_assets().TREE_CREDIT

@@ -7,8 +7,8 @@
    "url": "https://github.com/mcfletch/glisteel/releases/download/content-v1/glisteel-cars.tar.gz",
    "directory": "cars",
    "archive": "tar",
-   "approximate_bytes": 505114,
-   "sha256": "1f9ba620a627a1ace91a77dda73d0ee8943ab2cd50e5161d885c54884a051c98",
+   "approximate_bytes": 505096,
+   "sha256": "d0cbf0b48dfa3e53a9be28c0d6e3e1f6be56f87fc927686d26d41d41fb9cd607",
    "copyright": "Every model here is this project's own, built by [`tools/cars.py`](../../../tools/cars.py)",
    "marker": "cars/hero.glb",
    "base": true,
@@ -20,8 +20,8 @@
    "url": "https://github.com/mcfletch/glisteel/releases/download/content-v1/glisteel-forest-art.tar.gz",
    "directory": "forest-art",
    "archive": "tar",
-   "approximate_bytes": 26324759,
-   "sha256": "c4e1ea1d115ad59698be685ae2f19be4430e3cf5fa373b3e0a51b296898fb932",
+   "approximate_bytes": 33117610,
+   "sha256": "5233da610fd5f3b97ef8795d903500ed242e2df5ca818b1d107b5adf6bfe1530",
    "copyright": "'Fir tree' by Georgeous, 'Noel_Pine_Tree' by 3D Error 404 and 'Maple trees pack' by LOLIPOP, all CC-BY 4.0; ground materials from ambientCG (CC0 1.0). The meshes, textures and impostor cards here are derivative works and carry the same licence; packaged by the glisteel project.",
    "marker": "trees",
    "notes": "Tree and gantry art, shared by every track."
@@ -32,9 +32,9 @@
    "url": "https://github.com/mcfletch/glisteel/releases/download/content-v1/glisteel-ashdown.tar.gz",
    "directory": "ashdown",
    "archive": "tar",
-   "approximate_bytes": 23071848,
-   "sha256": "81ff27b2a87b8bc399b7428bef02e2ec1ad3e3035ec56479cf164173e684a584",
-   "copyright": "Sources for the data this world was baked from.  - Terrain and road surface: generated procedurally by OpenGLContext (BSD-3-Clause). - Ground detail materials: ambientCG (CC0 1.0), fetched and cached at first use. - Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), 'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and 'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 (http://creativecommons.org/licenses/by/4.0/); the meshes, textures and impostor cards here are derivative works and carry the same licence.",
+   "approximate_bytes": 26840976,
+   "sha256": "5f0a75532d936d029cda3985d05647acfa24be87350fadc80c44ee27130bb0ca",
+   "copyright": "Sources for the data this world was baked from.  - Terrain and road surface: generated procedurally by OpenGLContext (BSD-3-Clause). - Ground detail materials: ambientCG (CC0 1.0), fetched and cached at first use. - Ground cover plants: scans from Poly Haven (https://polyhaven.com/), CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/), which requires no attribution; the clumps and cards here are baked from them and are CC0 as well. - Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), 'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and 'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 (http://creativecommons.org/licenses/by/4.0/); the meshes, textures and impostor cards here are derivative works and carry the same licence.",
    "marker": "tileset.json",
    "needs": [
     "glisteel/forest-art"
@@ -48,14 +48,14 @@
    "url": "https://github.com/mcfletch/glisteel/releases/download/content-v1/glisteel-beacon.tar.gz",
    "directory": "beacon",
    "archive": "tar",
-   "approximate_bytes": 8729607,
-   "sha256": "1a9b7d3cd68bf7f7ceaca6dc8ef1e989d7a969723da5353e89acd156fd0b0d35",
-   "copyright": "Sources for the data this world was baked from.  - Terrain and road surface: generated procedurally by OpenGLContext (BSD-3-Clause). - Ground detail materials: ambientCG (CC0 1.0), fetched and cached at first use. - Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), 'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and 'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 (http://creativecommons.org/licenses/by/4.0/); the meshes, textures and impostor cards here are derivative works and carry the same licence.",
+   "approximate_bytes": 10137464,
+   "sha256": "0b59cb6073de0966f26ed101d262cca510bcc6be6c5e226a6dc8333f028f3f3c",
+   "copyright": "Sources for the data this world was baked from.  - Terrain and road surface: generated procedurally by OpenGLContext (BSD-3-Clause). - Ground detail materials: ambientCG (CC0 1.0), fetched and cached at first use. - Ground cover plants: scans from Poly Haven (https://polyhaven.com/), CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/), which requires no attribution; the clumps and cards here are baked from them and are CC0 as well. - Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), 'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and 'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 (http://creativecommons.org/licenses/by/4.0/); the meshes, textures and impostor cards here are derivative works and carry the same licence.",
    "marker": "tileset.json",
    "needs": [
     "glisteel/forest-art"
    ],
-   "notes": "3.0 km, point to point; 1053 m of bridge, 1775 m of tunnel.",
+   "notes": "3.0 km, point to point; 1011 m of bridge, 1751 m of tunnel.",
    "preview": "previews/beacon.jpg"
   },
   {
@@ -64,9 +64,9 @@
    "url": "https://github.com/mcfletch/glisteel/releases/download/content-v1/glisteel-steelbowl.tar.gz",
    "directory": "steelbowl",
    "archive": "tar",
-   "approximate_bytes": 5223760,
-   "sha256": "caa1389dc35b8d3a199859299d5a4d1f90b26e39dc0d02c05cf29ed1fc59f1a5",
-   "copyright": "Sources for the data this world was baked from.  - Terrain and road surface: generated procedurally by OpenGLContext (BSD-3-Clause). - Ground detail materials: ambientCG (CC0 1.0), fetched and cached at first use. - Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), 'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and 'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 (http://creativecommons.org/licenses/by/4.0/); the meshes, textures and impostor cards here are derivative works and carry the same licence.",
+   "approximate_bytes": 5478955,
+   "sha256": "c4b3259e28ea0383d6612813a3d0d9d15a670b8158b8a8795012b666bc778d71",
+   "copyright": "Sources for the data this world was baked from.  - Terrain and road surface: generated procedurally by OpenGLContext (BSD-3-Clause). - Ground detail materials: ambientCG (CC0 1.0), fetched and cached at first use. - Ground cover plants: scans from Poly Haven (https://polyhaven.com/), CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/), which requires no attribution; the clumps and cards here are baked from them and are CC0 as well. - Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), 'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and 'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 (http://creativecommons.org/licenses/by/4.0/); the meshes, textures and impostor cards here are derivative works and carry the same licence.",
    "marker": "tileset.json",
    "needs": [
     "glisteel/forest-art"
@@ -80,14 +80,14 @@
    "url": "https://github.com/mcfletch/glisteel/releases/download/content-v1/glisteel-tidewater.tar.gz",
    "directory": "tidewater",
    "archive": "tar",
-   "approximate_bytes": 28560155,
-   "sha256": "68d8fd293c995cd9c815514549130518865b0aa711c47acee20aa8cec08b4c74",
-   "copyright": "Sources for the data this world was baked from.  - Terrain and road surface: generated procedurally by OpenGLContext (BSD-3-Clause). - Ground detail materials: ambientCG (CC0 1.0), fetched and cached at first use. - Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), 'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and 'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 (http://creativecommons.org/licenses/by/4.0/); the meshes, textures and impostor cards here are derivative works and carry the same licence.",
+   "approximate_bytes": 25824729,
+   "sha256": "f294f4d24e407d19bd5ee1fceb3f18c10648a4e9817e299b53fedef899d8ecb3",
+   "copyright": "Sources for the data this world was baked from.  - Terrain and road surface: generated procedurally by OpenGLContext (BSD-3-Clause). - Ground detail materials: ambientCG (CC0 1.0), fetched and cached at first use. - Ground cover plants: scans from Poly Haven (https://polyhaven.com/), CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/), which requires no attribution; the clumps and cards here are baked from them and are CC0 as well. - Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), 'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and 'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 (http://creativecommons.org/licenses/by/4.0/); the meshes, textures and impostor cards here are derivative works and carry the same licence.",
    "marker": "tileset.json",
    "needs": [
     "glisteel/forest-art"
    ],
-   "notes": "7.3 km, a lap; 1036 m of bridge, 774 m of causeway, 567 m of tunnel.",
+   "notes": "7.3 km, a lap; 3201 m of bridge, 1242 m of causeway, 525 m of tunnel.",
    "preview": "previews/tidewater.jpg"
   }
  ]

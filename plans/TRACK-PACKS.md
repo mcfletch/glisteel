@@ -1,10 +1,35 @@
 # Tracks as downloads, and more than one of them
 
-**Status: §1–§5 and §7 have landed. The four tracks bake from committed
-recipes, archive to 88.1 MB with one copy of the art, and the game offers them:
-Tracks → Get more says what each is, how big it is and whose it is, fetches it
-with the art it shares, and lists it beside a track baked by hand. §6 is the
-part that needs a release to exist, which is not something code does.**
+**Status: all of it has landed. The four tracks bake from committed recipes,
+archive to 90.0 MB with one copy of the art, and the game offers them: Tracks →
+Get more says what each is, how big it is and whose it is, fetches it with the
+art it shares, and lists it beside a track baked by hand. `./release-assets.py`
+is the whole of §6 — bake, archive, digest, registry, install here, push there.**
+
+Four things were found by installing a release before publishing one, and all
+of them are fixed:
+
+- **A track's art landed beside the track rather than under it**, so a fetched
+  Ashdown drove through a world with no trees — the tileset names
+  `trees/fir.npz`, which resolves against the track's own root. The registry
+  gave the art pack a `directory` of its own, which is what the engine did with
+  it. `needs` now means "unpacks *into* the pack that needs it"
+  (`fetch.wanted_for`, `store.directory_for(pack, within=...)`), which is what
+  this plan said all along and what one download and four extractions is.
+- **The archives were not reproducible.** Entry timestamps were fixed and the
+  gzip container's own was not, so the same content gave a different digest
+  every build. The writer is the engine's now
+  (`OpenGLContext.contentpacks.archive.write`) and the digest is a function of
+  the content: two builds of the launch set, minutes apart, agree.
+- **The download screen quoted the track's own size**, so a player agreeing to
+  Ashdown at 22 MB was charged 54. It quotes the whole set the choice pulls in
+  and names what comes with it, which is what §5 said it did.
+- **A world's credit was cut to 600 characters** on its way into the registry,
+  which landed each track's entry ending mid-attribution — the last work named
+  and the person who made it not. Most of the art in a track is somebody
+  else's under CC-BY and the credit travelling with it is the condition of
+  using it, so `_world_credit` carries the notice at the length the bake wrote
+  it. The four shipped tracks credit 779 characters' worth.
 
 A release should offer a player several tracks that feel unlike each other,
 without any of them being in the wheel. This plan covers what a track costs,
@@ -124,12 +149,18 @@ Four tracks, each leaning on a different part of what is already built. All
 four are baked from committed recipes and **measured**, not projected; "unique"
 is what is left after the shared art pack.
 
-| track | km | shape | unique | what carries the road |
+| track | km | shape | archived | what carries the road |
 |---|---|---|---|---|
-| **Ashdown** | 7.19 | lap | 30.4 MB | 895 m bridge, 289 m bore, 251 m causeway |
-| **Tidewater** | 7.29 | lap | 39.2 MB | 1035 m bridge, 566 m bore, **773 m causeway** |
-| **Beacon** | 3.02 | **open** | 11.9 MB | 1053 m bridge, **1774 m bore** |
-| **Steelbowl** | 1.70 | lap | 6.5 MB | none |
+| **Ashdown** | 7.2 | lap | 22.0 MB | 895 m bridge, 289 m bore, 252 m causeway |
+| **Tidewater** | 7.3 | lap | 22.2 MB | 3201 m bridge, 525 m bore, **1242 m causeway** |
+| **Beacon** | 3.0 | **open** | 8.8 MB | 1011 m bridge, **1751 m bore** |
+| **Steelbowl** | 1.7 | lap | 5.0 MB | none |
+
+Measured from the archives `./release-assets.py` built on 2026-09-17; the
+shared art is 31.6 MB archived and the cars 0.5 MB, for 90.0 MB in all. The
+structure lengths moved from the earlier bake recorded above — Tidewater in
+particular carries three times the viaduct it did — because the generation
+under them has moved; the recipes have not.
 
 **Ashdown** is the home circuit and the world every other measurement here is
 read against: the shipped defaults, written down.
@@ -147,8 +178,8 @@ nothing shipped has exercised.
 **Steelbowl** is `maximum_bank` near its ceiling with `variety` at zero and
 `structures` off — a short banked oval, and the cheapest thing in the release.
 
-With the 25.5 MB art pack that is **113.6 MB** for all four, and a player who
-wants one track downloads between 32 MB and 65 MB.
+That is **90.0 MB** for all four, and a player who wants one track downloads
+between 37 MB and 54 MB — the track, and the art it shares.
 
 The recipes are `glisteel/tracks/*.toml`, read by `glisteel-bake --recipe`.
 
@@ -164,7 +195,7 @@ The recipes are `glisteel/tracks/*.toml`, read by `glisteel-bake --recipe`.
    path changes: both unpack into the same directory, so `trees/...` in a tile
    resolves as it always did.
 3. ✅ **Track pictures.** Four thumbnails, driven and captured, 87 KB in total
-   against the 88 MB they describe. They ship in the wheel, because a chooser
+   against the 90 MB they describe. They ship in the wheel, because a chooser
    needs them *before* it downloads anything.
 4. ✅ **`glisteel/packs.json`** and `glisteel/previews/*.jpg`, written by
    `tools/release_content.py` **from the archives it built** — so no digest can
@@ -172,7 +203,7 @@ The recipes are `glisteel/tracks/*.toml`, read by `glisteel-bake --recipe`.
    and four tracks each naming the art in `needs`.
 
    The registry is also published as a **bundle** — `glisteel-registry.zip`,
-   the JSON and the four thumbnails, 89 KB against the 88 MB it describes. That
+   the JSON and the four thumbnails, 89 KB against the 90 MB it describes. That
    is what an installed game is pointed at to be offered content it never
    shipped with: fetching one gives a chooser every pack's title, size, terms
    and picture while downloading none of the content, so a later set of tracks
@@ -185,11 +216,19 @@ The recipes are `glisteel/tracks/*.toml`, read by `glisteel-bake --recipe`.
    bare ground. A download the player stopped is said differently from one that
    failed. The bar is `OpenGLContext.ui.ProgressBar`, written in the engine
    rather than here: a capability any game would want.
-6. **The release workflow** — bake every recipe, take each picture, archive,
-   digest, and upload to a `content-v1` tag. Reproducibility is worth having
-   here: the archive should be built with fixed timestamps and sorted entries so
-   a rebake at the same tag gives the same digest. Whether the bake itself is
-   byte-deterministic at a given seed needs checking before that is claimed.
+6. ✅ **The release workflow** — `./release-assets.py`: bake every recipe into
+   one directory per track plus `_art`, archive each, digest it, write
+   `glisteel/packs.json` and the registry bundle from what was built, and with
+   `--push` attach the lot to the `content-v1` tag through the GitHub CLI.
+   `--install` puts it in this machine's store instead, which is what makes the
+   whole thing testable without publishing anything.
+
+   The archives are reproducible: two builds of the same bake give the same
+   digests. The bake is too — Steelbowl baked twice from its recipe archives to
+   one digest — with one thing between it and a rebuild from a tag: the
+   manifest records the day it was baked, so the same recipe on a later date is
+   a different byte. What a rebuild can therefore show today is that the recipe
+   produces the same world, not that it produces the same file.
 7. ✅ **`glisteel/assets/`** (792 KB of cars) is the **base pack** — the
    — digested, and fetched before the menu on a first run.
    `content.art_directory()` reads the pack once it is here and the copy in the

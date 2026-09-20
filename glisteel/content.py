@@ -1,7 +1,8 @@
 """What this game offers to download, and what of it is already here.
 
 glisteel ships its code and fetches its data. A baked track is 22 MB and the
-four this release carries are 88 MB together, which is not a wheel and not
+four this release carries are 90 MB together with the art they share, which
+is not a wheel and not
 something an index should be asked to serve; the archives are attached to a
 GitHub release and fetched from there. The car the player drives is the same
 story at a smaller size, so it is the **base pack** -- the one thing fetched
@@ -16,9 +17,9 @@ that arrived as a pack reaches the chooser beside one baked by hand.
     >>> for pack in content.missing():                     # doctest: +SKIP
     ...     print(pack.title, pack.human_size())
 
-``tools/release_content.py`` writes :data:`CATALOG_PATH` from the archives it
-builds, so every digest in it is of a file that was built rather than of one
-somebody hoped for.
+``release-assets.py`` writes :data:`CATALOG_PATH` from the archives it builds,
+so every digest in it is of a file that was built rather than of one somebody
+hoped for.
 """
 
 from __future__ import annotations
@@ -33,8 +34,8 @@ from OpenGLContext.contentpacks import ContentPack, ContentStore, catalog, fetch
 log = logging.getLogger(__name__)
 
 __all__ = ['BASE', 'CATALOG_PATH', 'NAMESPACE', 'art_directory', 'installed',
-           'installed_tracks', 'missing', 'needed_to_start', 'registry',
-           'store', 'track_packs']
+           'installed_tracks', 'missing', 'needed_to_start', 'offered',
+           'registry', 'store', 'track_packs', 'wanted_for']
 
 #: The registry shipped with the game.
 CATALOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -126,13 +127,28 @@ def installed_tracks(store: ContentStore | None = None) -> list[Any]:
     return found
 
 
-def wanted_for(pack: ContentPack) -> list[ContentPack]:
-    """``pack`` and everything it is incomplete without.
+def offered(store: ContentStore | None = None) -> list[ContentPack]:
+    """What a download screen puts in front of a player.
+
+    The packs that are a choice and are not here yet. The art every track
+    shares is not one of them: it arrives with whichever track names it, and
+    unpacks under that track rather than into a place of its own.
+    """
+    where = store if store is not None else globals()['store']()
+    return list(where.missing(catalog.offered(registry())))
+
+
+def wanted_for(pack: ContentPack,
+               store: ContentStore | None = None) -> list[ContentPack]:
+    """What choosing ``pack`` has to fetch: it, and what it needs.
 
     What a user is asked to consent to: fetching a track without the art it
-    shares leaves them looking at bare ground.
+    shares leaves them looking at bare ground. Asked within the choice, since
+    the art lands under each track that needs it -- so a second track fetches
+    the art again, from the download cache rather than from the network.
     """
-    return list(catalog.with_needed(pack, registry()))
+    where = store if store is not None else globals()['store']()
+    return list(fetch.wanted_for(pack, registry(), where))
 
 
 def art_directory(store: ContentStore | None = None) -> str:

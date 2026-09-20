@@ -249,8 +249,8 @@ needs Python installed:
   it asks the machine for are resolved.
 
 **No world travels with either, and neither do the cars.** A baked track is
-22 MB and the four this release carries are 88 MB together, which is not a
-wheel: the archives are attached to a GitHub release and fetched from the game.
+22 MB and the four this release carries are 90 MB together with the art they
+share, which is not a wheel: the archives are attached to a GitHub release and fetched from the game.
 So is the art the car is drawn with, which is why a first run fetches something
 before it shows a menu — one download, asked for, rather than a stall at the
 first frame that wants a model.
@@ -261,13 +261,21 @@ is and whose it is, and fetches the one chosen along with the art it shares:
 | | | |
 |---|---|---|
 | **Ashdown** | 22 MB | 7.2 km lap; 895 m of viaduct, 289 m of bore |
-| **Tidewater** | 27 MB | 7.3 km lap with the valleys flooded; 773 m of causeway |
-| **Beacon** | 8 MB | 3.0 km hill climb, point to point; more than half inside the hill |
+| **Tidewater** | 22 MB | 7.3 km lap with the valleys flooded; 773 m of causeway |
+| **Beacon** | 9 MB | 3.0 km hill climb, point to point; more than half inside the hill |
 | **Steelbowl** | 5 MB | 1.7 km banked oval, nothing carried |
 
-Each needs `glisteel/forest-art` (25 MB), which is the same art in every track
-and is therefore downloaded once. `OPENGLCONTEXT_CONTENT` points a packaged,
-offline or CI run at a local copy instead, and nothing is fetched.
+Each needs `glisteel/forest-art` (32 MB), which is the same art in every track:
+it is downloaded once and unpacked under each track that needs it, since every
+path inside a baked world resolves against that world's own root.
+`OPENGLCONTEXT_CONTENT` points a packaged, offline or CI run at a local copy
+instead, and nothing is fetched.
+
+Building that content is one command, `./release-assets.py`: it bakes every
+recipe, archives it, writes `glisteel/packs.json` from the archives it built,
+and — with `--push` — attaches them to the release the registry names.
+`--install` puts them straight into this machine's store, which is how a content
+release is driven before it is a release.
 
 Or bake your own, which is what [glisteel-editor](https://github.com/mcfletch/glisteel-editor)
 is for:

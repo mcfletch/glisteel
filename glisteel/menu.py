@@ -243,25 +243,29 @@ def _how(name: Any) -> str:
 def download_screen(packs: Sequence[Any],
                     job: Any = None,
                     on_fetch: Callable[[Any], None] | None = None,
-                    on_cancel: Callable[[], None] | None = None) -> Panel:
+                    on_cancel: Callable[[], None] | None = None,
+                    wanted: Callable[[Any], Sequence[Any]] | None = None) -> Panel:
     """What is on offer, what it costs, and whose it is.
 
-    A track is 22 MB and the set is 88 MB, so none of it ships in the wheel.
+    A track is 22 MB and the set is 90 MB, so none of it ships in the wheel.
     This screen is where a player agrees to a download: the size before it
     starts, the terms the content carries, and -- since a track is incomplete
     without the art it shares -- the size of *everything* the choice pulls in
     rather than of the one pack named.
 
-    ``packs`` is what is missing; an empty one is :data:`ALL_HERE` rather than
-    an empty screen. ``job`` is a
+    ``packs`` is what is missing and ``wanted(pack)`` is the whole set choosing
+    one pulls in -- the size shown is that set's, since a track's art is
+    fetched with it and a player shown the track's own size alone would be told
+    the wrong number. Without it a pack answers for itself. An empty ``packs``
+    is :data:`ALL_HERE` rather than an empty screen. ``job`` is a
     :class:`~OpenGLContext.contentpacks.fetch.FetchJob` under way, and the
     screen is rebuilt from it as it is polled.
     """
     packs = list(packs)
     chooser = Select(name='offered', options=[one.key for one in packs],
                      value=packs[0].key if packs else None)
-    caption = Label(text=_offer(packs[0]) if packs else ALL_HERE, wrap=True,
-                    name='offer')
+    caption = Label(text=_offer(packs[0], wanted) if packs else ALL_HERE,
+                    wrap=True, name='offer')
     # A bar and the words: the bar is how far, the words are which pack and
     # what went wrong. Neither says the other's half.
     progress = ProgressBar(fraction=_fraction(job), text=_progress(job),
@@ -271,14 +275,14 @@ def download_screen(packs: Sequence[Any],
     fetch.enabled = bool(packs) and not _running(job)
 
     def picked(widget: Any) -> None:
-        caption.text = _offer(_pack_named(packs, widget.value))
+        caption.text = _offer(_pack_named(packs, widget.value), wanted)
     chooser.on_change = picked
 
-    def wanted(_widget: Any = None) -> None:
+    def start(_widget: Any = None) -> None:
         chosen = _pack_named(packs, chooser.value)
         if chosen is not None and on_fetch is not None:
             on_fetch(chosen)
-    fetch.on_activate = wanted
+    fetch.on_activate = start
     if on_cancel is not None:
         cancel.on_activate = lambda _widget=None: on_cancel()
 
@@ -296,15 +300,30 @@ def _pack_named(packs: Sequence[Any], key: Any) -> Any:
     return packs[0] if packs else None
 
 
-def _offer(pack: Any) -> str:
-    """One pack as a player reads it before agreeing to fetch it."""
+def _offer(pack: Any, wanted: Callable[[Any], Sequence[Any]] | None = None
+           ) -> str:
+    """One choice as a player reads it before agreeing to fetch it.
+
+    The size is the whole set the choice pulls in, and anything else in that
+    set is named: a download screen that says 22 MB and fetches 54 has not
+    asked the question it appears to be asking.
+    """
     if pack is None:
         return ALL_HERE
-    said = ['%s — %s' % (pack.title, pack.human_size())]
+    whole = list(wanted(pack)) if wanted is not None else [pack]
+    said = ['%s — %s' % (pack.title, _size(whole))]
     if pack.notes:
         said.append(pack.notes)
+    for one in whole:
+        if one.key != pack.key:
+            said.append('with %s — %s' % (one.title, one.human_size()))
     said.append(pack.copyright)
     return '\n'.join(said)
+
+
+def _size(packs: Sequence[Any]) -> str:
+    """What a set of packs costs, as the user reads it."""
+    return '%d MB' % (round(sum(one.approximate_bytes for one in packs) / 1e6),)
 
 
 def _fraction(job: Any) -> float:
