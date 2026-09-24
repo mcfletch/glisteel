@@ -32,7 +32,7 @@ from glisteel.assist import STRENGTH, Straighten
 from glisteel.camera import VIEWS, CameraPose, ChaseCamera
 from glisteel.car import Car, CarSpec
 from glisteel.race import Collisions, OffRoad, RaceTiming, off_course
-from glisteel.reflections import Reflections
+from glisteel.reflections import Reflections, world_is_zoned
 from glisteel.run import COUNTDOWN, FINISHED, Run
 from glisteel.sound import Soundtrack
 from glisteel.traffic import IN_THE_WAY
@@ -242,8 +242,9 @@ class Session:
         position, heading = self._grid_placement()
         self.car = Car(world.physics, spec or CarSpec(), position=position,
                        heading=heading)
-        #: What the car is lit and reflected by, which follows the road.
-        self.reflections = Reflections(course)
+        #: What the car is lit and reflected by, which follows the road -- or,
+        #: in a world whose places carry zones, the sky those zones stand in.
+        self.reflections = Reflections(course, zoned=world_is_zoned(world))
         self.timing = RaceTiming(course)
         self.watch = OffRoad(course)
         self.crashes = Collisions()

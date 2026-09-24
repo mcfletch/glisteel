@@ -183,3 +183,36 @@ def _horizon(image):
 
 def _underfoot(image):
     return float(image[-max(image.shape[0] // 8, 1):].mean())
+
+
+class TestAWorldWithZones:
+    """A world whose places carry zones is lit by them, over the open sky."""
+
+    def _watcher(self):
+        applied = []
+        return applied, reflections.Reflections(ROAD, apply=applied.append,
+                                                zoned=True)
+
+    def test_it_hands_over_the_open_sky_once(self) -> None:
+        applied, watching = self._watcher()
+        for station in (100.0, 400.0, 750.0, 100.0):
+            watching.update((0.0, 0.0, station))
+        assert len(applied) == 1
+        assert np.array_equal(applied[0], reflections.panorama(reflections.OPEN))
+        assert watching.context == reflections.OPEN
+
+    def test_a_restart_hands_it_over_again(self) -> None:
+        applied, watching = self._watcher()
+        watching.update((0.0, 0.0, 100.0))
+        watching.context = None
+        watching.update((0.0, 0.0, 100.0))
+        assert len(applied) == 2
+
+    def test_a_world_is_zoned_when_its_tiles_carry_zones(self) -> None:
+        class Terrain:
+            zones = object()
+
+        class World:
+            terrain = Terrain()
+        assert reflections.world_is_zoned(World())
+        assert not reflections.world_is_zoned(object())

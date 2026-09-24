@@ -19,9 +19,14 @@ rather than a picture, and because :class:`~OpenGLContext.passes.ibl.IBLProbe`
 convolves what it is given -- the sharpest thing it keeps is the shape of the
 light, not its detail.
 
-Where a captured panorama would be better -- the tunnel really being *this*
-tunnel -- it drops into the same place: what the renderer is handed is an array,
-and where it came from is this module's business alone.
+**A world baked with zones does this itself.** Its bores, causeways, bridges
+and wooded stretches each carry an ``OGLC_zone`` whose environment is captured
+from the road inside it, so the tunnel really is *this* tunnel, and the engine
+cross-fades between them per fragment rather than for the whole scene at once
+(``docs/zones.rst`` in OpenGLContext). Such a world is given ``zoned=True``,
+and then this hands the renderer the open sky once, for everywhere no zone
+covers, and leaves the places to the zones. A world without them -- one baked
+before there were zones, or with ``--no-places`` -- is lit as described above.
 """
 from __future__ import annotations
 
@@ -35,7 +40,7 @@ from OpenGLContext.passes import ibl
 
 __all__ = ['CONTEXTS', 'FOREST', 'TUNNEL', 'VIADUCT', 'OPEN',
            'Reflections', 'context_at', 'panorama', 'mix_at', 'blended',
-           'TRANSITION']
+           'TRANSITION', 'world_is_zoned']
 
 #: The sorts of place a road runs through, as far as what it reflects goes.
 FOREST = 'forest'
@@ -175,9 +180,13 @@ class Reflections:
     crosses a handful of portals, not a thousand frames.
     """
 
-    def __init__(self, course: Any, apply: Callable[[Any], Any] | None = None) -> None:
+    def __init__(self, course: Any, apply: Callable[[Any], Any] | None = None,
+                 zoned: bool = False) -> None:
         self.course = course
         self.apply = apply if apply is not None else _register
+        #: Whether the world's zones light its places, leaving the scene's own
+        #: environment the open sky everywhere.
+        self.zoned = bool(zoned)
         #: Which place the car is most in, or None before the first update.
         self.context: str | None = None
         self._mix: dict[str, float] = {}
@@ -190,6 +199,13 @@ class Reflections:
         one pass over its centreline, and nothing else happens unless the
         mixture of places around the car has moved by :data:`STEP`.
         """
+        if self.zoned:
+            if self.context == OPEN:
+                return None
+            self._mix = {OPEN: 1.0}
+            self.apply(panorama(OPEN))
+            self.context = OPEN
+            return OPEN
         if self.course is None:                  # pragma: no cover - no road
             return None
         mix = mix_at(self.course, self.course.station_of(position))
@@ -217,6 +233,17 @@ class Reflections:
             return 1.0
         was, now = _level(self._mix), _level(mix)
         return abs(now - was) / max(min(was, now), 1e-6)
+
+
+def world_is_zoned(world: Any) -> bool:
+    """Whether a world carries zones for its places, which then light them.
+
+    A baked world's zones arrive with its tiles
+    (:attr:`~OpenGLContext.scenegraph.tilesterrain.TilesTerrain.zones`); a
+    world built from a course has no tiles and no zones.
+    """
+    terrain = getattr(world, 'terrain', None)
+    return getattr(terrain, 'zones', None) is not None
 
 
 def _register(environment: np.ndarray) -> None:
