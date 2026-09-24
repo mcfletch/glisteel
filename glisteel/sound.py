@@ -258,8 +258,7 @@ class Soundtrack:
         self.motor = _looping(motor_clip(sample_rate))
         self.tyres = _looping(tyre_clip(sample_rate))
         self.wind = _looping(wind_clip(sample_rate))
-        #: Hitting something: silent until :meth:`hit` arms it, and armed for
-        #: exactly one frame so that a bang plays once rather than every frame.
+        #: Hitting something: silent until :meth:`hit` plays it.
         self.impact = AudioSource(loop=False, autoplay=False, gain=0.0)
         self.impact.useClip(impact_clip(sample_rate))
         #: What to put in the scene.
@@ -285,19 +284,15 @@ class Soundtrack:
         self.motor.playbackRate = self.sound.motor.rate
         self.tyres.gain = self.sound.tyres.gain
         self.wind.gain = self.sound.wind.gain
-        # Armed for one frame and no more. By the next one the emitter has
-        # started it and holds a playing voice, which it will not restart; a
-        # source left armed would bang again the moment that voice ended.
-        self.impact.autoplay = False
 
     def hit(self, closing: float) -> float:
         """Bang, at a level the closing speed decides. Returns that level.
 
-        Nought for a touch too gentle to be a crash, in which case nothing is
-        armed and nothing sounds.
+        Nought for a touch too gentle to be a crash, in which case nothing
+        sounds.
         """
         gain = self.sound.hit(closing)
         if gain > 0.0:
             self.impact.gain = gain
-            self.impact.autoplay = True
+            self.impact.play()
         return gain

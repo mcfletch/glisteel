@@ -314,8 +314,7 @@ class TestItPlaysThroughTheEngine:
         assert engine.active_voices == 3
 
     def test_an_impact_sounds_once_rather_than_every_frame(self, engine):
-        """It is armed for exactly one frame. A source left armed would bang
-        again the moment its voice ended."""
+        """Once its voice has ended it stays quiet until the next crash."""
         from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         self.frame(track, engine, _Car(speed=30.0), 0.0)
@@ -327,12 +326,36 @@ class TestItPlaysThroughTheEngine:
             self.frame(track, engine, _Car(speed=30.0), step * FRAME)
         assert engine.active_voices == 3
 
-    def test_a_nudge_arms_nothing(self, engine):
+    def test_a_crash_is_heard_in_the_order_a_session_runs(self, engine):
+        """The physics step reports the crash, the soundtrack updates after
+        the steps, and the render pass drives the node after that."""
+        from glisteel.sound import Soundtrack
+        track = Soundtrack(sample_rate=8000)
+        self.frame(track, engine, _Car(speed=30.0), 0.0)
+        track.hit(15.0)
+        self.frame(track, engine, _Car(speed=30.0), FRAME)
+        assert engine.active_voices == 4, 'the bang did not sound'
+
+    def test_a_second_crash_is_heard_too(self, engine):
+        from glisteel.sound import Soundtrack
+        track = Soundtrack(sample_rate=8000)
+        track.hit(15.0)
+        self.frame(track, engine, _Car(speed=30.0), 0.0)
+        for step in range(1, 400):
+            self.frame(track, engine, _Car(speed=30.0), step * FRAME)
+            engine.mixer.mix(int(FRAME * 8000))
+        assert engine.active_voices == 3
+        track.hit(15.0)
+        self.frame(track, engine, _Car(speed=30.0), 400 * FRAME)
+        assert engine.active_voices == 4, 'the second bang did not sound'
+
+    def test_a_nudge_is_silent(self, engine):
         from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         self.frame(track, engine, _Car(speed=30.0), 0.0)
         assert track.hit(0.2) == 0.0
-        assert not track.impact.autoplay
+        self.frame(track, engine, _Car(speed=30.0), FRAME)
+        assert engine.active_voices == 3
 
     def test_silence_is_a_valid_backend(self):
         """A machine with no device runs this unchanged: the nodes traverse,
