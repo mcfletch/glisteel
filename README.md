@@ -829,7 +829,7 @@ birdsong, water — is recorded, and that is a content pack.
 | Motor | pitch is road speed: one reduction gear and no clutch, so there are no shifts to hear. Quiet coasting, loud under power |
 | Tyres | rolling with speed, and **scrubbing much louder** when the car lets go. Silent with the wheels off the ground |
 | Wind | speed squared, which is most of what makes speed feel like speed |
-| Impacts | every contact, at the closing speed the crash rule already measures. A scrape is quieter than a crash, and a nudge at walking pace is nothing |
+| Impacts | every contact with a car, and each blow against a parapet, portal or tree hard enough to write down, at the closing speed the physics measures. A scrape is quieter than a crash, and a nudge at walking pace is nothing |
 
 **It reads the car rather than being told about it.** `omi_physics` computes
 `Wheel.slip` — the sideways speed at the contact patch — for its own reasons,

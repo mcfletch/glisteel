@@ -14,6 +14,7 @@ from glisteel import scenarios
 from glisteel.driver import ALONGSIDE
 from glisteel.run import COUNTDOWN
 from glisteel.session import (
+    BUMP_AGAIN,
     MAXIMUM_CATCHUP,
     PHYSICS_STEP,
     RACE_LAPS,
@@ -473,6 +474,19 @@ def _touching(session, other):
     pair = {session.car.body, session.world.traffic.body_of(other)}
     return any({contact.a, contact.b} == pair
                for contact in session.world.physics.contacts)
+
+
+def _listening(session):
+    """The closing speeds the soundtrack is asked to bang at, as it plays them."""
+    heard: list = []
+    playing = session.sound.hit
+
+    def hit(closing):
+        heard.append(float(closing))
+        return playing(closing)
+
+    session.sound.hit = hit
+    return heard
 
 
 class TestHittingACar:
@@ -945,6 +959,31 @@ class TestARunSaysWhenTheCarHitTheWorld:
         session._note_a_bump(30.0)
         assert session.ended is None
 
+    def test_it_is_heard(self) -> None:
+        session = _session()
+        heard = _listening(session)
+        session.advance(FRAME)
+        session._note_a_bump(18.0)
+        assert heard == [18.0]
+
+    def test_and_heard_once_rather_than_on_every_step_of_it(self) -> None:
+        session = _session()
+        heard = _listening(session)
+        session.advance(FRAME)
+        for _ in range(60):
+            session._note_a_bump(18.0)
+        assert heard == [18.0]
+
+    def test_a_restarted_race_writes_down_its_first_bump(self) -> None:
+        """What was held off in the last race says nothing about this one."""
+        session = _session()
+        kept = self._kept(session)
+        session.advance(FRAME)
+        session._note_a_bump(18.0)
+        session.restart()
+        session._note_a_bump(18.0)
+        assert [name for name, _ in kept] == ['hit-the-world'] * 2
+
     def test_one_bump_is_one_line_and_not_sixty_a_second(self) -> None:
         """A car wedged against a wall is closing on it on every step."""
         session = _session()
@@ -1099,6 +1138,19 @@ touching_it_does_not`: two cars going nearly the same speed meet at the
         kept = self._touch(session)
         touches = [name for name, _ in kept if name == 'hit-a-car']
         assert len(touches) <= 2, '%d lines for one touch' % (len(touches),)
+
+    def test_a_second_touch_after_a_clear_gap_is_written_down_too(self) -> None:
+        """The hold-off runs on the drive's clock, not on the steps the two
+        cars happen to be in contact, so a separate touch later on is its own
+        line."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        other = _traffic_at(session, session.across(), station=300.0)
+        kept = TestWritingDownACrash._kept(session)
+        session._note_a_touch(other, 3.0)
+        _drive(session, BUMP_AGAIN * 2.0)
+        session._note_a_touch(other, 3.0)
+        assert [name for name, _ in kept].count('hit-a-car') == 2
 
     def test_and_a_crash_is_still_a_crash_rather_than_a_touch(self) -> None:
         session = _session(traffic=1)

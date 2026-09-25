@@ -39,7 +39,8 @@ from glisteel.traffic import IN_THE_WAY
 
 log = logging.getLogger(__name__)
 
-__all__ = ['Controller', 'Readings', 'Result', 'Session', 'AHEAD_REACH',
+__all__ = ['Controller', 'HoldOff', 'Readings', 'Result', 'Session',
+           'AHEAD_REACH',
            'BUMPED', 'BUMP_AGAIN', 'MAXIMUM_CATCHUP', 'PHYSICS_STEP',
            'RACE_LAPS', 'SAMPLE_SECONDS', 'STUCK_SECONDS', 'STUCK_SPEED']
 
@@ -130,6 +131,35 @@ RACE_LAPS = 1
 #: The viewport a session assumes until it is told otherwise. Streaming needs a
 #: height to measure screen-space error against and an aspect to cull with.
 VIEWPORT = (1280, 720)
+
+
+class HoldOff:
+    """At most one of something in any ``seconds`` of the drive's clock.
+
+    :meth:`tick` runs it down on every physics step whether or not anything
+    happened on that step, so a second event after a clear gap is let through
+    however long the first one lasted.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = float(seconds)
+        #: Seconds until the next one is let through; nought when it would be.
+        self.left = 0.0
+
+    def tick(self, dt: float) -> None:
+        """Let ``dt`` seconds of the drive pass."""
+        self.left = max(self.left - float(dt), 0.0)
+
+    def take(self) -> bool:
+        """True, and hold off the next one, if one is let through now."""
+        if self.left > 0.0:
+            return False
+        self.left = self.seconds
+        return True
+
+    def clear(self) -> None:
+        """Let the next one through, as at the start of a race."""
+        self.left = 0.0
 
 
 def _rounded(value: Any, places: int = 2) -> float | None:
@@ -266,8 +296,10 @@ class Session:
         #: run nobody asked to record pays a call.
         self.telemetry: Any = NOT_RECORDING
         self._sampled = 0.0
-        self._bumped = 0.0
-        self._touched = 0.0
+        #: One line in the journal per blow against the world, and one per
+        #: car touched, rather than one per step of the contact.
+        self._bumped = HoldOff(BUMP_AGAIN)
+        self._touched = HoldOff(BUMP_AGAIN)
         self._settle()
 
     # -- the state of the run --------------------------------------------------
@@ -566,8 +598,10 @@ class Session:
             # answered by the step that resolved it, and a frame is several
             # steps. Asked once a frame instead, a crash registers or does not
             # according to where the frames happened to fall.
+            self._bumped.tick(PHYSICS_STEP)
+            self._touched.tick(PHYSICS_STEP)
             self._watch_for_a_crash()
-            self._watch_for_a_bump(PHYSICS_STEP)
+            self._watch_for_a_bump()
             self._sample_the_drive(PHYSICS_STEP, wanted)
             self._accumulated -= PHYSICS_STEP
         self.car.follow(elapsed)
@@ -627,8 +661,12 @@ class Session:
         self.run.restart()
         self._stuck_for = 0.0
         # Nothing of the last race carries into this one: a part-step left over
-        # would be simulated the moment the new one starts.
+        # would be simulated the moment the new one starts, and a hold-off or
+        # a sample clock would pass over the new race's first seconds.
         self._accumulated = 0.0
+        self._sampled = 0.0
+        self._bumped.clear()
+        self._touched.clear()
         self.reflections.context = None
         self._settle()
 
@@ -726,7 +764,7 @@ class Session:
         throttle, brake, steer = self.driver.controls(self, dt)
         return float(throttle), float(brake), self.assist.steer(self, steer)
 
-    def _watch_for_a_bump(self, dt: float) -> None:
+    def _watch_for_a_bump(self) -> None:
         """Note the car meeting the world: a parapet, a portal, a tree.
 
         :meth:`_watch_for_a_crash` asks about the traffic, because what ends a
@@ -739,7 +777,6 @@ class Session:
         The wheels are on the road on every step and the body is not, so a
         blow to the body is something beside the road rather than the road.
         """
-        self._bumped = max(self._bumped - float(dt), 0.0)
         if self.run.over:
             return
         traffic = self.world.traffic
@@ -752,10 +789,14 @@ class Session:
         self._note_a_bump(closing)
 
     def _note_a_bump(self, closing: float) -> None:
-        """Write down one blow against the world, at most one a moment."""
-        if float(closing) < BUMPED or self._bumped > 0.0:
+        """Write down and sound one blow against the world, at most one a moment.
+
+        Heard at the same rate it is written down, since a car held against a
+        wall is closing on it on every step and one bang is what it made.
+        """
+        if float(closing) < BUMPED or not self._bumped.take():
             return
-        self._bumped = BUMP_AGAIN
+        self.sound.hit(closing)
         index, off = self.course.nearest(self.car.position)
         self.telemetry.mark(
             'hit-the-world', closing=round(float(closing), 1),
@@ -876,20 +917,15 @@ class Session:
     def _note_a_touch(self, other: Any, closing: float) -> None:
         """Write down one car met and driven away from, at most one a moment.
 
-        **A contact the run survives is still a contact**, and until it was
-        written down nothing anywhere said one had happened: what ends a run is
-        :class:`~glisteel.race.Collisions`' rule, and everything under it left
-        the reader of a recorded lap watching the car bounce off somebody with
-        a journal that mentioned no such thing. Two cars stay in contact for as
-        long as they are touching, so this is held off in the same way a blow
+        A contact under :class:`~glisteel.race.Collisions`' rule for ending a
+        run is written as ``hit-a-car``, so a recorded lap says the car met
+        somebody whether or not the run ended there. Two cars stay in contact
+        for as long as they are touching, so this is held off as a blow
         against the world is (:meth:`_note_a_bump`) rather than written on
         every step of the scrape.
         """
-        self._touched = max(self._touched - PHYSICS_STEP, 0.0)
-        if self._touched > 0.0:
-            return
-        self._touched = BUMP_AGAIN
-        self._mark_the_car('hit-a-car', other, closing)
+        if self._touched.take():
+            self._mark_the_car('hit-a-car', other, closing)
 
     def _mark_the_car(self, name: str, other: Any, closing: float) -> None:
         """Write down what the car met, on the step it met it.
