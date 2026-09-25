@@ -458,7 +458,7 @@ class TestAskingForAWorldThatIsNotThere:
     def test_it_raises_something_ordinary_code_can_catch(self, tmp_path) -> None:
         from glisteel.world import RaceWorld
         missing = str(tmp_path / 'nowhere' / 'tileset.json')
-        with pytest.raises(Exception) as caught:  # noqa: B017 -- the assertion
+        with pytest.raises(Exception) as caught:
             RaceWorld(missing)
         # Which is the whole point: SystemExit is a BaseException and would
         # pass straight through the caller below.

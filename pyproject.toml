@@ -85,6 +85,11 @@ select = [
     "UP",   # pyupgrade
     "BLE",  # no blind except
     "S110", # no silent try/except/pass
+    "S112", # no silent try/except/continue
+    "TRY400",  # an error logged from an except block carries its traceback
+    "RUF012",  # a mutable class attribute is declared a ClassVar
+    "RUF100",  # no noqa that silences nothing
+    "S102", "S202", "S301", "S307", "S310",  # no exec, unchecked tar extraction, pickle, eval or unchecked URL scheme
     "PGH003", "PGH004",  # a type: ignore or noqa names the codes it silences
     "PLE0604", "PLE0605",  # __all__ is a list or tuple of strings
 ]
@@ -93,11 +98,6 @@ ignore = [
     "E741",   # ambiguous name -- x/y/z read naturally as coordinates
     "UP031",  # percent formatting, as the engine uses throughout
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# The entry module sets the OPENGLCONTEXT_* environment the engine reads at
-# import time, so its imports deliberately are not all at the top.
-"glisteel/game.py" = ["E402"]
 
 [tool.mypy]
 # 3.12 rather than the 3.10 floor in ``requires-python``: numpy's own stubs use

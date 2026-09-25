@@ -40,44 +40,45 @@ from typing import Any
 
 import numpy as np
 
+# The engine reads these at import time, so they are set before it is imported.
 os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')
 os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')
 
-from OpenGLContext import quaternion, telemetry, testingcontext  # noqa: E402
-from OpenGLContext.events.systemtime import systemTime  # noqa: E402
-from OpenGLContext.scenegraph.scenegraph import SceneGraph  # noqa: E402
-from OpenGLContext.ui.overlay import OverlayMixin  # noqa: E402
-from OpenGLContext.video.recorder import RecordingMixin  # noqa: E402
-from OpenGLContext.viewer import environment  # noqa: E402
-from OpenGLContext.viewer.sceneviewer import ViewerContext  # noqa: E402
+from OpenGLContext import quaternion, telemetry, testingcontext
+from OpenGLContext.events.systemtime import systemTime
+from OpenGLContext.scenegraph.scenegraph import SceneGraph
+from OpenGLContext.ui.overlay import OverlayMixin
+from OpenGLContext.video.recorder import RecordingMixin
+from OpenGLContext.viewer import environment
+from OpenGLContext.viewer.sceneviewer import ViewerContext
 
-from glisteel import (  # noqa: E402
+from glisteel import (
     menu,
-    schemes,  # noqa: E402
+    schemes,
     tracks,
 )
-from glisteel.assist import STRENGTH as ASSIST  # noqa: E402
-from glisteel.camera import VIEWS  # noqa: E402
-from glisteel.car import CarSpec  # noqa: E402
-from glisteel.driver import (  # noqa: E402
-    PACE,  # noqa: E402
+from glisteel.assist import STRENGTH as ASSIST
+from glisteel.camera import VIEWS
+from glisteel.car import CarSpec
+from glisteel.driver import (
+    PACE,
     RACING_KPH,
     Autopilot,
     DriverStyle,
     StandIn,
 )
-from glisteel.hud import RaceHUD  # noqa: E402
-from glisteel.lighting import (  # noqa: E402
+from glisteel.hud import RaceHUD
+from glisteel.lighting import (
     BEAM_COLOUR,
     LAMP_COLOUR,
     Headlights,
 )
-from glisteel.options import DEFAULT_SIZE, Options, window_size  # noqa: E402
-from glisteel.preferences import Preferences  # noqa: E402
-from glisteel.records import Records  # noqa: E402
-from glisteel.session import RACE_LAPS, Session  # noqa: E402
-from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel  # noqa: E402
-from glisteel.world import RaceWorld  # noqa: E402
+from glisteel.options import DEFAULT_SIZE, Options, window_size
+from glisteel.preferences import Preferences
+from glisteel.records import Records
+from glisteel.session import RACE_LAPS, Session
+from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel
+from glisteel.world import RaceWorld
 
 log = logging.getLogger(__name__)
 BaseContext: Any = testingcontext.getInteractive()
