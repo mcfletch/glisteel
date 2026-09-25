@@ -15,7 +15,8 @@ handling without knowing anything about any of it:
     The library (:mod:`glisteel.tracks`) as a band of pictures, each with what
     the track is and the quickest lap driven on it.
 :func:`download_screen`
-    What is on offer, what it costs, whose it is, and how far a fetch has got.
+    What is on offer, what it costs, whose it is, and how far a fetch has got;
+    :class:`Downloads` keeps the download across openings of it.
 :func:`driving_screen`
     Which of the five ways of driving is in use, each in its own words.
 :func:`finish_screen`
@@ -30,20 +31,22 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from OpenGLContext.ui import contentscreen
+from OpenGLContext.ui.contentscreen import ContentScreen
 from OpenGLContext.ui.gallery import Carousel
 from OpenGLContext.ui.layout import Column, Row
 from OpenGLContext.ui.panel import Panel
 from OpenGLContext.ui.widgets import (
     Button,
     Label,
-    ProgressBar,
     Select,
     Separator,
     Spacer,
 )
 
 __all__ = ['ALL_HERE', 'BEST', 'FINISHED', 'GAME_TITLE', 'NEVER_DRIVEN',
-           'NO_TRACKS', 'STOPPED', 'download_screen', 'driving_screen',
+           'NO_TRACKS', 'STOPPED', 'Downloads', 'download_screen',
+           'driving_screen',
            'finish_screen', 'main_menu', 'track_screen']
 
 #: The name of the game, in exactly one place.
@@ -58,12 +61,12 @@ NO_TRACKS = 'No tracks yet — download one, or bake one with glisteel-bake'
 
 #: What the download screen says when there is nothing left to fetch. The
 #: ordinary end state of downloading things, not a failure.
-ALL_HERE = 'Everything is downloaded'
+ALL_HERE = contentscreen.ALL_HERE
 
 #: What it says about a download the player stopped. Distinct from a failure:
 #: nothing went wrong, and telling somebody their own decision was an error is
 #: a poor way to answer it.
-STOPPED = 'Stopped'
+STOPPED = contentscreen.STOPPED
 
 #: What stands where a best lap would go on a track never driven.
 NEVER_DRIVEN = '--:--.---'
@@ -217,18 +220,31 @@ def driving_screen(chosen: str | None = None,
         caption.text = _how(widget.value)
     picker.on_change = picked
 
-    def chose(_widget: Any = None) -> None:
-        if on_choose is not None:
-            on_choose(str(picker.value))
-    use.on_activate = chose
-    if on_cancel is not None:
-        cancel.on_activate = lambda _widget=None: on_cancel()
+    panel = Panel(title='Driving', scrim=True, modal=True,
+                  preferredColumns=MENU_COLUMNS,
+                  children=[Column(spacing=4, children=[
+                      picker, caption, Separator(top=6),
+                      Row(spacing=2, children=[use, Spacer(), cancel])])])
+    answered = False
 
-    return Panel(title='Driving', scrim=True, modal=True,
-                 preferredColumns=MENU_COLUMNS,
-                 children=[Column(spacing=4, children=[
-                     picker, caption, Separator(top=6),
-                     Row(spacing=2, children=[use, Spacer(), cancel])])])
+    def finish(chosen: bool) -> None:
+        # One answer per screen, and answering takes the screen away: what
+        # comes next is the menu, and this left under it would stand over the
+        # race once the menu was resumed.
+        nonlocal answered
+        if answered:
+            return
+        answered = True
+        panel.close(chosen)
+        if chosen and on_choose is not None:
+            on_choose(str(picker.value))
+        elif not chosen and on_cancel is not None:
+            on_cancel()
+
+    use.on_activate = lambda _widget: finish(True)
+    cancel.on_activate = lambda _widget: finish(False)
+    panel.on_close = lambda _closing: finish(False)
+    return panel
 
 
 def _how(name: Any) -> str:
@@ -241,120 +257,78 @@ def _how(name: Any) -> str:
 
 
 def download_screen(packs: Sequence[Any],
-                    job: Any = None,
-                    on_fetch: Callable[[Any], None] | None = None,
-                    on_cancel: Callable[[], None] | None = None,
-                    wanted: Callable[[Any], Sequence[Any]] | None = None) -> Panel:
-    """What is on offer, what it costs, and whose it is.
+                    on_fetch: Callable[[Any], Any] | None = None,
+                    wanted: Callable[[Any], Sequence[Any]] | None = None,
+                    on_finished: Callable[[Any], None] | None = None,
+                    on_close: Callable[[], None] | None = None,
+                    job: Any = None) -> ContentScreen:
+    """What is on offer, what it costs, whose it is, and how far a fetch is.
 
-    A track is 22 MB and the set is 90 MB, so none of it ships in the wheel.
-    This screen is where a player agrees to a download: the size before it
-    starts, the terms the content carries, and -- since a track is incomplete
-    without the art it shares -- the size of *everything* the choice pulls in
-    rather than of the one pack named.
-
-    ``packs`` is what is missing and ``wanted(pack)`` is the whole set choosing
-    one pulls in -- the size shown is that set's, since a track's art is
-    fetched with it and a player shown the track's own size alone would be told
-    the wrong number. Without it a pack answers for itself. An empty ``packs``
-    is :data:`ALL_HERE` rather than an empty screen. ``job`` is a
-    :class:`~OpenGLContext.contentpacks.fetch.FetchJob` under way, and the
-    screen is rebuilt from it as it is polled.
+    The engine's :class:`~OpenGLContext.ui.contentscreen.ContentScreen`, as
+    this game shows it: ``packs`` is what is missing and ``wanted(pack)`` the
+    whole set choosing one pulls in, whose size is the one shown, since a
+    track is fetched with the art it shares. ``on_fetch(pack)`` returns the
+    :class:`~OpenGLContext.contentpacks.fetch.FetchJob` it started; ``job`` is
+    one a previous screen started. Its panel is named ``downloads``.
     """
-    packs = list(packs)
-    chooser = Select(name='offered', options=[one.key for one in packs],
-                     value=packs[0].key if packs else None)
-    caption = Label(text=_offer(packs[0], wanted) if packs else ALL_HERE,
-                    wrap=True, name='offer')
-    # A bar and the words: the bar is how far, the words are which pack and
-    # what went wrong. Neither says the other's half.
-    progress = ProgressBar(fraction=_fraction(job), text=_progress(job),
-                           name='progress')
-    fetch = Button(text='Download', name='fetch', role='primary')
-    cancel = Button(text='Close', name='cancel')
-    fetch.enabled = bool(packs) and not _running(job)
-
-    def picked(widget: Any) -> None:
-        caption.text = _offer(_pack_named(packs, widget.value), wanted)
-    chooser.on_change = picked
-
-    def start(_widget: Any = None) -> None:
-        chosen = _pack_named(packs, chooser.value)
-        if chosen is not None and on_fetch is not None:
-            on_fetch(chosen)
-    fetch.on_activate = start
-    if on_cancel is not None:
-        cancel.on_activate = lambda _widget=None: on_cancel()
-
-    return Panel(title='Downloads', scrim=True, modal=True,
-                 preferredColumns=MENU_COLUMNS * 2,
-                 children=[Column(spacing=4, children=[
-                     chooser, caption, progress, Separator(top=6),
-                     Row(spacing=2, children=[fetch, Spacer(), cancel])])])
+    screen = ContentScreen(packs, on_fetch=on_fetch, wanted=wanted,
+                           on_finished=on_finished, on_close=on_close,
+                           title='Downloads', columns=MENU_COLUMNS * 2,
+                           job=job)
+    screen.panel.name = 'downloads'
+    return screen
 
 
-def _pack_named(packs: Sequence[Any], key: Any) -> Any:
-    for one in packs:
-        if one.key == key:
-            return one
-    return packs[0] if packs else None
+class Downloads:
+    """The download screen across openings, and the download it started.
 
+    A player may close the screen while a track is fetched and open it again;
+    the download carries on and the next screen shows it. :meth:`poll` is
+    called once a frame whether or not the screen is open. When a download
+    arrives, ``on_arrived()`` is called and the offer is refreshed, which is
+    what lets the track screen show the new track.
 
-def _offer(pack: Any, wanted: Callable[[Any], Sequence[Any]] | None = None
-           ) -> str:
-    """One choice as a player reads it before agreeing to fetch it.
-
-    The size is the whole set the choice pulls in, and anything else in that
-    set is named: a download screen that says 22 MB and fetches 54 has not
-    asked the question it appears to be asking.
+    ``offered()`` returns what is on offer now, ``wanted(pack)`` the set
+    choosing one fetches, and ``start(pack)`` the job that fetches it.
     """
-    if pack is None:
-        return ALL_HERE
-    whole = list(wanted(pack)) if wanted is not None else [pack]
-    said = ['%s — %s' % (pack.title, _size(whole))]
-    if pack.notes:
-        said.append(pack.notes)
-    for one in whole:
-        if one.key != pack.key:
-            said.append('with %s — %s' % (one.title, one.human_size()))
-    said.append(pack.copyright)
-    return '\n'.join(said)
 
+    def __init__(self, offered: Callable[[], Sequence[Any]],
+                 wanted: Callable[[Any], Sequence[Any]],
+                 start: Callable[[Any], Any],
+                 on_arrived: Callable[[], None] | None = None,
+                 on_close: Callable[[], None] | None = None) -> None:
+        self.offered = offered
+        self.wanted = wanted
+        self.start = start
+        self.on_arrived = on_arrived
+        self.on_close = on_close
+        #: The screen last opened, open or not.
+        self.screen: ContentScreen | None = None
 
-def _size(packs: Sequence[Any]) -> str:
-    """What a set of packs costs, as the user reads it."""
-    return '%d MB' % (round(sum(one.approximate_bytes for one in packs) / 1e6),)
+    @property
+    def open(self) -> bool:
+        """Whether the screen is on show."""
+        return self.screen is not None and not self.screen.panel.closed
 
+    def show(self) -> Panel:
+        """A new screen, over the download under way if there is one."""
+        self.screen = download_screen(
+            self.offered(), on_fetch=self.start, wanted=self.wanted,
+            on_finished=self._finished, on_close=self.on_close,
+            job=self.screen.job if self.screen is not None else None)
+        return self.screen.panel
 
-def _fraction(job: Any) -> float:
-    """How far the bar is filled. Nothing where there is no job to ask."""
-    if job is None:
-        return 0.0
-    return float(getattr(job, 'fraction', 0.0))
+    def poll(self) -> bool:
+        """Poll the download; whether the screen changed."""
+        return self.screen.poll() if self.screen is not None else False
 
-
-def _running(job: Any) -> bool:
-    return job is not None and not getattr(job, 'finished', False)
-
-
-def _progress(job: Any) -> str:
-    """How far a download has got, or why it stopped.
-
-    A job that failed and a job the player stopped are different things and are
-    said differently; a job that finished says nothing, because the screen it
-    came back to already shows what arrived.
-    """
-    if job is None:
-        return ''
-    if getattr(job, 'cancelled', False):
-        return STOPPED
-    failed = getattr(job, 'failed', None)
-    if failed is not None:
-        return 'Could not download: %s' % (failed,)
-    if getattr(job, 'finished', False):
-        return ''
-    return '%s — %d%%' % (getattr(job, 'state', '') or '',
-                          round(float(getattr(job, 'fraction', 0.0)) * 100))
+    def _finished(self, job: Any) -> None:
+        if job.failed is not None or job.cancelled:
+            return
+        if self.screen is not None:
+            self.screen.offer(self.offered())
+        if self.on_arrived is not None:
+            self.on_arrived()
 
 
 def finish_screen(result: Any, place: int | None = None,

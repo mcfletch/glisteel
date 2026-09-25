@@ -302,101 +302,183 @@ class TestTheDownloadScreen:
     """
 
     def offered(self, **named):
-        from OpenGLContext.contentpacks.pack import ContentPack
-        base = dict(url='https://example.invalid/a.tar.gz', archive='tar',
-                    copyright='Somebody, CC-BY 4.0', marker='tileset.json')
-        return [ContentPack(key='glisteel/ashdown', title='Ashdown',
-                            directory='ashdown', approximate_bytes=23_000_000,
-                            notes='7.2 km, a lap.', **dict(base, **named)),
-                ContentPack(key='glisteel/beacon', title='Beacon',
-                            directory='beacon', approximate_bytes=9_000_000,
-                            **dict(base, **named))]
+        return _offered(**named)
 
     def test_it_names_every_pack_on_offer(self):
-        offered = widget(menu.download_screen(self.offered()), 'offered')
+        offered = menu.download_screen(self.offered()).chooser
         assert list(offered.options) == ['glisteel/ashdown', 'glisteel/beacon']
 
     def test_it_says_what_a_download_costs(self):
-        panel = menu.download_screen(self.offered())
+        panel = menu.download_screen(self.offered()).panel
         assert '23 MB' in _text(panel)
 
     def test_and_the_cost_is_the_whole_set_the_choice_pulls_in(self):
         """A track without the art it shares arrives as bare ground, so the
         art is fetched with it -- and a player who was shown the track's own
         22 MB and charged 54 was told the wrong number."""
-        packs = self.offered()
-        art = packs[0].__class__(
-            key='glisteel/forest-art', title='Forest art',
-            url='https://example.invalid/art.tar.gz', directory='forest-art',
-            archive='tar', approximate_bytes=32_000_000,
-            copyright='Somebody, CC-BY 4.0', marker='trees')
-        panel = menu.download_screen(packs, wanted=lambda one: [one, art])
+        panel = menu.download_screen(self.offered(),
+                                     wanted=lambda one: [one, _ART]).panel
         assert '55 MB' in _text(panel)
         assert 'Forest art' in _text(panel)
 
     def test_it_says_whose_the_content_is(self):
         """A pack's terms are why `copyright` is required of one."""
-        assert 'CC-BY 4.0' in _text(menu.download_screen(self.offered()))
+        assert 'CC-BY 4.0' in _text(menu.download_screen(self.offered()).panel)
 
-    def test_it_offers_to_fetch_and_to_leave(self):
-        found = names(menu.download_screen(self.offered()))
-        assert 'fetch' in found and 'cancel' in found
+    def test_it_offers_to_fetch_to_stop_and_to_leave(self):
+        found = names(menu.download_screen(self.offered()).panel)
+        assert {'fetch', 'stop', 'close'} <= set(found)
+
+    def test_it_is_named_so_the_game_can_find_it(self):
+        assert menu.download_screen(self.offered()).panel.name == 'downloads'
 
     def test_looking_at_one_does_not_start_fetching_it(self):
         """Stepping through what is on offer is reading, not agreeing."""
         asked = []
-        panel = menu.download_screen(
-            self.offered(), on_fetch=lambda pack: asked.append(pack.key),
-            wanted=lambda one: [one])
-        chooser = widget(panel, 'offered')
-        chooser.value = 'glisteel/beacon'
-        if chooser.on_change is not None:
-            chooser.on_change(chooser)
+        screen = menu.download_screen(
+            self.offered(), on_fetch=lambda pack: asked.append(pack.key))
+        screen.chooser.write('glisteel/beacon')
         assert asked == []
-        assert 'Beacon' in _text(panel)
+        assert 'Beacon' in _text(screen.panel)
 
-    def test_choosing_one_asks_for_it_and_what_it_needs(self):
+    def test_choosing_one_asks_for_it(self):
         wanted = []
-        panel = menu.download_screen(
+        screen = menu.download_screen(
             self.offered(), on_fetch=lambda pack: wanted.append(pack.key))
-        widget(panel, 'fetch').activate()
+        screen.fetch_button.activate()
         assert wanted == ['glisteel/ashdown']
 
     def test_nothing_on_offer_is_not_an_error(self):
         """Everything downloaded is the ordinary end state, not a failure."""
-        panel = menu.download_screen([])
-        assert menu.ALL_HERE in _text(panel)
-        assert not widget(panel, 'fetch').enabled
+        screen = menu.download_screen([])
+        assert menu.ALL_HERE in _text(screen.panel)
+        assert not screen.fetch_button.enabled
 
-    def test_a_fetch_under_way_says_how_far(self):
-        class _Job:
-            fraction = 0.42
-            state = 'Ashdown'
-            finished = False
-            failed = None
-            cancelled = False
-        found = _text(menu.download_screen(self.offered(), job=_Job()))
-        assert '42' in found and 'Ashdown' in found
 
-    def test_one_that_failed_says_so_rather_than_looking_idle(self):
-        class _Job:
-            fraction = 0.3
-            state = 'Ashdown'
-            finished = True
-            failed = OSError('the server said no')
-            cancelled = False
-        assert 'the server said no' in _text(
-            menu.download_screen(self.offered(), job=_Job()))
+class _Gate:
+    """A fetch that waits to be let through, fails, or hears a stop."""
 
-    def test_one_the_user_stopped_is_not_reported_as_a_failure(self):
-        class _Job:
-            fraction = 0.3
-            state = 'Ashdown'
-            finished = True
-            failed = None
-            cancelled = True
-        found = _text(menu.download_screen(self.offered(), job=_Job()))
-        assert menu.STOPPED in found
+    def __init__(self, fail=None):
+        import threading
+        self.go = threading.Event()
+        self.fail = fail
+
+    def __call__(self, pack, progress, cancel):
+        from OpenGLContext.contentpacks.fetch import Cancelled
+        progress(pack.approximate_bytes // 2, pack.approximate_bytes)
+        while not self.go.wait(0.01):
+            if cancel():
+                raise Cancelled('stopped')
+        if self.fail is not None:
+            raise self.fail
+        return '/content/' + pack.directory
+
+
+class TestDownloadsAcrossOpenings:
+    """The download screen is opened from the track chooser, may be closed
+    while a track downloads, and is opened again."""
+
+    @pytest.fixture
+    def gate(self):
+        gate = _Gate()
+        yield gate
+        gate.go.set()
+
+    @pytest.fixture
+    def downloads(self, gate):
+        from OpenGLContext.contentpacks.fetch import FetchJob
+        here = []
+        self.arrived = []
+
+        def offered():
+            return [one for one in _offered() if one.key not in here]
+
+        def start(pack):
+            here.append(pack.key)
+            return FetchJob([pack], store=None, fetch=gate)
+        return menu.Downloads(offered, lambda one: [one], start,
+                              on_arrived=lambda: self.arrived.append(1))
+
+    def finish(self, downloads):
+        downloads.screen.job._thread.join(timeout=10)
+        downloads.poll()
+
+    def test_a_download_that_arrives_is_said_and_leaves_the_offer(
+            self, downloads, gate):
+        downloads.show()
+        downloads.screen.fetch_button.activate()
+        gate.go.set()
+        self.finish(downloads)
+        assert downloads.screen.progress.text == 'Done.'
+        assert [one.key for one in downloads.screen.packs] == [
+            'glisteel/beacon']
+        assert self.arrived == [1]
+
+    def test_one_that_failed_says_why_and_stays_said(self, downloads, gate):
+        gate.fail = OSError('the server said no')
+        downloads.show()
+        downloads.screen.fetch_button.activate()
+        gate.go.set()
+        self.finish(downloads)
+        downloads.poll()
+        assert 'the server said no' in downloads.screen.progress.text
+        assert self.arrived == []
+
+    def test_one_the_player_stopped_is_not_reported_as_a_failure(
+            self, downloads):
+        downloads.show()
+        downloads.screen.fetch_button.activate()
+        downloads.screen.stop_button.activate()
+        self.finish(downloads)
+        assert downloads.screen.progress.text == menu.STOPPED
+        assert self.arrived == []
+
+    def test_closing_it_leaves_the_download_running_for_the_next(
+            self, downloads, gate):
+        downloads.show()
+        downloads.screen.fetch_button.activate()
+        downloads.screen.close_button.activate()
+        assert not downloads.open
+        job = downloads.screen.job
+        panel = downloads.show()
+        assert downloads.open and downloads.screen.job is job
+        assert not downloads.screen.fetch_button.enabled
+        gate.go.set()
+        self.finish(downloads)
+        assert downloads.screen.panel is panel
+        assert self.arrived == [1]
+
+    def test_it_is_polled_while_closed(self, downloads, gate):
+        downloads.show()
+        downloads.screen.fetch_button.activate()
+        downloads.screen.close_button.activate()
+        gate.go.set()
+        self.finish(downloads)
+        assert self.arrived == [1]
+
+
+def _offered(**named):
+    from OpenGLContext.contentpacks.pack import ContentPack
+    base = dict(url='https://example.invalid/a.tar.gz', archive='tar',
+                copyright='Somebody, CC-BY 4.0', marker='tileset.json')
+    return [ContentPack(key='glisteel/ashdown', title='Ashdown',
+                        directory='ashdown', approximate_bytes=23_000_000,
+                        notes='7.2 km, a lap.', **dict(base, **named)),
+            ContentPack(key='glisteel/beacon', title='Beacon',
+                        directory='beacon', approximate_bytes=9_000_000,
+                        **dict(base, **named))]
+
+
+def _art():
+    from OpenGLContext.contentpacks.pack import ContentPack
+    return ContentPack(key='glisteel/forest-art', title='Forest art',
+                       url='https://example.invalid/art.tar.gz',
+                       directory='forest-art', archive='tar',
+                       approximate_bytes=32_000_000,
+                       copyright='Somebody, CC-BY 4.0', marker='trees')
+
+
+_ART = _art()
 
 
 def _text(panel):
@@ -481,6 +563,33 @@ class TestChoosingHowToDrive:
         panel = menu.driving_screen(on_cancel=lambda: left.append(1))
         widget(panel, 'cancel').activate()
         assert left == [1]
+
+    def test_choosing_closes_it(self):
+        """The menu comes back over the race; this left underneath it would
+        stand over the race once the menu was resumed."""
+        panel = menu.driving_screen(on_choose=lambda name: None)
+        widget(panel, 'use').activate()
+        assert panel.closed
+
+    def test_leaving_closes_it(self):
+        panel = menu.driving_screen(on_cancel=lambda: None)
+        widget(panel, 'cancel').activate()
+        assert panel.closed
+
+    def test_escape_is_leaving(self):
+        left = []
+        panel = menu.driving_screen(on_cancel=lambda: left.append(1))
+        panel.key('<escape>', (0, 0, 0))
+        assert panel.closed and left == [1]
+
+    def test_it_answers_once_however_often_it_is_pressed(self):
+        chose, left = [], []
+        panel = menu.driving_screen(on_choose=chose.append,
+                                    on_cancel=lambda: left.append(1))
+        widget(panel, 'use').activate()
+        widget(panel, 'use').activate()
+        widget(panel, 'cancel').activate()
+        assert len(chose) == 1 and left == []
 
     def test_the_main_menu_reaches_it(self):
         """Where a player looks for how the game is played."""

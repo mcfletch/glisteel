@@ -157,9 +157,9 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     #: The video being written, or None. Declared because the mixin that owns it
     #: is untyped, and mypy cannot otherwise tell what it holds.
     recorder: Any = None
-    #: The download under way, or None. Polled once a frame; a job nobody polls
-    #: tells nobody anything.
-    _fetching: Any = None
+    #: The download screen and the download it started, across openings.
+    #: Polled once a frame; a job nobody polls tells nobody anything.
+    _downloads: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
     addEventHandler: Any
@@ -370,65 +370,69 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.pushOverlay(panel)
 
     def show_tracks(self) -> None:               # pragma: no cover - needs a window
-        """The library, as a band of pictures. Replaces the menu, not over it."""
+        """The library, as a band of pictures. Replaces the menu, not over it.
+
+        Named, and replaced rather than stacked: it is shown again when a
+        download adds a track to it.
+        """
         self._drop_menu()
+        self._drop_named('tracks')
         found = tracks.library()
         best = {track.key: self.records.record(track.key) for track in found}
-        self.pushOverlay(menu.track_screen(
+        panel = menu.track_screen(
             found, chosen=self.track,
             records={key: one for key, one in best.items() if one is not None},
             on_choose=self._on_track, on_cancel=self.show_menu,
-            on_downloads=self.show_downloads))
-
-    def show_downloads(self) -> None:            # pragma: no cover - needs a window
-        """What is on offer, and what a download costs.
-
-        Over the chooser rather than instead of it: asking for more is not
-        answering the question the chooser asked, and closing this should find
-        it where it was left.
-        """
-        from glisteel import content
-        panel = menu.download_screen(
-            content.offered(), job=self._fetching,
-            on_fetch=self._on_fetch, on_cancel=self.show_tracks,
-            wanted=content.wanted_for)
-        panel.name = 'downloads'
+            on_downloads=self.show_downloads)
+        panel.name = 'tracks'
         self.pushOverlay(panel)
 
-    def _on_fetch(self, pack: Any) -> None:      # pragma: no cover - needs a window
-        """Start a download, off the frame loop.
+    def show_downloads(self) -> None:            # pragma: no cover - needs a window
+        """What is on offer, what a download costs, and how far one is.
 
-        The whole set the choice pulls in, not the one pack named: a track
-        without the art it shares arrives as bare ground, and a user who agreed
-        to a track agreed to a track that works.
+        Over the chooser rather than instead of it: asking for more is not
+        answering the question the chooser asked, and closing this finds it
+        where it was left, showing any track that arrived meanwhile.
+        """
+        self._drop_named('downloads')
+        self.pushOverlay(self._download_screens().show())
+
+    def _download_screens(self) -> Any:          # pragma: no cover - needs a window
+        if self._downloads is None:
+            from glisteel import content
+            self._downloads = menu.Downloads(
+                content.offered, content.wanted_for, self._start_fetch,
+                on_arrived=self._on_arrived)
+        return self._downloads
+
+    def _start_fetch(self, pack: Any) -> Any:    # pragma: no cover - needs a window
+        """A download of the whole set the choice pulls in, off the frame loop.
+
+        A track without the art it shares arrives as bare ground, and a user
+        who agreed to a track agreed to a track that works.
         """
         from OpenGLContext.contentpacks.fetch import FetchJob
 
         from glisteel import content
         store = content.store()
-        self._fetching = FetchJob(content.wanted_for(pack, store), store,
-                                  on_progress=self.triggerRedraw,
-                                  within=pack).start()
-        self.show_downloads()
+        return FetchJob(content.wanted_for(pack, store), store,
+                        on_progress=self.triggerRedraw, within=pack)
+
+    def _on_arrived(self) -> None:               # pragma: no cover - needs a window
+        """A track arrived: the chooser under the downloads shows it."""
+        if self.overlays.named('tracks') is None:
+            return
+        downloads = self.overlays.named('downloads')
+        self.show_tracks()
+        if downloads is not None:
+            # Back on top of the chooser it was opened over.
+            self.overlays.remove(downloads)
+            self.pushOverlay(downloads)
 
     def pollDownloads(self) -> None:             # pragma: no cover - needs a window
-        """Publish what the download has managed, once a frame.
-
-        `poll` is the only place anything the worker wrote is read, which is
-        the whole of the thread safety; a job nobody polls tells nobody
-        anything. Rebuilding the screen is what shows it.
-        """
-        job = self._fetching
-        if job is None:
-            return
-        was = (job.fraction, job.finished)
-        job.poll()
-        if job.finished:
-            self._fetching = None
-        if (job.fraction, job.finished) != was \
-                and self.overlays.named('downloads') is not None:
-            self._drop_named('downloads')
-            self.show_downloads()
+        """Publish what the download has managed, once a frame."""
+        if self._downloads is not None and self._downloads.poll():
+            self.triggerRedraw()
 
     def _drop_named(self, name: str) -> None:    # pragma: no cover - needs a window
         panel = self.overlays.named(name)
