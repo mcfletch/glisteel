@@ -7,7 +7,7 @@ held keys and the arithmetic that turns them into pedals and a wheel.
 """
 import pytest
 
-from glisteel.steering import KeyboardDriver
+from glisteel.steering import KeyboardDriver, MouseWheel
 
 STEP = 1.0 / 120.0
 
@@ -116,7 +116,6 @@ class TestTheKeysThatDriveIt:
 
 class TestSteeringWithThePointer:
     def test_the_pointer_has_the_wheel_while_no_key_is_down(self) -> None:
-        from glisteel.steering import MouseWheel
         pointer = MouseWheel(width=1000)
         driver = KeyboardDriver(pointer)
         pointer.moved(200)
@@ -126,7 +125,6 @@ class TestSteeringWithThePointer:
     def test_and_a_key_takes_it_back(self) -> None:
         """A driver reaching for a key has decided the pointer is not where
         they want the wheel."""
-        from glisteel.steering import MouseWheel
         pointer = MouseWheel(width=1000)
         driver = KeyboardDriver(pointer)
         pointer.moved(200)

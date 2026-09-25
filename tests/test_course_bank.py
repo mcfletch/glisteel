@@ -9,7 +9,10 @@ it.
 """
 import numpy as np
 import pytest
-from OpenGLContext.scenegraph.road import RoadProfile
+from omi_physics.raycast import raycast
+from omi_physics.world import PhysicsWorld
+from OpenGLContext.physics.road import RoadColliders
+from OpenGLContext.scenegraph.road import RoadProfile, bank_profile
 
 from glisteel.world import Course, courses_in
 
@@ -104,8 +107,6 @@ class TestTheColliderUnderTheWheels:
 
     def _corner(self, bank):
         """A quarter circle to the right, banked or not, and its collider."""
-        from omi_physics.world import PhysicsWorld
-        from OpenGLContext.physics.road import RoadColliders
         angle = np.linspace(0.0, np.pi / 2, 60)
         line = np.stack([300.0 - 300.0 * np.cos(angle), np.full(60, 20.0),
                          -300.0 * np.sin(angle)], axis=-1)
@@ -119,7 +120,6 @@ class TestTheColliderUnderTheWheels:
 
     def _gaps(self, bank):
         """How far the collider is from where the course says the road is."""
-        from omi_physics.raycast import raycast
         course, world = self._corner(bank)
         found = []
         for index in range(10, 50):
@@ -133,7 +133,6 @@ class TestTheColliderUnderTheWheels:
         return np.asarray(found)
 
     def test_a_corner_that_leans_has_a_collider_that_leans_with_it(self) -> None:
-        from OpenGLContext.scenegraph.road import bank_profile
         gaps = self._gaps(lambda line: bank_profile(line, speed=200 / 3.6))
         assert len(gaps) > 100, "the ray found no road to land on"
         assert gaps.max() < 0.01
@@ -146,11 +145,8 @@ class TestTheColliderUnderTheWheels:
     def test_a_collider_swept_flat_under_a_banked_road_does_not_line_up(self) -> None:
         """What the lean is *for*: without it the two disagree by most of the
         road's own width times the lean."""
-        from omi_physics.raycast import raycast
-        from OpenGLContext.physics.road import RoadColliders
         course, _world = self._corner(
             lambda line: np.full(len(line), 0.10))
-        from omi_physics.world import PhysicsWorld
         flat = PhysicsWorld()
         RoadColliders(flat, course.centreline, course.road_profile(),
                       closed=False).update(course.centreline[30])
@@ -188,9 +184,6 @@ class TestARoadThatIsWiderInPlaces:
         """A stretch built to be passed on is wider than the road it is on, and
         a collider at the road's nominal width is a wall down each edge of the
         extra tarmac."""
-        from omi_physics.raycast import raycast
-        from omi_physics.world import PhysicsWorld
-        from OpenGLContext.physics.road import RoadColliders
         line = _line()
         world = PhysicsWorld()
         RoadColliders(world, line, closed=False,
@@ -203,8 +196,6 @@ class TestARoadThatIsWiderInPlaces:
         assert 5.0 - hit.distance == pytest.approx(0.0, abs=0.2)
 
     def test_a_road_of_one_width_is_swept_where_it_always_was(self) -> None:
-        from omi_physics.world import PhysicsWorld
-        from OpenGLContext.physics.road import RoadColliders
         line = _line()
         plain, wide = (RoadColliders(PhysicsWorld(), line, closed=False,
                                      widening=extra)

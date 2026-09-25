@@ -7,26 +7,37 @@ it decides what a driver decides -- how fast, and when to pull out -- and then
 asks for it through the controls rather than reaching past them.
 """
 import dataclasses
+import math
 from typing import Any
 
 import numpy as np
 import pytest
+from OpenGLContext.telemetry import NOT_RECORDING
 
 from glisteel import scenarios, schemes
 from glisteel.driver import (
     ALONGSIDE,
+    CAR_LENGTHS,
     CROSSING_MARGIN,
     FOLLOWING_LEAST,
     FOLLOWING_SECONDS,
+    PASS_ACROSS,
+    PASS_LONGEST,
+    PASSED_BY,
     PASSING_GAP,
     PASSING_REACH,
+    RACING_KPH,
+    REASON_HOLDS,
     SLIP_LONGEST,
     STILL_ON,
     DriverStyle,
     StandIn,
 )
+from glisteel.game import driver_for
+from glisteel.options import Options
 from glisteel.schemes import CROSSING
 from glisteel.session import Session
+from glisteel.traffic import SPEED_LIMIT
 
 STEP = 1.0 / 120.0
 
@@ -198,7 +209,6 @@ class TestHowFastItMeansToGo:
     corners let it."""
 
     def test_it_aims_at_two_hundred(self) -> None:
-        from glisteel.driver import RACING_KPH
         session = _open_road()
         stand_in = StandIn(schemes.named('lanes'))
         stand_in.controls(session, STEP)
@@ -214,7 +224,6 @@ class TestHowFastItMeansToGo:
 
     def test_and_it_is_far_faster_than_the_traffic_it_shares_the_road_with(
             self) -> None:
-        from glisteel.traffic import SPEED_LIMIT
         session = _open_road()
         stand_in = StandIn(schemes.named('lanes'))
         stand_in.controls(session, STEP)
@@ -268,7 +277,6 @@ class TestKeepingBack:
     def test_and_a_pass_is_not_a_follow(self) -> None:
         """Out getting by something, the gap is the racing one: held to a
         following distance all the way past, the car never draws alongside."""
-        from glisteel.driver import PASSING_GAP
         session = _open_road(traffic=0)
         stand_in = StandIn(schemes.named('lanes'))
         session.driver = stand_in
@@ -650,19 +658,19 @@ class _Ahead:
     def __getattr__(self, name):
         return getattr(self._session, name)
 
-    def traffic_ahead(self, reach=0.0):
+    def traffic_ahead(self, reach=0.0):  # noqa: ARG002 answers SessionLike.traffic_ahead
         return self._found
 
-    def lane_ahead(self, across, reach=0.0):
+    def lane_ahead(self, across, reach=0.0):  # noqa: ARG002 answers SessionLike.lane_ahead
         return None
 
-    def lane_clear(self, across, ahead=0.0, behind=0.0):
+    def lane_clear(self, across, ahead=0.0, behind=0.0):  # noqa: ARG002 answers SessionLike.lane_clear
         return True
 
-    def sight(self, over=0.0):
+    def sight(self, over=0.0):  # noqa: ARG002 answers SessionLike.sight
         return self._sight
 
-    def oncoming(self, reach=None):
+    def oncoming(self, reach=None):  # noqa: ARG002 answers SessionLike.oncoming
         return self._oncoming
 
 
@@ -676,13 +684,13 @@ class _Coming:
         self.two_way = two_way
         self._sight = float(sight)
 
-    def sight(self, over=0.0):
+    def sight(self, over=0.0):  # noqa: ARG002 answers SessionLike.sight
         return self._sight
 
     def __getattr__(self, name):
         return getattr(self._session, name)
 
-    def oncoming(self, reach=0.0):
+    def oncoming(self, reach=0.0):  # noqa: ARG002 answers SessionLike.oncoming
         return self._found
 
     def along(self, other):
@@ -741,7 +749,6 @@ class TestWhatCountsAsAPass:
         return stand_in
 
     def test_one_given_up_on_is_not_counted(self) -> None:
-        from glisteel.driver import PASS_LONGEST
         session = _open_road(traffic=0)
         stand_in = self._out_there(session)
         stand_in.passing_for = PASS_LONGEST + 1.0
@@ -820,19 +827,15 @@ class TestARunThatIsARace:
     this road."""
 
     def _config(self, **named):
-        from glisteel.options import Options
         return Options(world='x', autopilot=True, control='lanes', **named)
 
     def test_the_game_hands_it_a_racing_speed(self) -> None:
-        from glisteel.driver import RACING_KPH
-        from glisteel.game import driver_for
         session = _open_road(traffic=0)
         driver = driver_for(self._config(pace=1.0), session)
         assert driver.pilot.style.maximum_speed == pytest.approx(
             RACING_KPH / 3.6)
 
     def test_and_the_pace_dial_is_a_fraction_of_it(self) -> None:
-        from glisteel.game import driver_for
         session = _open_road(traffic=0)
         quick = driver_for(self._config(pace=1.0), session)
         steady = driver_for(self._config(pace=0.8), session)
@@ -892,7 +895,7 @@ class _InLane:
     def __getattr__(self, name):
         return getattr(self._session, name)
 
-    def lane_ahead(self, across, reach=0.0):
+    def lane_ahead(self, across, reach=0.0):  # noqa: ARG002 answers SessionLike.lane_ahead
         return self._found
 
 
@@ -994,7 +997,6 @@ class TestWritingDownWhatItDid:
         return kept
 
     def test_a_session_marks_nowhere_until_it_is_given_somewhere(self) -> None:
-        from OpenGLContext.telemetry import NOT_RECORDING
         session = _open_road(traffic=0)
         assert session.telemetry is NOT_RECORDING
 
@@ -1011,7 +1013,6 @@ class TestWritingDownWhatItDid:
         assert 'sight' in fields and 'speed' in fields
 
     def test_giving_one_up_is_written_down_with_the_reason(self) -> None:
-        from glisteel.driver import PASS_LONGEST
         session = _open_road(traffic=0)
         stand_in = StandIn(schemes.named('lanes'))
         _driving(session, 8.0, stand_in)
@@ -1053,7 +1054,6 @@ class TestWritingDownWhatItDid:
         session = _open_road(traffic=0)
         stand_in = StandIn(schemes.named('lanes'))
         _driving(session, 8.0, stand_in)
-        from glisteel.driver import REASON_HOLDS
         kept = self._kept(session)
         held = int(REASON_HOLDS / STEP) + 2
         for road in (_Ahead(session, gap=_crossable(stand_in, session),
@@ -1084,7 +1084,7 @@ class TestNotPullingOutOntoTheEndOfAStraight:
                 return getattr(session, name)
 
             @staticmethod
-            def oncoming(reach=None):
+            def oncoming(reach=None):  # noqa: ARG004 answers SessionLike.oncoming
                 return None
 
             @staticmethod
@@ -1124,7 +1124,6 @@ class TestNotChangingItsMindEveryFrame:
         return stand_in
 
     def test_it_holds_a_pass_it_would_not_now_begin(self) -> None:
-        from glisteel.traffic import SPEED_LIMIT
         session = _open_road(traffic=0)
         stand_in = self._out_there(session)
         # A road between the two bars: less than beginning a pass asks for,
@@ -1220,7 +1219,7 @@ class TestTheViewDoesNotShrinkAsItAccelerates:
                 return getattr(session, name)
 
             @staticmethod
-            def oncoming(reach=None):
+            def oncoming(reach=None):  # noqa: ARG004 answers SessionLike.oncoming
                 return None
 
             @staticmethod
@@ -1270,7 +1269,6 @@ class TestAPassIsDrivenNotCoasted:
         return stand_in
 
     def test_a_standing_start_gets_by_something_stopped(self) -> None:
-        from glisteel.driver import PASS_LONGEST
         session = _open_road(traffic=0)
         stand_in = self._standing(session)
         assert stand_in.pass_seconds(0.0, 8.0, 0.0, quick=40.0) < PASS_LONGEST
@@ -1278,9 +1276,6 @@ class TestAPassIsDrivenNotCoasted:
     def test_and_it_is_the_time_the_acceleration_actually_takes(self) -> None:
         """Covering the relative distance under the pull it believes it has,
         which for a race car from rest is a few seconds rather than never."""
-        import math
-
-        from glisteel.driver import CAR_LENGTHS, PASS_ACROSS, PASSED_BY
         session = _open_road(traffic=0)
         stand_in = self._standing(session)
         pull = stand_in.pilot.style.pull
@@ -1380,7 +1375,7 @@ class TestTheRightFootFinishesThePass:
         stand_in.pedals(_Coming(session), STEP)
         assert stand_in.slipping is not None
         # The other car is well up the road now: the gap has been made.
-        stand_in._slip_car = _Car(120.0)
+        stand_in._slip_car = _Car(120.0)  # noqa: SLF001 the car the stand-in is slipstreaming
         stand_in.pedals(_Coming(session), STEP)
         assert stand_in.slipping is None
 

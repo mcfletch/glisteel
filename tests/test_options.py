@@ -15,11 +15,11 @@ import argparse
 import pytest
 
 from glisteel import schemes
+from glisteel.game import build_parser
 from glisteel.options import Options, window_size
 
 
 def _parsed(argv=()):
-    from glisteel.game import build_parser
     return build_parser().parse_args(list(argv))
 
 

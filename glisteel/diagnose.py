@@ -30,8 +30,10 @@ from typing import Any
 import numpy as np
 from OpenGLContext.telemetry import Keeping, Tee
 
+from glisteel import scenarios
 from glisteel.driver import PACE, Autopilot, DriverStyle
 from glisteel.session import Session
+from glisteel.traffic import Traffic
 from glisteel.world import RaceWorld
 
 __all__ = ['Report', 'drive_it', 'main']
@@ -178,12 +180,10 @@ def world_for(named: str, traffic: int | None) -> RaceWorld:
     question is about the *driving* rather than about a particular place. They
     cost a second to build where a baked world costs a bake.
     """
-    from glisteel import scenarios
     if named in scenarios.CATALOGUE:
         piece = scenarios.named(named)
         made = piece.world(traffic=0)
         if traffic is None or traffic > 0:
-            from glisteel.traffic import Traffic
             made.traffic = Traffic(
                 made.course, physics=made.physics,
                 count=(made.cars_the_road_carries() if traffic is None

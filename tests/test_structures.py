@@ -6,9 +6,12 @@ the answer has to come back without materialising a point-by-point distance
 matrix between the two. What is asserted here is the answer, and that asking
 about a lot of ground at once does not cost a lot of memory.
 """
+import tracemalloc
+
 import numpy as np
 import pytest
 
+from glisteel.traffic import TrafficCar
 from glisteel.world import Course, Structure
 
 
@@ -85,7 +88,6 @@ class TestWhichGroundIsOverAStructure:
 class TestAskingAboutALotOfGround:
     def test_a_chunk_of_terrain_does_not_cost_a_matrix(self) -> None:
         """The intermediate has to be bounded, not samples x road points."""
-        import tracemalloc
         course = _road(points=900, structures=[BORE])
         side = 320
         x, z = np.meshgrid(np.linspace(-100.0, 4100.0, side),
@@ -106,7 +108,6 @@ class TestWhatHasAnEdgeToFallOff:
 
     @staticmethod
     def _course(*kinds):
-        from glisteel.world import Course, Structure
         line = np.stack([np.zeros(9), np.zeros(9),
                          -np.arange(9) * 10.0], axis=-1)
         return Course(name='r', centreline=line, carriageway_width=7.2,
@@ -153,10 +154,9 @@ class TestACarThatHasPulledOff:
 
     def pulled_off(self, course):
         """Where the car's centre stands, and half its width."""
-        from glisteel.traffic import TrafficCar
         car = TrafficCar(course, station=1000.0, heading=1, limit=25.0)
         car.pull_off()
-        return car._pulled_off() + car.lane, car.kind.width / 2.0
+        return car._pulled_off() + car.lane, car.kind.width / 2.0  # noqa: SLF001 how far off its lane a traffic car stands
 
     def test_the_whole_car_is_on_ground_a_car_can_stand_on(self) -> None:
         course = self.course()

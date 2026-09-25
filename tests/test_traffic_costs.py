@@ -49,7 +49,7 @@ class TestWhatIsInFrontIsStillWhatIsInFront:
         course = _circuit()
         traffic = _traffic(course)
         traffic.cars = self._cars(course, [0.0, 40.0, 500.0])
-        traffic._look_ahead(course.point(0) * 3.0, 0.0)
+        traffic._look_ahead(course.point(0) * 3.0, 0.0)  # noqa: SLF001 times one traffic query alone
         assert traffic.cars[0].ahead is not None
         assert traffic.cars[0].ahead[0] == pytest.approx(40.0, abs=1e-6)
 
@@ -57,21 +57,21 @@ class TestWhatIsInFrontIsStillWhatIsInFront:
         course = _circuit()
         traffic = _traffic(course)
         traffic.cars = self._cars(course, [0.0, 30.0, 60.0, 90.0])
-        traffic._look_ahead(course.point(0) * 3.0, 0.0)
+        traffic._look_ahead(course.point(0) * 3.0, 0.0)  # noqa: SLF001 times one traffic query alone
         assert traffic.cars[0].ahead[0] == pytest.approx(30.0, abs=1e-6)
 
     def test_the_car_in_front_has_an_open_road(self) -> None:
         course = _circuit()
         traffic = _traffic(course)
         traffic.cars = self._cars(course, [0.0, 30.0])
-        traffic._look_ahead(course.point(0) * 3.0, 0.0)
+        traffic._look_ahead(course.point(0) * 3.0, 0.0)  # noqa: SLF001 times one traffic query alone
         assert traffic.cars[1].ahead is None
 
     def test_something_beyond_the_look_ahead_is_not_seen(self) -> None:
         course = _circuit()
         traffic = _traffic(course)
         traffic.cars = self._cars(course, [0.0, LOOK_AHEAD + 50.0])
-        traffic._look_ahead(course.point(0) * 3.0, 0.0)
+        traffic._look_ahead(course.point(0) * 3.0, 0.0)  # noqa: SLF001 times one traffic query alone
         assert traffic.cars[0].ahead is None
 
     def test_a_car_coming_the_other_way_is_not_in_the_way(self) -> None:
@@ -79,7 +79,7 @@ class TestWhatIsInFrontIsStillWhatIsInFront:
         traffic = _traffic(course)
         traffic.cars = (self._cars(course, [0.0]) +
                         self._cars(course, [40.0], heading=-1))
-        traffic._look_ahead(course.point(0) * 3.0, 0.0)
+        traffic._look_ahead(course.point(0) * 3.0, 0.0)  # noqa: SLF001 times one traffic query alone
         assert traffic.cars[0].ahead is None
 
     def test_it_carries_the_speed_of_whatever_is_in_front(self) -> None:
@@ -87,13 +87,13 @@ class TestWhatIsInFrontIsStillWhatIsInFront:
         traffic = _traffic(course)
         traffic.cars = self._cars(course, [0.0, 40.0])
         traffic.cars[1].speed = 11.0
-        traffic._look_ahead(course.point(0) * 3.0, 0.0)
+        traffic._look_ahead(course.point(0) * 3.0, 0.0)  # noqa: SLF001 times one traffic query alone
         assert traffic.cars[0].ahead[1] == pytest.approx(11.0)
 
     def test_a_car_going_the_other_way_sees_the_one_in_front_of_it(self) -> None:
         course = _circuit()
         traffic = _traffic(course)
         traffic.cars = self._cars(course, [100.0, 60.0], heading=-1)
-        traffic._look_ahead(course.point(0) * 3.0, 0.0)
+        traffic._look_ahead(course.point(0) * 3.0, 0.0)  # noqa: SLF001 times one traffic query alone
         assert traffic.cars[0].ahead is not None
         assert traffic.cars[0].ahead[0] == pytest.approx(40.0, abs=1e-6)

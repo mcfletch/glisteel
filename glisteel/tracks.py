@@ -178,7 +178,7 @@ def _downloaded(store: Any) -> list[Track]:
     module to turn a pack into a :class:`Track`, and a module that imports its
     own reader at import time cannot be imported at all.
     """
-    from glisteel import content
+    from glisteel import content  # noqa: PLC0415 content imports tracks
     return content.installed_tracks(store=store)
 
 

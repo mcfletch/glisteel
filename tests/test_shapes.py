@@ -7,13 +7,18 @@ forgotten, and where the copies had drifted apart -- two sign conventions for
 one angle -- a reader had no way to tell which was meant.
 """
 import dataclasses
+import inspect
 
 import numpy as np
 import pytest
 
+from glisteel.camera import CameraPose
 from glisteel.geometry import yaw_of, yaw_to_face
+from glisteel.hud import RaceHUD
 from glisteel.session import Readings
 from glisteel.trace import Trace
+from glisteel.traffic import TrafficCar
+from glisteel.world import Course
 
 
 class TestWhichWayAThingIsPointing:
@@ -54,13 +59,11 @@ class TestWhichWayAThingIsPointing:
 
 class TestEveryoneUsesTheOneSpelling:
     def test_the_camera_does(self) -> None:
-        from glisteel.camera import CameraPose
         pose = CameraPose(position=np.zeros(3),
                           target=np.array([1.0, 0.0, 0.0]))
         assert pose.heading() == pytest.approx(yaw_of((1.0, 0.0, 0.0)))
 
     def test_the_road_does(self) -> None:
-        from glisteel.world import Course
         line = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
         course = Course(name='c', centreline=line, carriageway_width=7.0,
                         total_width=12.0, closed=False, length=1.0)
@@ -68,8 +71,6 @@ class TestEveryoneUsesTheOneSpelling:
             yaw_to_face((1.0, 0.0, 0.0)))
 
     def test_a_traffic_car_does(self) -> None:
-        from glisteel.traffic import TrafficCar
-        from glisteel.world import Course
         line = np.array([[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]])
         course = Course(name='c', centreline=line, carriageway_width=7.0,
                         total_width=12.0, closed=False, length=100.0)
@@ -117,7 +118,6 @@ class TestARecordedDriveKnowsItsOwnColumns:
 
 class TestTheReadoutsAreOneThing:
     def test_the_hud_takes_a_frames_readings(self) -> None:
-        from glisteel.hud import RaceHUD
         hud = RaceHUD()
         hud.show(Readings(speed_kph=88.0, off=True))
         assert hud.speed.value.strip() == '88'
@@ -125,8 +125,5 @@ class TestTheReadoutsAreOneThing:
 
     def test_what_it_is_told_is_what_a_session_answers(self) -> None:
         """Neither side may grow a field the other does not know about."""
-        import inspect
-
-        from glisteel.hud import RaceHUD
         wanted = inspect.signature(RaceHUD.show).parameters
         assert list(wanted) == ['self', 'reading']

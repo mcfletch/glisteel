@@ -1,7 +1,9 @@
 """The road as somewhere to be: its width, its lanes, and moving between them."""
+import numpy as np
 import pytest
 
 from glisteel import scenarios
+from glisteel.world import Course
 from glisteel.zone import LANES, MARGIN, DrivableZone
 
 
@@ -120,11 +122,8 @@ if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
 
 
-def _course(closed=True, width=7.2, lanes=2):
+def _course(closed=True, width=7.2):
     """A course only wide enough and closed enough to make a zone from."""
-    import numpy as np
-
-    from glisteel.world import Course
     line = np.stack([np.arange(9) * 10.0, np.zeros(9), np.zeros(9)], axis=-1)
     return Course(name='c', centreline=line, carriageway_width=width,
                   total_width=width + 3.4, closed=closed, length=80.0)

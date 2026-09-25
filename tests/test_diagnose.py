@@ -7,8 +7,11 @@ thing.
 """
 import numpy as np
 import pytest
+from OpenGLContext.telemetry import Keeping
 
-from glisteel.diagnose import Report, summarise
+from glisteel import scenarios
+from glisteel.diagnose import Report, drive_it, summarise
+from glisteel.traffic import Traffic
 
 
 def _report(world='beacon', seconds=100.0, outcome=None, speeds=(10.0, 20.0)):
@@ -48,9 +51,6 @@ class TestTheSummaryOfAHandfulOfRuns:
 class TestADriveKeptInAJournalToo:
     def test_the_report_still_has_the_marks(self) -> None:
         """A journal is kept as well as the summary, not instead of it."""
-        from OpenGLContext.telemetry import Keeping
-
-        from glisteel.diagnose import drive_it
         journal = Keeping()
         report = drive_it('oval', seconds=2.0, traffic=0, journal=journal)
         assert report.marks, 'the report has no marks'
@@ -62,8 +62,6 @@ class TestADriveKeptInAJournalToo:
 class TestTheTrafficADriveMeets:
     def test_a_reseeded_road_puts_out_what_one_built_with_that_seed_does(
             self) -> None:
-        from glisteel import scenarios
-        from glisteel.traffic import Traffic
         course = scenarios.named('oval').world(traffic=0).course
 
         def put_out(crowd):

@@ -380,7 +380,7 @@ class Lanes(Line):
 
     # -- driving it ------------------------------------------------------------
 
-    def moved(self, line: float, axis: float, dt: float) -> float:
+    def moved(self, line: float, axis: float, dt: float) -> float:  # noqa: ARG002 overrides Line.moved(line, axis, dt)
         """A press is a lane; nothing else moves the car across the road.
 
         A lane with something in it is *asked for* rather than taken, and taken

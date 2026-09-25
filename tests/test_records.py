@@ -5,6 +5,7 @@ import os
 import pytest
 
 from glisteel.records import KEPT, Record, Records, records_path
+from glisteel.tracks import home
 
 
 def _records(tmp_path, name='times.json'):
@@ -149,7 +150,6 @@ class TestBetweenOneSessionAndTheNext:
 class TestWhereTheyAreKept:
     def test_beside_the_player_s_other_files(self, monkeypatch, tmp_path):
         monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
-        from glisteel.tracks import home
         assert os.path.dirname(records_path()) == home()
 
     def test_asking_where_does_not_make_the_file(self, monkeypatch, tmp_path):
@@ -181,7 +181,7 @@ class TestTheTableSurvivesBeingWritten:
         """
         table = Records(path)
         table.offer('aaa', 84.115)
-        table._tables['zzz'] = [_Unwritable()]
+        table._tables['zzz'] = [_Unwritable()]  # noqa: SLF001 plants a record that cannot be written
         return table
 
     def test_a_failed_write_leaves_the_previous_table(self, tmp_path) -> None:

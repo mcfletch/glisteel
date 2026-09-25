@@ -14,18 +14,24 @@ import numpy as np
 import pytest
 from omi_physics.world import PhysicsWorld
 
-from glisteel import models
+from glisteel import models, scenarios
+from glisteel.game import build_parser
 from glisteel.traffic import (
     CRUISING,
     DEFAULT_TRAFFIC,
+    EDGE_BAND,
     EVADING,
+    HEADWAY,
     IN_THE_WAY,
+    PASSING_SECONDS,
     PULLING_OFF,
+    RACING_SPEED,
     REACTION,
     SLOWING,
     SPEED_LIMIT,
     Traffic,
     TrafficCar,
+    cars_for,
 )
 from glisteel.world import Course, Structure
 
@@ -293,7 +299,6 @@ class TestTrafficYouCanSeeAndHit:
     """
 
     def _fleet(self, **named):
-        from omi_physics.world import PhysicsWorld
         world = PhysicsWorld()
         named.setdefault('course', _ring())
         named.setdefault('count', 4)
@@ -522,7 +527,6 @@ class TestWhichWayACarIsPointing:
             tuple(car.forward()), abs=1e-6)
 
     def test_on_a_road_running_the_other_axis_too(self) -> None:
-        from glisteel.world import Course
         count = 101
         x = np.linspace(0.0, 1000.0, count)
         course = Course(name='road', centreline=np.stack(
@@ -555,7 +559,6 @@ class TestStandingOnTheRoad:
     """
 
     def _fleet(self, course=None):
-        from omi_physics.world import PhysicsWorld
         world = PhysicsWorld()
         return world, Traffic(course=course or _ring(), count=1, seed=2,
                               physics=world)
@@ -563,14 +566,14 @@ class TestStandingOnTheRoad:
     def test_a_car_rides_the_road_it_is_on(self) -> None:
         _world, traffic = self._fleet()
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
-        assert float(traffic._standing(traffic.cars[0])[1]) < 1.5
+        assert float(traffic._standing(traffic.cars[0])[1]) < 1.5  # noqa: SLF001 where a traffic car stands, before it is drawn
 
     def test_and_it_is_hit_about_its_own_middle(self) -> None:
         _world, traffic = self._fleet()
         traffic.update(np.array([300.0, 0.0, 0.0]), 0.0)
         car = traffic.cars[0]
-        assert float(traffic._centre(car)[1]) == pytest.approx(
-            float(traffic._standing(car)[1]) + car.kind.height / 2.0)
+        assert float(traffic._centre(car)[1]) == pytest.approx(  # noqa: SLF001 where a traffic car is drawn
+            float(traffic._standing(car)[1]) + car.kind.height / 2.0)  # noqa: SLF001 where a traffic car stands, before it is drawn
 
     def test_it_stands_on_the_surface_rather_than_on_the_crown(self) -> None:
         """A road is crowned so that it drains, and a car keeping its own side
@@ -737,16 +740,13 @@ class TestTheRoadIsNotEmpty:
     def test_and_the_game_leaves_how_much_to_the_road(self):
         """Not a number decided at import: how many cars make a good lap
         depends on how long the lap is, and only the world knows that."""
-        from glisteel.game import build_parser
         assert build_parser().parse_args(['w.json']).traffic is None
 
     def test_and_the_road_answers_with_something(self):
-        from glisteel import scenarios
         world = scenarios.circuit().world(traffic=None)
         assert world.traffic is not None and world.traffic.count > 0
 
     def test_an_empty_circuit_is_still_askable_for(self):
-        from glisteel.game import build_parser
         assert build_parser().parse_args(['w.json', '--traffic', '0']).traffic == 0
 
 
@@ -758,7 +758,6 @@ class TestTrafficComesFromBeyondWhatCanBeSeen:
     """
 
     def _traffic(self, count=8, course=None):
-        from glisteel.traffic import Traffic
         course = course if course is not None else _course(length=8000.0,
                                                            count=801)
         traffic = Traffic(course, count=count, seed=3)
@@ -766,11 +765,10 @@ class TestTrafficComesFromBeyondWhatCanBeSeen:
         return traffic
 
     def test_nothing_is_placed_where_a_driver_would_see_it_arrive(self) -> None:
-        from glisteel.traffic import EDGE_BAND
         traffic = self._traffic()
-        here = traffic._station_of(traffic.course.point(0))
+        here = traffic._station_of(traffic.course.point(0))  # noqa: SLF001 the traffic model's own station arithmetic
         for car in traffic.cars:
-            gap = traffic._gap(here, car.station)
+            gap = traffic._gap(here, car.station)  # noqa: SLF001 the traffic model's own station arithmetic
             assert gap >= traffic.reach - EDGE_BAND - 1.0, (
                 'a car appeared %.0f m away, inside what a driver has road '
                 'for' % gap)
@@ -781,7 +779,6 @@ class TestTrafficComesFromBeyondWhatCanBeSeen:
         :data:`HEADWAY` from each other are those going the same way on the
         same side -- a quarter of a two-way road's traffic. A band too narrow
         for them is a road that never fills up."""
-        from glisteel.traffic import DEFAULT_TRAFFIC, EDGE_BAND, HEADWAY
         together = max(DEFAULT_TRAFFIC // 4, 1)
         assert EDGE_BAND >= HEADWAY * together, (
             '%d m of band for %d cars %d m apart'
@@ -790,7 +787,6 @@ class TestTrafficComesFromBeyondWhatCanBeSeen:
     def test_the_road_fills_up_as_the_driver_goes_down_it(self) -> None:
         """Only a few fit in the band at once, so a road is populated by being
         driven along rather than by being conjured whole."""
-        from glisteel.traffic import Traffic
         course = _course(length=20000.0, count=2001)
         traffic = Traffic(course, count=8, seed=3)
         for step in range(400):
@@ -838,19 +834,15 @@ class TestWhichWayTheTrafficGoes:
 
 class TestHowMuchTrafficMakesARace:
     def test_it_is_worked_out_from_how_often_a_racer_wants_to_meet_one(self):
-        from glisteel.traffic import cars_for
         assert cars_for(seconds=5.0) > cars_for(seconds=20.0)
 
     def test_a_road_with_traffic_coming_the_other_way_needs_more_of_it(self):
-        from glisteel.traffic import cars_for
         assert cars_for(two_way=True) > cars_for(two_way=False)
 
     def test_a_faster_racer_catches_them_sooner_and_needs_fewer(self):
-        from glisteel.traffic import cars_for
         assert cars_for(racing=80.0) < cars_for(racing=40.0)
 
     def test_there_is_always_at_least_one(self):
-        from glisteel.traffic import cars_for
         assert cars_for(seconds=1e6) == 1
 
 
@@ -950,7 +942,6 @@ class TestNoCarEndsUpInTheDitch:
 
     def driven(self, seconds=180.0, count=12, seed=3):
         """How far out every car's outer side was, every second, over a run."""
-        from glisteel.traffic import Traffic
         course = _course(length=4000.0, count=401)
         crowd = Traffic(course, count=count, seed=seed)
         step, at = 1.0 / 60.0, 0.0
@@ -1116,17 +1107,14 @@ class TestARoadHasToBePassable:
     def test_a_long_road_is_sized_by_how_often_a_racer_meets_somebody(self
                                                                      ) -> None:
         """The reach rule still decides, where the road is long enough."""
-        from glisteel.traffic import cars_for
         assert cars_for(two_way=True, length=20000.0) == cars_for(two_way=True)
 
     def test_a_short_circuit_carries_fewer(self) -> None:
-        from glisteel.traffic import cars_for
         assert cars_for(two_way=True, length=1695.0) < cars_for(two_way=True)
 
     def test_and_leaves_room_for_a_pass_between_the_oncoming_ones(self) -> None:
         """Which is the whole point: the gap between cars coming the other way
         has to be longer than the road a pass crosses."""
-        from glisteel.traffic import PASSING_SECONDS, RACING_SPEED, cars_for
         length = 1695.0
         count = cars_for(two_way=True, length=length)
         oncoming = count / 2.0
@@ -1136,13 +1124,11 @@ class TestARoadHasToBePassable:
     def test_a_one_way_road_is_not_capped_this_way(self) -> None:
         """There is no oncoming lane to find a gap in; what limits a pass there
         is a different question and not this one."""
-        from glisteel.traffic import cars_for
         assert cars_for(length=1695.0) == cars_for()
 
     def test_there_is_always_at_least_one_car(self) -> None:
         """A road so short that the sum says none is still a road with traffic
         on it -- an empty one is what ``--traffic 0`` is for."""
-        from glisteel.traffic import cars_for
         assert cars_for(two_way=True, length=50.0) >= 1
 
 

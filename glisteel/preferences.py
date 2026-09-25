@@ -29,6 +29,8 @@ from typing import Any
 
 from OpenGLContext import atomicfiles
 
+from glisteel import schemes, tracks
+
 log = logging.getLogger(__name__)
 
 __all__ = ['PREFERENCES', 'Preferences', 'preferences_path']
@@ -39,7 +41,6 @@ PREFERENCES = 'preferences.json'
 
 def preferences_path() -> str:
     """Where this player's settings are kept."""
-    from glisteel import tracks
     return os.path.join(tracks.home(), PREFERENCES)
 
 
@@ -103,5 +104,4 @@ class Preferences:
 
 def _a_scheme(name: Any) -> str | None:
     """``name`` if some way of driving is called that, else None."""
-    from glisteel import schemes
     return str(name) if name in schemes.available() else None

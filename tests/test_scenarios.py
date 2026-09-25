@@ -14,6 +14,8 @@ import numpy as np
 import pytest
 
 from glisteel import scenarios
+from glisteel.car import Car
+from glisteel.world import Course
 
 STEP = 1.0 / 120.0
 
@@ -109,7 +111,6 @@ class TestWhatAScenarioCarries:
 
 def _settled(world, position, heading, seconds=2.0):
     """A car dropped at a point and left to find the ground."""
-    from glisteel.car import Car
     world.stream(tuple(float(v) for v in position), 720.0)
     car = Car(world.physics, position=position, heading=heading)
     for _ in range(int(seconds / STEP)):
@@ -134,7 +135,6 @@ class TestARoadWithSomewhereToPassOnIt:
     """
 
     def _course(self, piece):
-        from glisteel.world import Course
         line = np.stack([piece.plan[:, 0], np.zeros(len(piece.plan)),
                          piece.plan[:, 1]], axis=-1)
         steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
@@ -167,11 +167,11 @@ class TestARoadWithSomewhereToPassOnIt:
 
     def test_and_a_driver_can_see_a_long_way_down_its_straights(self) -> None:
         course = self._course(scenarios.oval())
-        assert course._sight.max() > 300.0
+        assert course._sight.max() > 300.0  # noqa: SLF001 the sight distance the course caches per point
 
     def test_which_a_ring_of_the_same_size_cannot(self) -> None:
         ring = self._course(scenarios.circuit(radius_x=400.0, radius_z=300.0))
-        assert ring._sight.max() < 200.0
+        assert ring._sight.max() < 200.0  # noqa: SLF001 the sight distance the course caches per point
 
     def test_it_is_in_the_catalogue_by_name(self) -> None:
         assert scenarios.named('oval').name == 'oval'

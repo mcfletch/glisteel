@@ -42,6 +42,8 @@ from OpenGLContext.contentpacks import (
     fetch,
 )
 
+from glisteel import tracks
+
 log = logging.getLogger(__name__)
 
 __all__ = ['BASE', 'CATALOG_PATH', 'CONTENT', 'IN_WHEEL', 'NAMESPACE',
@@ -132,7 +134,6 @@ def installed_tracks(store: ContentStore | None = None) -> list[Any]:
     directory with a manifest beside a tileset, and nothing downstream needs to
     know which it was.
     """
-    from glisteel import tracks
     where = _ours(store)
     found = []
     for pack in track_packs():

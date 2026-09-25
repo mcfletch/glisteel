@@ -5,6 +5,7 @@ the camera does. What is left for a window is the picture, which
 ``tests/test_plays.py`` takes.
 """
 
+import dataclasses
 import math
 
 import numpy as np
@@ -12,6 +13,9 @@ import pytest
 from omi_physics.world import PhysicsWorld
 from OpenGLContext.loaders.assets import bounds
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.scenegraph.shape import Shape
+from OpenGLContext.scenegraph.switch import Switch
+from OpenGLContext.viewer import environment
 
 from glisteel import models
 from glisteel.camera import ChaseCamera
@@ -24,7 +28,8 @@ from glisteel.car import (
     car_body_mesh,
     wheel_mesh,
 )
-from glisteel.world import static_ground
+from glisteel.game import race_fog
+from glisteel.world import VIEW_DISTANCE, static_ground
 
 STEP = 1.0 / 120.0
 
@@ -93,7 +98,7 @@ class TestTheCar:
     def test_the_wheels_hang_and_compress(self, floor) -> None:
         car = Car(floor, position=(0, 1.0, 0))
         _drive(floor, car, 2.0)
-        drops = [float(node.translation[1]) for node in car._wheel_nodes]
+        drops = [float(node.translation[1]) for node in car._wheel_nodes]  # noqa: SLF001 the wheel nodes the car poses each frame
         assert len(drops) == 4
         assert all(-1.0 < drop < 1.0 for drop in drops)
 
@@ -101,16 +106,16 @@ class TestTheCar:
         car = Car(floor, position=(0, 1.0, 0))
         _drive(floor, car, 1.0)
         _drive(floor, car, 1.0, throttle=0.5, steer=1.0)
-        turned = [abs(float(node.rotation[3])) for node in car._wheel_nodes]
+        turned = [abs(float(node.rotation[3])) for node in car._wheel_nodes]  # noqa: SLF001 the wheel nodes the car poses each frame
         assert max(turned) > 0.05
         assert min(turned) == pytest.approx(0.0)
 
     def test_the_wheels_roll_as_it_goes(self, floor) -> None:
         car = Car(floor, position=(0, 1.0, 0))
         _drive(floor, car, 1.5)
-        before = float(car._wheel_nodes[0].children[0].rotation[3])
+        before = float(car._wheel_nodes[0].children[0].rotation[3])  # noqa: SLF001 the wheel nodes the car poses each frame
         _drive(floor, car, 2.0, throttle=1.0)
-        assert abs(float(car._wheel_nodes[0].children[0].rotation[3]) - before) > 1.0
+        assert abs(float(car._wheel_nodes[0].children[0].rotation[3]) - before) > 1.0  # noqa: SLF001 the wheel nodes the car poses each frame
 
     def test_a_heavier_car_rides_at_the_same_height(self, floor) -> None:
         """Spring rates are in car-weights per metre, so a tuning survives a
@@ -125,7 +130,6 @@ class TestTheCar:
             float(light.position[1]), abs=0.01)
 
     def test_a_softer_spring_squats_lower(self, floor) -> None:
-        import dataclasses
         stiff = Car(floor, CarSpec(), position=(-20.0, 2.0, 0))
         soft = Car(floor, CarSpec(), position=(20.0, 2.0, 0))
         # The same car with softer springs and nothing else changed: where the
@@ -144,20 +148,17 @@ class TestTheCar:
 
 class TestHowItIsDrawn:
     def test_the_body_is_a_closed_solid(self) -> None:
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
         mesh = car_body_mesh(PBRMaterial())
         assert len(mesh.positions) % 3 == 0
         assert len(mesh.indices) == len(mesh.positions)
 
     def test_the_body_is_car_sized(self) -> None:
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
         points = car_body_mesh(PBRMaterial()).positions
         size = points.max(axis=0) - points.min(axis=0)
         assert 1.5 < size[0] < 2.2                    # across
         assert 3.5 < size[2] < 5.0                    # along
 
     def test_every_face_has_a_normal(self) -> None:
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
         mesh = car_body_mesh(PBRMaterial())
         assert np.allclose(np.linalg.norm(mesh.normals, axis=1), 1.0, atol=1e-4)
 
@@ -171,7 +172,7 @@ class TestHowItIsDrawn:
         """The outside of the car -- bodywork and wheels -- switches together."""
         car = Car(floor, position=(0, 1.0, 0))
         assert len(car.node.children[0].choice[0].children) == 5
-        assert len(car._wheel_nodes) == 4
+        assert len(car._wheel_nodes) == 4  # noqa: SLF001 the wheel nodes the car poses each frame
 
 
 class TestTheCamera:
@@ -286,8 +287,8 @@ class TestTheCarIsPaintedWhereTheRendererLooks:
         The model carries its own paint and keeps it; the spec's colour is for
         the car drawn when there is no model to load.
         """
-        monkeypatch.setattr(models.ART, 'load', lambda relative: None)
-        monkeypatch.setattr(models.ART, 'shared', lambda relative: None)
+        monkeypatch.setattr(models.ART, 'load', lambda _relative: None)
+        monkeypatch.setattr(models.ART, 'shared', lambda _relative: None)
         car = Car(floor, CarSpec(paint=(0.8, 0.1, 0.05)), position=(0, 1.0, 0))
         colours = [tuple(round(float(v), 3)
                          for v in shape.appearance.material.baseColor)
@@ -304,7 +305,6 @@ class TestTheCarIsPaintedWhereTheRendererLooks:
 
 
 def _shapes(node, out=None):
-    from OpenGLContext.scenegraph.shape import Shape
     out = [] if out is None else out
     if isinstance(node, Shape):
         out.append(node)
@@ -322,25 +322,18 @@ class TestTheAirTheWorldIsSeenThrough:
 
     def test_the_haze_and_the_fog_are_the_same_colour(self) -> None:
         """Terrain fades into the air the background is already made of."""
-        from OpenGLContext.viewer import environment
-
-        from glisteel.game import race_fog
         assert (tuple(race_fog().color)
                 == pytest.approx(tuple(environment.HORIZON_HAZE)))
 
     def test_it_thickens_over_a_distance_not_at_a_line(self) -> None:
-        from glisteel.game import race_fog
         assert race_fog().fogType == 'EXPONENTIAL'
 
     def test_the_far_side_of_the_world_is_in_it(self) -> None:
         """Whatever the far plane still draws must be hazed, or the edge shows."""
-        from glisteel.game import race_fog
-        from glisteel.world import VIEW_DISTANCE
         assert race_fog().visibilityRange < VIEW_DISTANCE
 
     def test_the_road_ahead_is_not(self) -> None:
         """A driver has to see far enough to place the car for a corner."""
-        from glisteel.game import race_fog
         assert race_fog().visibilityRange > 600.0
 
 
@@ -386,7 +379,6 @@ class TestTheDriverIsInsideTheCar:
 
 def _drawn(node) -> bool:
     """Whether anything under a car's node would be rendered."""
-    from OpenGLContext.scenegraph.switch import Switch
     for child in node.children:
         if isinstance(child, Switch):
             return bool(child.renderedChildren())
@@ -499,7 +491,7 @@ class TestTheCarIsTheModel:
         car = Car(floor)
         car.hidden = True
         assert not any(_shapes(node) and _visible(node, car)
-                       for node in car._wheel_nodes)
+                       for node in car._wheel_nodes)  # noqa: SLF001 the wheel nodes the car poses each frame
 
     def test_the_rim_follows_the_front_wheels(self, floor) -> None:
         """Steering left turns the rim one way, right the other, straight none."""
@@ -512,14 +504,14 @@ class TestTheCarIsTheModel:
 
     def test_it_rolls_on_the_wheel_models(self, floor) -> None:
         car = Car(floor)
-        assert len(car._wheel_nodes) == 4
-        for node in car._wheel_nodes:
+        assert len(car._wheel_nodes) == 4  # noqa: SLF001 the wheel nodes the car poses each frame
+        for node in car._wheel_nodes:  # noqa: SLF001 the wheel nodes the car poses each frame
             assert _shapes(node), 'a wheel with nothing drawn in it'
 
     def test_a_missing_model_leaves_a_car_that_still_drives(self, floor, monkeypatch) -> None:
         """Art is not rules: without its model the car is drawn from primitives."""
-        monkeypatch.setattr(models.ART, 'load', lambda relative: None)
-        monkeypatch.setattr(models.ART, 'shared', lambda relative: None)
+        monkeypatch.setattr(models.ART, 'load', lambda _relative: None)
+        monkeypatch.setattr(models.ART, 'shared', lambda _relative: None)
         car = Car(floor)
         _drive(floor, car, 1.0, throttle=0.5)
         assert _shapes(car.node), 'nothing at all is drawn'

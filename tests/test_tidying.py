@@ -18,7 +18,7 @@ from glisteel.race import ROUGH, TARMAC, VERGE, Collisions, OffRoad
 from glisteel.records import Records
 from glisteel.scripted import Script
 from glisteel.session import Session
-from glisteel.traffic import SPEED_LIMIT, TrafficCar
+from glisteel.traffic import CRUISING, SLOW_FOR, SPEED_LIMIT, Traffic, TrafficCar
 from glisteel.world import Course
 
 
@@ -38,7 +38,6 @@ class TestTheSpeedARoadIsDrivenAt:
         assert SPEED_LIMIT * 3.6 == pytest.approx(80.0, abs=0.5)
 
     def test_a_car_with_nothing_said_drives_it(self) -> None:
-        from glisteel.traffic import Traffic
         assert Traffic(_course()).limit == pytest.approx(SPEED_LIMIT)
 
 
@@ -49,13 +48,12 @@ class TestWhyATrafficCarSlowedDown:
         assert car.reason == 'a tractor'
 
     def test_it_is_cleared_when_the_car_picks_up_again(self) -> None:
-        from glisteel.traffic import CRUISING, SLOW_FOR
         car = TrafficCar(_course(), station=0.0, heading=1, limit=25.0)
         car.brake_for('a tractor')
         # Wound past the hold rather than driven there: a driver decides things
         # at random, and one that braked again would be a different answer to
         # the question being asked.
-        car._elapsed += SLOW_FOR + 1.0
+        car._elapsed += SLOW_FOR + 1.0  # noqa: SLF001 winds a traffic car past its hold
         car.advance(0.0)
         assert car.state == CRUISING
         assert car.reason == ''
@@ -179,6 +177,6 @@ class TestStartingAFreshRace:
     def test_it_does_not_carry_the_last_races_leftover_time(self) -> None:
         session = Session(scenarios.straight().world())
         session.advance(0.007)               # less than one physics step
-        assert session._accumulated > 0.0
+        assert session._accumulated > 0.0  # noqa: SLF001 the physics time not yet stepped
         session.restart()
-        assert session._accumulated == 0.0
+        assert session._accumulated == 0.0  # noqa: SLF001 the physics time not yet stepped

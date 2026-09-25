@@ -1,6 +1,8 @@
 """The four numbers a driver acts on, and where they go."""
 
 
+from OpenGLContext.ui.metrics import FontMetrics
+
 from glisteel.hud import FAST_KPH, HOME, RaceHUD
 from glisteel.run import COUNTDOWN, ENDED, FINISHED, RACING
 from glisteel.session import Readings
@@ -109,7 +111,6 @@ class TestWhereTheyGo:
 
 
 def _laid_out(viewport=(1280, 720)):
-    from OpenGLContext.ui.metrics import FontMetrics
     hud = RaceHUD()
     hud.show(Readings(speed_kph=120.0, timing=_Timing(current=12.0)))
     hud.layout(viewport, FontMetrics(char_width=9, char_height=16))

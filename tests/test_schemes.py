@@ -11,9 +11,15 @@ import pytest
 
 from glisteel import scenarios, schemes
 from glisteel.assist import Straighten
+from glisteel.driver import Autopilot, StandIn
+from glisteel.game import driver_for
+from glisteel.options import Options
 from glisteel.schemes import QUEUED_FOR
+from glisteel.scripted import Script
 from glisteel.session import Session
-from glisteel.steering import CONTROLS
+from glisteel.steering import CONTROLS, MouseWheel
+from glisteel.trace import drive
+from glisteel.world import Course
 from glisteel.zone import DrivableZone
 
 STEP = 1.0 / 120.0
@@ -68,7 +74,6 @@ class _Session:
 
 def _wide():
     """A four-lane road, for the lanes there are on one."""
-    from glisteel.world import Course
     line = scenarios.straight(length=800.0).centreline()
     return Course(
         name='wide', centreline=line, carriageway_width=14.4, total_width=18.0,
@@ -203,7 +208,6 @@ class TestTheLine:
         assert session.assist.line == pytest.approx(1.8, abs=0.05)
 
     def test_the_pointer_moves_the_line_as_well(self) -> None:
-        from glisteel.steering import MouseWheel
         pointer = MouseWheel(width=1000)
         scheme = schemes.named('line', pointer=pointer)
         session = _Session()
@@ -367,7 +371,6 @@ class TestTheLanes:
         assert session.assist.line == pytest.approx(-1.8, abs=0.01)
 
     def test_the_pointer_picks_the_lane_it_is_nearest(self) -> None:
-        from glisteel.steering import MouseWheel
         pointer = MouseWheel(width=1000)
         scheme = schemes.named('lanes', pointer=pointer)
         session = _Session(across=1.8)
@@ -380,7 +383,6 @@ class TestTheLanes:
         """A pointer sits in the middle of the window until it is moved, and a
         car sent to the middle of the road as the run starts is a car sent into
         the oncoming lane by nobody."""
-        from glisteel.steering import MouseWheel
         scheme = schemes.named('lanes', pointer=MouseWheel(width=1000))
         session = _Session(across=1.8)
         for _ in range(60):
@@ -427,35 +429,28 @@ class TestWhoTheWindowHandsTheCarTo:
         return Session(scenarios.straight(length=800.0).world(traffic=0))
 
     def _config(self, **named):
-        from glisteel.options import Options
         return Options(world='x', **named)
 
     def test_it_is_the_way_of_driving_that_was_asked_for(self) -> None:
-        from glisteel.game import driver_for
         found = driver_for(self._config(control='lanes'), self._session())
         assert isinstance(found, schemes.Lanes)
 
     def test_and_it_carries_the_aid_the_player_asked_for(self) -> None:
-        from glisteel.game import driver_for
         found = driver_for(self._config(assist=0.3), self._session())
         assert found.trim == pytest.approx(0.3)
 
     def test_the_pointer_goes_with_whichever_way_it_is(self) -> None:
-        from glisteel.game import driver_for
         found = driver_for(self._config(control='line', mouse=True),
                            self._session())
         assert found.source.pointer is not None
 
     def test_and_without_it_there_is_no_pointer_to_steer_with(self) -> None:
-        from glisteel.game import driver_for
         assert driver_for(self._config(), self._session()).source.pointer is None
 
     def test_a_car_that_drives_itself_in_easy_mode_is_a_stand_in(self) -> None:
         """A way of driving that steers for the driver is a way of driving to be
         *judged*, so the autopilot drives it the way a player would: through the
         controls, not past them."""
-        from glisteel.driver import StandIn
-        from glisteel.game import driver_for
         found = driver_for(self._config(control='lanes', autopilot=True),
                            self._session())
         assert isinstance(found, StandIn)
@@ -465,8 +460,6 @@ class TestWhoTheWindowHandsTheCarTo:
         """Where the way of driving is the wheel, the autopilot turns it:
         pressing a steering key to wind a wheel it could turn directly is a
         worse driver rather than a truer one."""
-        from glisteel.driver import Autopilot
-        from glisteel.game import driver_for
         found = driver_for(self._config(autopilot=True), self._session())
         assert isinstance(found, Autopilot)
 
@@ -483,8 +476,6 @@ class TestDrivingOneToAScript:
     LINE = 'throttle 0..4; left 5..5.3'
 
     def _drive(self, scheme, seconds=11.0):
-        from glisteel.scripted import Script
-        from glisteel.trace import drive
         session = Session(scenarios.straight(length=1600.0).world(traffic=0))
         return drive(session, Script.parse(self.LINE, scheme=scheme),
                      seconds=seconds)
@@ -515,7 +506,7 @@ class _Blocked(_Session):
         super().__init__(*args, **named)
         self.occupied = occupied
 
-    def lane_clear(self, across, ahead=0.0, behind=0.0):
+    def lane_clear(self, across, ahead=0.0, behind=0.0):  # noqa: ARG002 answers SessionLike.lane_clear
         return self.occupied is None or abs(across - self.occupied) > 0.5
 
     def clears(self):

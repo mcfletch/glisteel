@@ -12,6 +12,7 @@ import pytest
 from glisteel import scenarios
 from glisteel.scripted import Hold, Script
 from glisteel.session import PHYSICS_STEP, Session
+from glisteel.steering import WIND_ON
 from glisteel.trace import drive
 
 
@@ -115,7 +116,6 @@ class TestTheMeasures:
 
     def test_the_steering_rate_is_what_the_wheel_does_a_second(self) -> None:
         """Held to a lock, the wheel winds on at the rate it is given."""
-        from glisteel.steering import WIND_ON
         trace = drive(_session(), Script.parse('throttle 0..8; left 2..8'),
                       seconds=7.0)
         assert trace.steering_rate() == pytest.approx(WIND_ON, rel=0.15)

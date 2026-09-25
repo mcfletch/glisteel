@@ -6,8 +6,9 @@ import pytest
 import support
 from OpenGLContext.scenegraph.road import advisory_speed, corner_speed
 
-from glisteel import scenarios
+from glisteel import scenarios, schemes
 from glisteel.hud import RaceHUD
+from glisteel.scripted import Script
 from glisteel.session import Readings, Session
 from glisteel.world import Course
 
@@ -111,7 +112,6 @@ class TestTheEndOfAnOpenRoad:
 
 class TestBeingToldAboutIt:
     def _session(self, scheme='lanes'):
-        from glisteel import schemes
         session = Session(scenarios.sweeper(radius=90.0).world(traffic=0))
         session.driver = schemes.named(scheme)
         session.run.go()
@@ -151,15 +151,12 @@ class TestADriveWrittenDown:
                                                                        ) -> None:
         """What the harness measures is what a player gets, so a script driving
         under a way of driving that is advised is advised."""
-        from glisteel.scripted import Script
         assert Script.parse('throttle 0..2', scheme='lanes').advises
 
     def test_and_one_that_is_not_is_not(self) -> None:
-        from glisteel.scripted import Script
         assert not Script.parse('throttle 0..2', scheme='wheel').advises
 
     def test_a_scripted_drive_reads_the_road_ahead(self) -> None:
-        from glisteel.scripted import Script
         session = Session(scenarios.sweeper(radius=90.0).world(traffic=0))
         session.driver = Script.parse('throttle 0..4', scheme='lanes')
         session.run.go()
@@ -170,15 +167,12 @@ class TestADriveWrittenDown:
 
 class TestWhichWaysOfDrivingAdvise:
     def test_the_lane_switch_tells_a_driver_to_slow_down(self) -> None:
-        from glisteel import schemes
         assert schemes.named('lanes').advises
 
     def test_and_driving_it_yourself_does_not(self) -> None:
-        from glisteel import schemes
         assert not schemes.named('wheel').advises
 
     def test_a_run_only_reads_the_road_for_a_driver_who_wants_it(self) -> None:
-        from glisteel import schemes
         session = Session(scenarios.sweeper(radius=90.0).world(traffic=0))
         session.driver = schemes.named('wheel')
         session.advance(1.0 / 60.0)

@@ -4,9 +4,13 @@ Everything worth asserting about a menu is structural -- which buttons it has,
 what each one does, which tracks it offers, what the finish says -- so none of
 it needs a window. Building a panel touches no GL.
 """
-import pytest
+import threading
 
-from glisteel import menu
+import pytest
+from OpenGLContext.contentpacks.fetch import Cancelled, FetchJob
+from OpenGLContext.contentpacks.pack import ContentPack
+
+from glisteel import menu, schemes
 from glisteel.records import Record
 from glisteel.session import Result
 from glisteel.tracks import Track
@@ -359,12 +363,10 @@ class _Gate:
     """A fetch that waits to be let through, fails, or hears a stop."""
 
     def __init__(self, fail=None):
-        import threading
         self.go = threading.Event()
         self.fail = fail
 
     def __call__(self, pack, progress, cancel):
-        from OpenGLContext.contentpacks.fetch import Cancelled
         progress(pack.approximate_bytes // 2, pack.approximate_bytes)
         while not self.go.wait(0.01):
             if cancel():
@@ -405,7 +407,6 @@ class TestDownloadsAcrossOpenings:
 
     @pytest.fixture
     def downloads(self, gate):
-        from OpenGLContext.contentpacks.fetch import FetchJob
         here = []
         self.arrived = []
 
@@ -419,7 +420,7 @@ class TestDownloadsAcrossOpenings:
                               on_arrived=lambda: self.arrived.append(1))
 
     def finish(self, downloads):
-        downloads.screen.job._thread.join(timeout=10)
+        downloads.screen.job._thread.join(timeout=10)  # noqa: SLF001 FetchJob has no public way to wait for its worker
         downloads.poll()
 
     def test_a_download_that_arrives_is_said_and_leaves_the_offer(
@@ -477,7 +478,6 @@ class TestDownloadsAcrossOpenings:
 
 
 def _offered(**named):
-    from OpenGLContext.contentpacks.pack import ContentPack
     base = dict(url='https://example.invalid/a.tar.gz', archive='tar',
                 copyright='Somebody, CC-BY 4.0', marker='tileset.json')
     return [ContentPack(key='glisteel/ashdown', title='Ashdown',
@@ -489,7 +489,6 @@ def _offered(**named):
 
 
 def _art():
-    from OpenGLContext.contentpacks.pack import ContentPack
     return ContentPack(key='glisteel/forest-art', title='Forest art',
                        url='https://example.invalid/art.tar.gz',
                        directory='forest-art', archive='tar',
@@ -555,7 +554,6 @@ class TestChoosingHowToDrive:
     """
 
     def test_the_screen_offers_every_way_of_driving(self):
-        from glisteel import schemes
         offered = widget(menu.driving_screen(), 'scheme')
         assert list(offered.options) == list(schemes.available())
 
@@ -565,7 +563,6 @@ class TestChoosingHowToDrive:
 
     def test_each_says_what_it_does(self):
         """A name alone makes a player try all five to find out which is which."""
-        from glisteel import schemes
         found = _text(menu.driving_screen(chosen='lanes'))
         assert schemes.named('lanes').summary in found
 
@@ -586,7 +583,7 @@ class TestChoosingHowToDrive:
     def test_choosing_closes_it(self):
         """The menu comes back over the race; this left underneath it would
         stand over the race once the menu was resumed."""
-        panel = menu.driving_screen(on_choose=lambda name: None)
+        panel = menu.driving_screen(on_choose=lambda _name: None)
         widget(panel, 'use').activate()
         assert panel.closed
 

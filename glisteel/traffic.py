@@ -27,6 +27,7 @@ from omi_physics import model
 from OpenGLContext.scenegraph.transform import Transform
 
 from glisteel import models
+from glisteel.car import BODY_HEIGHT, car_nodes
 from glisteel.geometry import yaw_to_face
 
 __all__ = ['TrafficCar', 'Traffic', 'CRUISING', 'SLOWING', 'PULLING_OFF',
@@ -966,7 +967,6 @@ class Traffic:
         if scene is not None:
             self._scenes[car] = scene
             return Transform(children=[scene.group])
-        from glisteel.car import BODY_HEIGHT, car_nodes
         # Without a model, the primitive car -- which is drawn about its own
         # middle, where a vehicle model stands on its wheels.
         return Transform(children=[Transform(

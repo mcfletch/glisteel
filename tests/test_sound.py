@@ -7,11 +7,16 @@ window and no audio thread.
 """
 import numpy as np
 import pytest
+from omi_audio import model
+from omi_audio.device import NullDevice
+from omi_audio.engine import AudioEngine
 
 from glisteel.sound import (
     MOTOR_HZ,
     SETTLE,
+    TYRE_SCRUB,
     CarSound,
+    Soundtrack,
     impact_clip,
     motor_clip,
     tyre_clip,
@@ -155,7 +160,6 @@ class TestALetGoTyreIsHeard:
     def test_and_a_handbrake_turn_is_as_loud_as_it_gets(self):
         """5.0 m/s, the worst measured, is past full scale rather than short
         of it: the loudest slide the car can produce is the loudest sound."""
-        from glisteel.sound import TYRE_SCRUB
         worst = settled(CarSound(), **_driving(speed=30.0, slip=5.0))
         assert worst.tyres.gain > TYRE_SCRUB
 
@@ -252,7 +256,6 @@ class _Car:
 
 class TestTheSoundtrackIsAPieceOfScene:
     def test_it_is_one_emitter_carrying_every_voice(self):
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         assert len(track.node.sources) == 4
 
@@ -260,13 +263,9 @@ class TestTheSoundtrackIsAPieceOfScene:
         """The listener is *in* this car. Panning the driver's own motor across
         their head as the car turns would be wrong, and putting it at a
         distance from them wrong twice."""
-        from omi_audio import model
-
-        from glisteel.sound import Soundtrack
         assert Soundtrack(sample_rate=8000).node.type == model.GLOBAL
 
     def test_driving_writes_the_gains_onto_the_nodes(self):
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         for _ in range(120):
             track.update(FRAME, _Car(speed=50.0, throttle=1.0, slip=4.0))
@@ -276,7 +275,6 @@ class TestTheSoundtrackIsAPieceOfScene:
         assert track.wind.gain == pytest.approx(track.sound.wind.gain)
 
     def test_a_car_in_the_air_is_read_off_its_wheels(self):
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         for _ in range(120):
             track.update(FRAME, _Car(speed=40.0, slip=9.0, grounded=False))
@@ -289,8 +287,6 @@ class TestItPlaysThroughTheEngine:
 
     @pytest.fixture
     def engine(self):
-        from omi_audio.device import NullDevice
-        from omi_audio.engine import AudioEngine
         made = AudioEngine(device=NullDevice(sample_rate=8000), voices=8)
         yield made
         made.close()
@@ -307,7 +303,6 @@ class TestItPlaysThroughTheEngine:
         engine.mixer.mix(int(FRAME * 8000))
 
     def test_the_three_loops_take_a_voice_each_and_keep_them(self, engine):
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         for step in range(120):
             self.frame(track, engine, _Car(speed=30.0), step * FRAME)
@@ -315,7 +310,6 @@ class TestItPlaysThroughTheEngine:
 
     def test_an_impact_sounds_once_rather_than_every_frame(self, engine):
         """Once its voice has ended it stays quiet until the next crash."""
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         self.frame(track, engine, _Car(speed=30.0), 0.0)
         assert track.hit(15.0) > 0.0
@@ -329,7 +323,6 @@ class TestItPlaysThroughTheEngine:
     def test_a_crash_is_heard_in_the_order_a_session_runs(self, engine):
         """The physics step reports the crash, the soundtrack updates after
         the steps, and the render pass drives the node after that."""
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         self.frame(track, engine, _Car(speed=30.0), 0.0)
         track.hit(15.0)
@@ -337,7 +330,6 @@ class TestItPlaysThroughTheEngine:
         assert engine.active_voices == 4, 'the bang did not sound'
 
     def test_a_second_crash_is_heard_too(self, engine):
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         track.hit(15.0)
         self.frame(track, engine, _Car(speed=30.0), 0.0)
@@ -350,7 +342,6 @@ class TestItPlaysThroughTheEngine:
         assert engine.active_voices == 4, 'the second bang did not sound'
 
     def test_a_nudge_is_silent(self, engine):
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         self.frame(track, engine, _Car(speed=30.0), 0.0)
         assert track.hit(0.2) == 0.0
@@ -360,7 +351,6 @@ class TestItPlaysThroughTheEngine:
     def test_silence_is_a_valid_backend(self):
         """A machine with no device runs this unchanged: the nodes traverse,
         the engine is None, and nothing plays."""
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         track.update(FRAME, _Car(speed=30.0))
         track.node.updateAudio(None, np.identity(4), 0.0)
@@ -374,7 +364,6 @@ class TestItPlaysThroughTheEngine:
         goes over, which is a crash that arrives as a crunch of clipping rather
         than as a bang.
         """
-        from glisteel.sound import Soundtrack
         track = Soundtrack(sample_rate=8000)
         car = _Car(speed=60.0, throttle=1.0, slip=5.0)
         peak = 0.0

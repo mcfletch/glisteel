@@ -115,7 +115,6 @@ class TestLampsThatDoNotPop:
     already dim by the time it goes, and dim again when the next one arrives."""
 
     def _lamps(self, spacing=25.0, count=12):
-        from glisteel.lighting import Luminaires
         along = np.arange(count) * spacing
         return Luminaires(np.stack([along, np.full(count, 5.0),
                                     np.zeros(count)], axis=-1))
@@ -141,7 +140,6 @@ class TestLampsThatDoNotPop:
         assert len(lamps.burning((300.0, 1.0, 0.0))) <= lamps.count
 
     def test_a_world_with_no_bores_lights_none(self) -> None:
-        from glisteel.lighting import Luminaires
         assert Luminaires(None).burning((0.0, 0.0, 0.0)) == []
 
     def test_the_share_never_jumps_as_the_car_drives_under_them(self) -> None:

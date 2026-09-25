@@ -1370,7 +1370,7 @@ class StandIn:
         self._waited = PASS_AGAIN
         self.refusals = Stretch(REASON_HOLDS)
 
-    def flush(self, session: SessionLike) -> None:
+    def flush(self, session: SessionLike) -> None:  # noqa: ARG002 the session calls a driver's flush with itself
         """End every stretch still open, as at the end of a run.
 
         A refusal is written as it is taken up, so ending one writes nothing.
@@ -1397,13 +1397,13 @@ class StandIn:
         if session is not self._session:
             self._session = session
             self.pilot.course = session.course
-            self.race_at(session.course)
+            self.race_at()
         self.pedals(session, dt)
         self.lanes(session, dt)
         found: tuple[float, float, float] = self.scheme.controls(session, dt)
         return found
 
-    def race_at(self, course: Any) -> None:
+    def race_at(self) -> None:
         """Aim at :data:`RACING_KPH` wherever the road allows it.
 
         Only where the run did not say otherwise: a caller that built this with
@@ -1761,7 +1761,7 @@ class StandIn:
         have now the gap looks like it will last for ever and the car arrives
         in the other lane after the crash.
         """
-        from glisteel.schemes import CROSSING
+        from glisteel.schemes import CROSSING  # noqa: PLC0415 schemes imports driver
         crossing = CROSSING * CROSSING_MARGIN
         now = max(float(session.car.speed()) - float(speed), 0.0)
         pull = max(self.pilot.style.pull, 1e-6)
@@ -1867,7 +1867,7 @@ class StandIn:
         The least that has to fit inside the road a driver can see before they
         are entitled to try; see :meth:`room_to_finish`.
         """
-        from glisteel.schemes import LANE_CHANGE_G
+        from glisteel.schemes import LANE_CHANGE_G  # noqa: PLC0415 schemes imports driver
         lane = LANE_WIDTH
         return THINKING + math.sqrt(2.0 * lane / max(LANE_CHANGE_G, 1e-6))
 

@@ -89,6 +89,10 @@ select = [
     "TRY400",  # an error logged from an except block carries its traceback
     "RUF012",  # a mutable class attribute is declared a ClassVar
     "RUF100",  # no noqa that silences nothing
+    "PLC0415",  # imports at the top, save a cycle or an optional dependency
+    "SLF001",  # no reaching into another object's private members
+    "DTZ",  # datetimes carry their time zone
+    "ARG",  # no parameter nothing reads, save one a protocol fixes
     "S102", "S202", "S301", "S307", "S310",  # no exec, unchecked tar extraction, pickle, eval or unchecked URL scheme
     "PGH003", "PGH004",  # a type: ignore or noqa names the codes it silences
     "PLE0604", "PLE0605",  # __all__ is a list or tuple of strings
@@ -98,6 +102,12 @@ ignore = [
     "E741",   # ambiguous name -- x/y/z read naturally as coordinates
     "UP031",  # percent formatting, as the engine uses throughout
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# The autopilot's tests put each of its judgements -- the room a pass needs,
+# the room behind a car it follows, where it aims, how it pulls out -- to the
+# question directly, below the drive() that combines them.
+"tests/test_driver.py" = ["SLF001"]
 
 [tool.mypy]
 # 3.12 rather than the 3.10 floor in ``requires-python``: numpy's own stubs use

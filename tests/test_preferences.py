@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from glisteel import preferences
+from glisteel import preferences, records, schemes, tracks
 
 
 @pytest.fixture
@@ -50,7 +50,6 @@ class TestAChoiceThatSurvives:
         assert preferences.Preferences(where).control is None
 
     def test_and_one_that_is_named_survives(self, where) -> None:
-        from glisteel import schemes
         with open(where, 'w') as handle:
             json.dump({'control': schemes.DEFAULT}, handle)
         assert preferences.Preferences(where).control == schemes.DEFAULT
@@ -88,7 +87,6 @@ class TestWritingIt:
 class TestWhereItLives:
     def test_beside_the_times_and_the_tracks(self) -> None:
         """One directory of a player's own things, not three."""
-        from glisteel import records, tracks
         assert os.path.dirname(preferences.preferences_path()) \
             == os.path.dirname(records.records_path()) == tracks.home()
 

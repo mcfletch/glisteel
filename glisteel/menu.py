@@ -44,6 +44,8 @@ from OpenGLContext.ui.widgets import (
     Spacer,
 )
 
+from glisteel import schemes
+
 __all__ = ['ALL_HERE', 'BEST', 'FINISHED', 'GAME_TITLE', 'NEVER_DRIVEN',
            'NO_TRACKS', 'STOPPED', 'Downloads', 'download_screen',
            'driving_screen', 'first_run_screen',
@@ -203,7 +205,6 @@ def driving_screen(chosen: str | None = None,
     offered with the summary it already carries, because a list of five
     names makes a player start five races to find out which is which.
     """
-    from glisteel import schemes
     ways = list(schemes.available())
     picker = Select(name='scheme', options=ways,
                     value=chosen if chosen in ways else schemes.DEFAULT)
@@ -244,7 +245,6 @@ def driving_screen(chosen: str | None = None,
 
 def _how(name: Any) -> str:
     """What one way of driving does, in its own words."""
-    from glisteel import schemes
     try:
         return str(schemes.named(str(name)).summary)
     except (KeyError, ValueError):               # pragma: no cover - no such way

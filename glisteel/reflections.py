@@ -282,7 +282,7 @@ def _draw(context: str, width: int) -> np.ndarray:
         cover = np.clip((up - 0.10) / 0.55, 0.0, 1.0)[:, :, None]
         canopy = leaves * (0.6 + 0.8 * gaps[:, :, None])
         image = sky * (1.0 - cover) + (canopy + sky * gaps[:, :, None] * 0.55) * cover
-        image = _trunks(image, rng, elevation, azimuth, height, width)
+        image = _trunks(image, rng, elevation, azimuth)
         # A wall of wood at eye level. Without it the horizon is open sky all
         # the way round, and a car reflects that band along its flanks and
         # washes out to silver under trees -- which is the one thing a forest
@@ -298,7 +298,7 @@ def _draw(context: str, width: int) -> np.ndarray:
         image = image * (1.0 - band) + np.array([0.045, 0.062, 0.040], 'f') * band
     else:
         image = sky
-        image = _trunks(image, rng, elevation, azimuth, height, width, thin=0.35)
+        image = _trunks(image, rng, elevation, azimuth, thin=0.35)
 
     ground = np.clip(-up / 0.35, 0.0, 1.0)[:, :, None]
     road = np.array([0.055, 0.055, 0.058], dtype='f')
@@ -324,8 +324,7 @@ def _flecks(rng: np.random.Generator, height: int, width: int,
 
 
 def _trunks(image: np.ndarray, rng: np.random.Generator, elevation: np.ndarray,
-            azimuth: np.ndarray, height: int, width: int,
-            thin: float = 1.0) -> np.ndarray:
+            azimuth: np.ndarray, thin: float = 1.0) -> np.ndarray:
     """Trees around the horizon: dark verticals where the eye finds the wood."""
     out = image.copy()
     bark = np.array([0.038, 0.030, 0.022], dtype='f')

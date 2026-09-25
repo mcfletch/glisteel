@@ -6,11 +6,16 @@ together with the art they share are 90 MB, which is not a wheel. The facility i
 namespace, and how a downloaded track reaches the chooser.
 """
 
+import importlib.util
+import json
 import os
+import subprocess
+import zipfile
 
 import pytest
+from OpenGLContext.contentpacks import catalog, publish
 
-from glisteel import content
+from glisteel import content, models, tracks
 
 
 def release_assets():
@@ -19,7 +24,6 @@ def release_assets():
     The command is spelled with a hyphen, as a command is, so it is loaded by
     path rather than imported by name.
     """
-    import importlib.util
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
         __file__))), 'release-assets.py')
     spec = importlib.util.spec_from_file_location('release_assets', path)
@@ -76,7 +80,7 @@ class TestWhatIsAlreadyHere:
         wanted = content.needed_to_start(store=store)
         assert [one.key for one in wanted] == ['glisteel/cars']
 
-    def test_and_stops_needing_it_once_it_is_here(self, store, tmp_path) -> None:
+    def test_and_stops_needing_it_once_it_is_here(self, store) -> None:
         self.unpack(store, 'glisteel/cars')
         assert content.needed_to_start(store=store) == []
 
@@ -91,7 +95,6 @@ class TestWhatIsAlreadyHere:
 
     def unpack(self, store, key, world=False):
         """Put a pack's content where the store looks, without a download."""
-        from OpenGLContext.contentpacks import catalog
         pack = catalog.pack_for_key(key, content.registry())
         where = store.directory_for(pack)
         os.makedirs(where, exist_ok=True)
@@ -100,7 +103,6 @@ class TestWhatIsAlreadyHere:
         with open(marker, 'w') as handle:
             handle.write('{}')
         if world:
-            import json
             with open(os.path.join(where, 'world.json'), 'w') as handle:
                 json.dump({'name': 'Ashdown', 'tileset': 'tileset.json'}, handle)
         return where
@@ -109,10 +111,7 @@ class TestWhatIsAlreadyHere:
 class TestTheChooserSeesDownloadedTracks:
     """A track fetched as a pack is a track like one baked by hand."""
 
-    def test_the_library_reads_both(self, tmp_path, monkeypatch) -> None:
-        import json
-
-        from glisteel import tracks
+    def test_the_library_reads_both(self, tmp_path) -> None:
         own = tmp_path / 'tracks' / 'mine'
         own.mkdir(parents=True)
         (own / 'tileset.json').write_text('{}')
@@ -180,7 +179,6 @@ class TestWhatAFirstRunDoes:
             assert len(one.sha256) == 64
 
     def test_a_run_with_the_cars_here_asks_for_nothing(self, store) -> None:
-        from OpenGLContext.contentpacks import catalog
         pack = catalog.pack_for_key('glisteel/cars', content.registry())
         where = store.directory_for(pack)
         os.makedirs(os.path.join(where, 'cars'), exist_ok=True)
@@ -197,7 +195,6 @@ class TestWhatAFirstRunDoes:
         assert not where.startswith(store.root)
 
     def test_and_from_the_pack_once_it_is(self, store) -> None:
-        from OpenGLContext.contentpacks import catalog
         pack = catalog.pack_for_key(content.BASE, content.registry())
         root = store.directory_for(pack)
         os.makedirs(os.path.join(root, 'cars'), exist_ok=True)
@@ -218,12 +215,10 @@ class TestTheRegistryAsOneFile:
     """
 
     def bundle(self, tmp_path):
-        from OpenGLContext.contentpacks import publish
         return publish.bundle_registry(
             content.CATALOG_PATH, str(tmp_path / 'glisteel-registry.zip'))
 
     def test_it_holds_the_registry_and_its_pictures(self, tmp_path) -> None:
-        import zipfile
         inside = zipfile.ZipFile(self.bundle(tmp_path)).namelist()
         assert 'packs.json' in inside
         assert sum(one.endswith('.jpg') for one in inside) == \
@@ -231,14 +226,12 @@ class TestTheRegistryAsOneFile:
 
     def test_the_engine_reads_back_what_this_writes(self, tmp_path) -> None:
         """The property that matters: built here, read there."""
-        from OpenGLContext.contentpacks import catalog
         packs = catalog.load_bundle(self.bundle(tmp_path),
                                     str(tmp_path / 'unpacked'))
         assert [one.key for one in packs] == \
             [one.key for one in content.registry()]
 
     def test_and_the_pictures_come_back_resolved(self, tmp_path) -> None:
-        from OpenGLContext.contentpacks import catalog
         packs = catalog.load_bundle(self.bundle(tmp_path),
                                     str(tmp_path / 'unpacked'))
         shown = [one for one in packs if one.preview]
@@ -266,7 +259,6 @@ class TestATrackAndTheArtItShares:
         return content.store(root=str(tmp_path / 'content'))
 
     def track(self, key='glisteel/ashdown'):
-        from OpenGLContext.contentpacks import catalog
         return catalog.pack_for_key(key, content.registry())
 
     def test_choosing_one_fetches_it_and_the_art(self, store) -> None:
@@ -312,7 +304,7 @@ class TestWhatTheRegistrySaysAWorldIsMadeOf:
         with open(os.path.join(str(tmp_path), 'CREDITS.txt'), 'w',
                   encoding='utf-8') as handle:
             handle.write(text)
-        return release_assets()._world_credit(str(tmp_path))
+        return release_assets()._world_credit(str(tmp_path))  # noqa: SLF001 a helper of the release-assets.py script
 
     def test_it_is_what_the_bake_wrote(self, tmp_path) -> None:
         assert self.credit(tmp_path, 'Ground: ambientCG, CC0 1.0.') == \
@@ -342,8 +334,8 @@ class TestACreditReadsAsText:
                   encoding='utf-8') as handle:
             handle.write('# Cars\n\nOurs, built by '
                          '[`tools/cars.py`](../../../tools/cars.py).\n')
-        assert release_assets()._credits(str(tmp_path)) == \
-            'Ours, built by tools/cars.py.'
+        credits = release_assets()._credits(str(tmp_path))  # noqa: SLF001 a helper of the release-assets.py script
+        assert credits == 'Ours, built by tools/cars.py.'
 
     def test_and_so_is_one_in_a_track_s(self, tmp_path) -> None:
         assert TestWhatTheRegistrySaysAWorldIsMadeOf().credit(
@@ -358,7 +350,6 @@ class TestACreditReadsAsText:
 
 class TestABakeDatesItselfByTheSource:
     def test_the_date_is_the_last_commit_s(self) -> None:
-        import subprocess
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         wanted = subprocess.run(['git', 'log', '-1', '--format=%ct'], cwd=here,
                                 capture_output=True, text=True).stdout.strip()
@@ -371,9 +362,6 @@ class TestTheArtIsLookedForWhenItIsUsed:
 
     def test_the_models_follow_a_pack_installed_after_import(
             self, tmp_path, monkeypatch) -> None:
-        from OpenGLContext.contentpacks import catalog
-
-        from glisteel import models
         pack = catalog.pack_for_key(content.BASE, content.registry())
         root = tmp_path / 'local' / content.NAMESPACE / pack.directory
         (root / 'cars').mkdir(parents=True)

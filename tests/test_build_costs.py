@@ -13,8 +13,12 @@ import math
 
 import pytest
 import support
+from omi_physics.world import PhysicsWorld
+from OpenGLContext.loaders.tiles3d import fetch
 
 from glisteel import scenarios
+from glisteel.car import Car
+from glisteel.world import RaceWorld, _baked_luminaires, _baked_props, courses_in, static_ground
 
 
 class TestABakedWorldIsReadOnce:
@@ -45,9 +49,6 @@ class TestABakedWorldIsReadOnce:
         obstacles and the lamps -- and each parsed the whole document for
         itself.
         """
-        from OpenGLContext.loaders.tiles3d import fetch
-
-        from glisteel.world import RaceWorld
         path = self._tileset(tmp_path)
         with support.counting(fetch, 'read_bytes') as reads:
             RaceWorld(path)
@@ -57,7 +58,6 @@ class TestABakedWorldIsReadOnce:
 
     def test_everything_it_carries_comes_out_of_one_document(self) -> None:
         """The three readers take a document rather than a path."""
-        from glisteel.world import _baked_luminaires, _baked_props, courses_in
         document = {'extras': {
             'roads': [{'name': 'r', 'centreline': [[0, 0, 0], [10, 0, 0]],
                        'length': 10.0}],
@@ -69,13 +69,11 @@ class TestABakedWorldIsReadOnce:
         assert _baked_luminaires(document['extras']).shape == (2, 3)
 
     def test_a_document_with_no_extras_is_not_an_error(self) -> None:
-        from glisteel.world import _baked_luminaires, _baked_props, courses_in
         assert courses_in({}) == []
         assert _baked_props({}) == []
         assert _baked_luminaires({}).shape == (0, 3)
 
     def test_it_still_finds_the_road_the_props_and_the_lamps(self, tmp_path) -> None:
-        from glisteel.world import RaceWorld
         world = RaceWorld(self._tileset(tmp_path))
         assert world.course is not None
         assert world.course.name == 'circuit'
@@ -107,50 +105,38 @@ class TestTheWheelsDoNotWindUpForEver:
     precision it is drawn with. A long race is a lot of revolutions."""
 
     def test_the_roll_stays_within_one_turn(self) -> None:
-        from omi_physics.world import PhysicsWorld
-
-        from glisteel.car import Car
-        from glisteel.world import static_ground
         world = PhysicsWorld()
         static_ground(world)
         car = Car(world, position=(0.0, 1.0, 0.0))
         # Half an hour at a hundred and eighty, in one go.
         for _ in range(400):
             car.follow(5.0)
-        for spin in car._wheel_spin:
+        for spin in car._wheel_spin:  # noqa: SLF001 the spin angle the car keeps for each drawn wheel
             assert abs(spin) <= 2.0 * math.pi + 1e-9, spin
 
     def test_the_wheels_still_turn(self) -> None:
-        from omi_physics.world import PhysicsWorld
-
-        from glisteel.car import Car
-        from glisteel.world import static_ground
         world = PhysicsWorld()
         static_ground(world)
         car = Car(world, position=(0.0, 1.0, 0.0))
         for _ in range(240):                     # let it stand on its wheels
             car.update(1.0 / 120.0)
             world.step(1.0 / 120.0)
-        before = list(car._wheel_spin)
+        before = list(car._wheel_spin)  # noqa: SLF001 the spin angle the car keeps for each drawn wheel
         car.control(throttle=1.0)
         for _ in range(120):                     # a second of it, from rest
             car.update(1.0 / 120.0)
             world.step(1.0 / 120.0)
         car.follow(1.0 / 60.0)
-        assert car._wheel_spin != before
+        assert car._wheel_spin != before  # noqa: SLF001 the spin angle the car keeps for each drawn wheel
         assert car.vehicle.forward_speed() > 1.0, 'the car did not move'
 
     def test_the_roll_is_continuous_across_the_wrap(self) -> None:
         """Wrapping must not put a step in the wheel's rotation."""
-        from omi_physics.world import PhysicsWorld
-
-        from glisteel.car import Car
-        from glisteel.world import static_ground
         world = PhysicsWorld()
         static_ground(world)
         car = Car(world, position=(0.0, 1.0, 0.0))
-        car._wheel_spin = [math.pi - 0.01] * len(car.vehicle.wheels)
-        was = list(car._wheel_spin)
+        car._wheel_spin = [math.pi - 0.01] * len(car.vehicle.wheels)  # noqa: SLF001 the spin angle the car keeps for each drawn wheel
+        was = list(car._wheel_spin)  # noqa: SLF001 the spin angle the car keeps for each drawn wheel
         car.follow(0.0)                          # no time passes
-        for now, before in zip(car._wheel_spin, was, strict=True):
+        for now, before in zip(car._wheel_spin, was, strict=True):  # noqa: SLF001 the spin angle the car keeps for each drawn wheel
             assert now == pytest.approx(before)

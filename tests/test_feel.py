@@ -15,10 +15,15 @@ import functools
 
 import numpy as np
 import pytest
+from omi_physics.world import PhysicsWorld
+from OpenGLContext.scenegraph import basenodes as _bn  # noqa: F401
 
+import tests.test_driver as td
 from glisteel import scenarios
+from glisteel.car import Car, CarSpec
 from glisteel.scripted import Script
 from glisteel.session import PHYSICS_STEP, Session
+from glisteel.steering import CENTRE
 from glisteel.trace import drive
 
 #: How fast the car is going when a control is tested at speed, in km/h, and
@@ -65,7 +70,6 @@ class TestTheWheel:
         assert trace.steer.max() < 0.4
 
     def test_the_wheel_never_moves_faster_than_it_is_wound(self) -> None:
-        from glisteel.steering import CENTRE
         trace = _drive('throttle 0..10; left 4..5; right 6..7', seconds=10.0)
         assert trace.steering_rate() <= CENTRE * 1.01, trace.report()
 
@@ -246,7 +250,6 @@ class TestWhatTheCarHasToPassWith:
     """
 
     def _car(self):
-        from glisteel.car import CarSpec
         return CarSpec()
 
     def thrust(self, spec, kph):
@@ -293,11 +296,6 @@ class TestItSlidesRatherThanRolls:
     """
 
     def _flat(self, spec=None):
-        from omi_physics.world import PhysicsWorld
-        from OpenGLContext.scenegraph import basenodes as _bn  # noqa: F401
-
-        import tests.test_driver as td
-        from glisteel.car import Car
         world = PhysicsWorld()
         td.static_ground(world, size=3000.0)
         return world, Car(world, spec, position=(0.0, 2.0, 0.0))
@@ -322,7 +320,6 @@ class TestItSlidesRatherThanRolls:
         what a road corner asks. The check that the car actually stays on its
         wheels is the one below.
         """
-        from glisteel.car import CarSpec
         spec = CarSpec()
         tips = (spec.track / 2.0) / self.settled_height()
         assert tips > 1.4, 'tips at %.2f g' % tips

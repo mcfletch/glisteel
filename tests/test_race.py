@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from glisteel.race import Lap, RaceTiming, off_course
+from glisteel.race import TARMAC, Collisions, Lap, OffRoad, RaceTiming, off_course
 from glisteel.world import Course
 
 
@@ -200,21 +200,20 @@ class TestBeingOffCourse:
         assert off_course(course, (0.0, 0.0, 0.0))
 
 
+def _straight(width=7.2, total=10.6):
+    line = np.stack([np.arange(60) * 8.0, np.zeros(60), np.zeros(60)],
+                    axis=-1)
+    return Course(name='r', centreline=line, carriageway_width=width,
+                  total_width=total, closed=False, length=472.0)
+
+
 class TestLeavingTheRoad:
     """A car that puts two wheels on the grass loses grip and drags; one that
     stays off it long enough is mired, and the run is over. What ends a lap on
     a forest road is the forest."""
 
-    def _course(self, width=7.2, total=10.6):
-        from glisteel.world import Course
-        line = np.stack([np.arange(60) * 8.0, np.zeros(60), np.zeros(60)],
-                        axis=-1)
-        return Course(name='r', centreline=line, carriageway_width=width,
-                      total_width=total, closed=False, length=472.0)
-
     def _watch(self, **named):
-        from glisteel.race import OffRoad
-        return OffRoad(self._course(), **named)
+        return OffRoad(_straight(), **named)
 
     def test_a_car_on_the_carriageway_is_on_the_road(self) -> None:
         watch = self._watch()
@@ -276,22 +275,19 @@ class TestLeavingTheRoad:
 
 class TestWhatTheGroundIsUnderTheWheels:
     def test_on_the_carriageway_it_is_tarmac(self) -> None:
-        from glisteel.race import OffRoad
-        watch = OffRoad(TestLeavingTheRoad()._course())
+        watch = OffRoad(_straight())
         watch.update((100.0, 0.0, 0.0), 0.1)
         assert watch.surface().grip == 1.0
         assert watch.surface().rolling == 0.0
 
     def test_off_it_the_going_is_soft(self) -> None:
-        from glisteel.race import OffRoad
-        watch = OffRoad(TestLeavingTheRoad()._course())
+        watch = OffRoad(_straight())
         watch.update((100.0, 0.0, 6.0), 0.1)
         assert watch.surface().grip < 0.6
         assert watch.surface().rolling > 0.1
 
     def test_the_further_off_the_softer_it_gets(self) -> None:
-        from glisteel.race import OffRoad
-        course = TestLeavingTheRoad()._course()
+        course = _straight()
         near, far = OffRoad(course), OffRoad(course)
         near.update((100.0, 0.0, 4.6), 0.1)
         far.update((100.0, 0.0, 12.0), 0.1)
@@ -305,7 +301,6 @@ class TestHittingSomething:
     """
 
     def _watch(self, **named):
-        from glisteel.race import Collisions
         return Collisions(**named)
 
     def test_nothing_has_happened_yet(self) -> None:
@@ -413,7 +408,6 @@ class TestAWidenedStretchIsStillRoad:
     """
 
     def _course(self, widening=0.0, width=7.2, total=14.2):
-        from glisteel.world import Course
         line = np.stack([np.arange(60) * 8.0, np.zeros(60), np.zeros(60)],
                         axis=-1)
         return Course(name='r', centreline=line, carriageway_width=width,
@@ -421,7 +415,6 @@ class TestAWidenedStretchIsStillRoad:
                       widening=np.full(60, float(widening)))
 
     def _watch(self, widening=0.0):
-        from glisteel.race import OffRoad
         return OffRoad(self._course(widening=widening))
 
     def test_the_ordinary_road_ends_where_it_always_did(self) -> None:
@@ -435,7 +428,6 @@ class TestAWidenedStretchIsStillRoad:
         assert not watch.off
 
     def test_and_the_wheels_are_still_on_tarmac(self) -> None:
-        from glisteel.race import TARMAC
         watch = self._watch(widening=3.6)
         watch.update((100.0, 0.0, 4.2), 0.1)
         assert watch.surface() == TARMAC

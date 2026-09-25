@@ -27,8 +27,13 @@ from omi_physics.raycast import raycast
 from omi_physics.world import PhysicsWorld
 from OpenGLContext.loaders.tiles3d import fetch
 from OpenGLContext.loaders.tiles3d.frustum import view_projection as frustum_matrix
+from OpenGLContext.loaders.tiles3d.props import baked_props
+from OpenGLContext.physics.heightfield import HeightFieldColliders
+from OpenGLContext.physics.props import PropColliders
+from OpenGLContext.physics.road import RoadColliders
 from OpenGLContext.scenegraph.road import (
     CAUTION,
+    RoadProfile,
     advisory_speed,
     corner_speed,
     cornering_radius,
@@ -42,6 +47,8 @@ from OpenGLContext.scenegraph.roadworks import (
 from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
 
 from glisteel.geometry import yaw_to_face
+from glisteel.lighting import Luminaires
+from glisteel.traffic import SPEED_LIMIT, Traffic, cars_for
 from glisteel.zone import LANES
 
 __all__ = ['Course', 'RaceWorld', 'courses_in', 'load_courses']
@@ -327,7 +334,6 @@ class Course:
         write its section gets one built from the two widths it did write, which
         is the shape of the road even if not every drop of it.
         """
-        from OpenGLContext.scenegraph.road import RoadProfile
         found = self.profile
         if found:
             return RoadProfile(
@@ -844,7 +850,6 @@ def _baked_props(extras: Any, base: str = '') -> list:
     writes them into ``extras`` for exactly this, and the engine reads them
     (:func:`~OpenGLContext.loaders.tiles3d.props.baked_props`).
     """
-    from OpenGLContext.loaders.tiles3d.props import baked_props
     found: list = baked_props(extras, 'props', base)
     return found
 
@@ -857,7 +862,6 @@ def _baked_stones(extras: Any, base: str) -> list:
     at different reaches: a boulder has to stop a car from a long way off, and
     a stone is what is under the wheel.
     """
-    from OpenGLContext.loaders.tiles3d.props import baked_props
     found: list = baked_props(extras, 'stones', base)
     return found
 
@@ -994,13 +998,11 @@ class RaceWorld:
         #: answer is how that stays true.
         self.bores = self._bores()
         if field is not None:
-            from OpenGLContext.physics.heightfield import HeightFieldColliders
             self.ground = HeightFieldColliders(self.physics, field,
                                                holes=self.bores)
         #: The carriageway, built from the course rather than from the tiles.
         self.roads: list[Any] = []
         for road in self.courses:
-            from OpenGLContext.physics.road import RoadColliders
             self.roads.append(RoadColliders(
                 self.physics, road.centreline, road.road_profile(),
                 closed=road.closed,
@@ -1009,7 +1011,6 @@ class RaceWorld:
                 barriers=road.edges()))
         #: The obstacles: boulders and whatever else a world puts in the way.
         #: The ones near the car are in the physics world; the rest are not.
-        from OpenGLContext.physics.props import PropColliders
         self.props = PropColliders(self.physics, props)
         #: The loose stone on the hillsides. Ground rather than obstacles: a
         #: wheel rides over one and a walker stands on it, so each is a dome
@@ -1020,14 +1021,12 @@ class RaceWorld:
                                     reach=STONE_REACH)
         #: The lamps in this world's bores, and which of them are worth a real
         #: light where the car is (:mod:`glisteel.lighting`).
-        from glisteel.lighting import Luminaires
         self.luminaires = Luminaires(luminaires)
         #: The other cars using the road, or None for a world with no course.
         self.traffic: Any = None
         if traffic is None and self.course is not None:
             traffic = self.cars_the_road_carries()
         if traffic and self.course is not None:
-            from glisteel.traffic import Traffic
             self.traffic = Traffic(self.course, count=int(traffic),
                                    physics=self.physics)
 
@@ -1042,7 +1041,6 @@ class RaceWorld:
         nowhere between the oncoming cars for a pass to fit (a 1695 m circuit
         takes six).
         """
-        from glisteel.traffic import SPEED_LIMIT, cars_for
         course = self.course
         if course is None:                       # pragma: no cover - no road
             return 0

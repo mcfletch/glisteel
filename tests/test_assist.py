@@ -4,7 +4,9 @@ import pytest
 
 from glisteel import scenarios
 from glisteel.assist import DEADZONE, STRENGTH, Straighten
+from glisteel.scripted import Script
 from glisteel.session import Session
+from glisteel.trace import drive
 
 
 def _session(piece=None, traffic=0, **named):
@@ -61,8 +63,6 @@ class TestWhatItDoesToADrive:
     LINE = 'throttle 0..4; left 5..5.3'
 
     def _drive(self, assist=STRENGTH, seconds=11.0, line=None):
-        from glisteel.scripted import Script
-        from glisteel.trace import drive
         session = Session(scenarios.straight(length=1600.0).world(traffic=0),
                           assist=assist)
         return drive(session, Script.parse(line or self.LINE), seconds=seconds)
@@ -111,8 +111,6 @@ class TestTheLineItHolds:
 
     @staticmethod
     def _driving(line='throttle 0..14', seconds=14.0, traffic=0):
-        from glisteel.scripted import Script
-        from glisteel.trace import drive
         session = Session(
             scenarios.straight(length=1600.0).world(traffic=traffic))
         return session, drive(session, Script.parse(line), seconds=seconds)

@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from OpenGLContext.scenegraph.props import Prop
+from OpenGLContext.scenegraph.terrain.heightfield import HeightField
 
 from glisteel.world import Course, RaceWorld
 
@@ -67,7 +69,7 @@ PROFILE = {'laneWidth': 3.6, 'lanes': 2, 'shoulderWidth': 0.7,
            'shoulderDrop': 0.05, 'vergeWidth': 1.0, 'vergeDrop': 0.35,
            'crossfall': 0.02, 'textureLength': 22.0}
 
-def level(x: Any, z: Any) -> Any:
+def level(x: Any, z: Any) -> Any:  # noqa: ARG001 a relief is called as relief(x, z)
     """Land with nothing to say: the height of it is zero everywhere."""
     return np.zeros_like(np.asarray(x, 'd'))
 
@@ -172,7 +174,6 @@ class Scenario:
         Sunk to the depth the road's own cross-section reaches, so the field
         meets the outer edge of the verge instead of cutting through it.
         """
-        from OpenGLContext.scenegraph.terrain.heightfield import HeightField
         drop = float(self.course().road_profile().section()[:, 1].min())
 
         def under(x: Any, z: Any) -> Any:
@@ -182,7 +183,6 @@ class Scenario:
 
     def props(self) -> list:
         """The boulders standing beside this road."""
-        from OpenGLContext.scenegraph.props import Prop
         course = self.course()
         beside = self.total_width / 2.0 + 1.6
         found = []
@@ -371,7 +371,7 @@ def _wave(height: float, wavelength: float, phase: float) -> Callable:
     two that behave alike: a :class:`Scenario` compares its relief by identity,
     and two calls to :func:`crest` describe the same piece of road.
     """
-    def relief(x: Any, z: Any) -> Any:
+    def relief(x: Any, z: Any) -> Any:  # noqa: ARG001 a relief is called as relief(x, z)
         return height / 2.0 * np.cos(
             2.0 * math.pi * np.asarray(z, 'd') / wavelength + phase)
     return relief

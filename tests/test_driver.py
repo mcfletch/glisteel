@@ -9,17 +9,21 @@ import math
 
 import numpy as np
 import pytest
+from omi_physics import model
 from omi_physics.world import PhysicsWorld
 
 from glisteel.car import Car
 from glisteel.driver import (
     ALONGSIDE,
+    FOLLOWING_LEAST,
+    FOLLOWING_SECONDS,
     PASSED_BY,
     REASON_HOLDS,
     REJOIN_SPEED,
     Autopilot,
     DriverStyle,
 )
+from glisteel.race import RaceTiming
 from glisteel.world import Course, static_ground
 
 STEP = 1.0 / 120.0
@@ -155,8 +159,6 @@ class TestItActuallyGetsRound:
     @pytest.mark.slow
     def test_it_drives_a_lap_of_a_flat_circuit(self) -> None:
         """The whole thing together: a real car, real physics, a real lap."""
-        from glisteel.race import RaceTiming
-
         world = PhysicsWorld()
         static_ground(world, size=2000.0)
         course = _oval(radius_x=160.0, radius_z=110.0)
@@ -209,7 +211,7 @@ class TestItGetsOverTheHills:
     DESIGN_SPEED = 47.0
     GRAVITY = 9.81
 
-    def _relief(self, x, z):
+    def _relief(self, x, z):  # noqa: ARG002 a relief is called as relief(x, z)
         """Rolling ground whose crests are at the design limit and no sharper."""
         radius = self.DESIGN_SPEED ** 2 / (self.GRAVITY * self.WEIGHT_LOSS)
         wavelength = 260.0
@@ -230,7 +232,6 @@ class TestItGetsOverTheHills:
 
     def _ground(self, world, extent=420.0, resolution=121):
         """The same relief as a triangle mesh, which is what the car drives on."""
-        from omi_physics import model
         axis = np.linspace(-extent, extent, resolution)
         gx, gz = np.meshgrid(axis, axis, indexing='ij')
         points = np.stack([gx.ravel(), self._relief(gx, gz).ravel(),
@@ -247,7 +248,6 @@ class TestItGetsOverTheHills:
                        collider=model.Collider(shape=shape))
 
     def _drive(self, seconds=150.0):
-        from glisteel.race import RaceTiming
         world = PhysicsWorld()
         self._ground(world)
         course = self._course()
@@ -372,7 +372,6 @@ class TestDrivingOnItsOwnSide:
     to do the same or it meets the traffic head-on."""
 
     def _course(self, count=241, radius=300.0):
-        from glisteel.world import Course
         angle = np.linspace(0.0, 2.0 * np.pi, count)
         line = np.stack([np.cos(angle) * radius, np.zeros(count),
                          np.sin(angle) * radius], axis=-1)
@@ -381,17 +380,14 @@ class TestDrivingOnItsOwnSide:
                       total_width=10.6, closed=True, length=float(steps.sum()))
 
     def test_by_default_it_drives_the_centreline(self) -> None:
-        from glisteel.driver import Autopilot
         assert Autopilot(self._course()).lane == 0.0
 
     def test_it_can_be_told_to_keep_a_side(self) -> None:
-        from glisteel.driver import Autopilot
         course = self._course()
         driver = Autopilot(course, lane=course.driving_lane)
         assert driver.lane == course.driving_lane
 
     def test_and_then_the_line_it_aims_at_is_over_there(self) -> None:
-        from glisteel.driver import Autopilot
         course = self._course()
         middle = Autopilot(course)
         side = Autopilot(course, lane=course.driving_lane)
@@ -402,7 +398,6 @@ class TestDrivingOnItsOwnSide:
     def test_a_car_on_its_lane_is_not_corrected_back(self) -> None:
         """The cross-track term measures against the line being driven, so a
         car sitting on it is where it should be."""
-        from glisteel.driver import Autopilot
         course = self._course()
         driver = Autopilot(course, lane=course.driving_lane)
         at = course.lane_point(10, course.driving_lane)
@@ -411,7 +406,6 @@ class TestDrivingOnItsOwnSide:
                                             20.0)) < 0.02
 
     def test_and_a_car_on_the_centreline_is_pulled_onto_it(self) -> None:
-        from glisteel.driver import Autopilot
         course = self._course()
         driver = Autopilot(course, lane=course.driving_lane)
         forward = _along(course, 10)
@@ -437,7 +431,6 @@ class TestDrivingBehindSomething:
     uses on itself: the speed it could still stop from in the room it has."""
 
     def _course(self, count=241, radius=300.0):
-        from glisteel.world import Course
         angle = np.linspace(0.0, 2.0 * np.pi, count)
         line = np.stack([np.cos(angle) * radius, np.zeros(count),
                          np.sin(angle) * radius], axis=-1)
@@ -505,7 +498,6 @@ class TestHowFarBackItSits:
         return gap, car.speed()
 
     def test_at_speed_it_sits_a_couple_of_seconds_back(self) -> None:
-        from glisteel.driver import FOLLOWING_SECONDS
         gap, speed = self._settled(28.0)
         assert speed == pytest.approx(28.0, abs=3.0)
         assert gap > FOLLOWING_SECONDS * speed * 0.7
@@ -517,7 +509,6 @@ class TestHowFarBackItSits:
     def test_behind_something_slow_it_closes_up(self) -> None:
         """A time gap at a crawl is a couple of car lengths, not a hundred
         metres: a driver in a queue does not leave the road open."""
-        from glisteel.driver import FOLLOWING_LEAST
         gap, _speed = self._settled(4.0)
         assert gap < FOLLOWING_LEAST * 1.6
 
@@ -540,12 +531,12 @@ class _Road:
 
     def __init__(self, car, ahead=None, clear=True, lane=1.8, own_lane=None):
         self.car = car
-        self._ahead = ahead
+        self.ahead = ahead
         #: What is up the car's *own* lane, where that is a different thing
         #: from what it is following -- which it is once a pass is past the car
         #: it pulled out for.
-        self._own_lane = own_lane
-        self._clear = clear
+        self.own_lane = own_lane
+        self.clear = clear
         #: Whether a passing lane beside this car's own can be moved into.
         self.beside_clear = True
         self.lane = lane
@@ -560,9 +551,9 @@ class _Road:
         was already braking for what it was crossing towards, which is the
         case that wanted testing.
         """
-        if self._ahead is None or self._ahead.gap > float(reach):
+        if self.ahead is None or self.ahead.gap > float(reach):
             return None
-        return self._ahead if self.car.position[0] * self.lane > 0.0 else None
+        return self.ahead if self.car.position[0] * self.lane > 0.0 else None
 
     def traffic_ahead(self, reach=140.0):
         found = self._within(reach)
@@ -574,7 +565,7 @@ class _Road:
     def lane_clear(self, across, ahead=24.0, behind=14.0):
         """Whether that lane can be moved into.
 
-        ``_clear`` is about the lane being *pulled out into*; the car's own
+        ``clear`` is about the lane being *pulled out into*; the car's own
         side answers for itself, from where the car it is passing has got to.
         One flag for both lanes said a driver giving up a pass could always
         come back, whatever was beside it -- which is exactly the case that
@@ -582,13 +573,13 @@ class _Road:
         """
         self.asked.append(across)
         if self._is_own(across):                 # the lane it started in
-            beside = self._ahead
+            beside = self.ahead
             if beside is None:
                 return True
             return not (-float(behind) <= beside.gap <= float(ahead))
         if across * self.lane > 0.0:             # a passing lane beside it
             return self.beside_clear
-        return self._clear
+        return self.clear
 
     def _is_own(self, across):
         """Whether that offset names the lane this car drives in.
@@ -608,7 +599,7 @@ class _Road:
         asking after. The car's own side holds whatever it is following; the
         far side is empty unless a test says otherwise.
         """
-        found = self._own_lane if self._own_lane is not None else self._ahead
+        found = self.own_lane if self.own_lane is not None else self.ahead
         if not self._is_own(across) or found is None:
             return None
         if not 0.0 <= found.gap <= float(reach):
@@ -668,7 +659,7 @@ class TestGettingPastSomethingSlower:
         # Sized on the road's speed, not on three metres a second.
         assert pilot._pass_room(crawling, 3.0,
                                 DriverStyle().maximum_speed,
-                                crawling._ahead) > 300.0
+                                crawling.ahead) > 300.0
         assert asked == pytest.approx(-1.8)
 
     def test_it_passes_a_car_it_has_settled_in_behind(self) -> None:
@@ -693,7 +684,7 @@ class TestGettingPastSomethingSlower:
         pilot = self._pilot()
         matched = _Road(self._car(18.0), ahead=_Ahead(40.0, 18.0))
         room = pilot._pass_room(matched, 18.0, DriverStyle().maximum_speed,
-                                matched._ahead)
+                                matched.ahead)
         assert room is not None and room > 0.0
 
     def test_but_not_on_a_speed_it_cannot_reach_yet(self) -> None:
@@ -709,8 +700,8 @@ class TestGettingPastSomethingSlower:
         crawling = _Road(_Car(position=(1.8, 0.0, -100.0), speed=3.0),
                          ahead=_Ahead(9.0, 0.0))
         top = DriverStyle().maximum_speed
-        crawl = pilot._pass_room(crawling, 3.0, top, crawling._ahead)
-        flying = pilot._pass_room(crawling, top, top, crawling._ahead)
+        crawl = pilot._pass_room(crawling, 3.0, top, crawling.ahead)
+        flying = pilot._pass_room(crawling, top, top, crawling.ahead)
         assert crawl > flying * 1.25, 'sized as though it were already up to speed'
 
     def test_it_gives_the_pass_up_if_the_way_through_closes(self) -> None:
@@ -721,7 +712,7 @@ class TestGettingPastSomethingSlower:
         road = _Road(self._car(40.0), ahead=slow)
         pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(-1.8)
-        road._clear = False
+        road.clear = False
         pilot.controls(road, 1 / 60)
         assert pilot.passing is None
 
@@ -739,7 +730,7 @@ class TestGettingPastSomethingSlower:
         slow = _Ahead(40.0, 18.0)                # too near to slot in behind
         road = _Road(self._car(40.0), ahead=slow)
         pilot.controls(road, 1 / 60)
-        road._clear = False
+        road.clear = False
         pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(1.8), 'stayed out on the wrong side'
 
@@ -756,7 +747,7 @@ class TestGettingPastSomethingSlower:
         pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(-1.8)
         slow.gap = -30.0                         # it is behind now
-        road._ahead = None
+        road.ahead = None
         pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(1.8)
         assert pilot.passing is None
@@ -852,15 +843,15 @@ class TestWhatIsComingTheOtherWayDrivesTheLimit:
         posted = self._pilot(posted=80)
         silent = self._pilot(posted=0)
         road, top = self._road(), DriverStyle().maximum_speed
-        assert posted._pass_room(road, 40.0, top, road._ahead) \
-            < silent._pass_room(road, 40.0, top, road._ahead)
+        assert posted._pass_room(road, 40.0, top, road.ahead) \
+            < silent._pass_room(road, 40.0, top, road.ahead)
 
     def test_a_road_that_says_nothing_assumes_the_worst(self) -> None:
         """No posted limit is no promise about what is coming, so the pass is
         sized as though it were another car doing what this one does."""
         silent = self._pilot(posted=0)
         road, top = self._road(), DriverStyle().maximum_speed
-        room = silent._pass_room(road, 40.0, top, road._ahead)
+        room = silent._pass_room(road, 40.0, top, road.ahead)
         taking = silent.pass_seconds(40.0, 40.0, 18.0, quick=top)
         # What is left once this car's own share of the road is taken out is
         # what it expects to meet coming down that lane.
@@ -872,8 +863,8 @@ class TestWhatIsComingTheOtherWayDrivesTheLimit:
         road, top = self._road(), DriverStyle().maximum_speed
         far = _Road(_Car(position=(1.8, 0.0, -100.0), speed=40.0),
                     ahead=_Ahead(120.0, 18.0))
-        assert near._pass_room(far, 40.0, top, far._ahead) \
-            > near._pass_room(road, 40.0, top, road._ahead)
+        assert near._pass_room(far, 40.0, top, far.ahead) \
+            > near._pass_room(road, 40.0, top, road.ahead)
 
 
 class TestGivingUpOnAPassDoesNotDriveIntoTheCarBeingPassed:
@@ -905,7 +896,7 @@ class TestGivingUpOnAPassDoesNotDriveIntoTheCarBeingPassed:
         pilot = self._pilot()
         road, slow = self.started(pilot)
         slow.gap = ALONGSIDE + 6.0               # given up, not yet past
-        road._clear = False                      # the way through has closed
+        road.clear = False                      # the way through has closed
         pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(-1.8), 'cut back across it'
 
@@ -915,7 +906,7 @@ class TestGivingUpOnAPassDoesNotDriveIntoTheCarBeingPassed:
         pilot = self._pilot()
         road, slow = self.started(pilot)
         slow.gap = ALONGSIDE + 6.0               # still beside its own lane
-        road._clear = False
+        road.clear = False
         pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(-1.8), 'came back too early'
         slow.gap = 120.0                         # dropped well back behind it
@@ -933,7 +924,7 @@ class TestGivingUpOnAPassDoesNotDriveIntoTheCarBeingPassed:
         pilot = self._pilot()
         road, slow = self.started(pilot)
         slow.gap = ALONGSIDE + 6.0
-        road._clear = False
+        road.clear = False
         pilot.controls(road, 1 / 60)
         assert pilot.passing is None
         assert pilot.lane == pytest.approx(-1.8), 'cut back across it'
@@ -969,7 +960,7 @@ class TestAPassCommittedToIsFinished:
         pilot = self._pilot()
         road, slow = self.started(pilot)
         slow.gap = ALONGSIDE / 2.0               # level with it
-        road._clear = False                      # and the way through closes
+        road.clear = False                      # and the way through closes
         pilot.controls(road, 1 / 60)
         assert pilot.passing is not None, 'gave up beside the car it was passing'
         assert pilot.lane == pytest.approx(-1.8)
@@ -980,7 +971,7 @@ class TestAPassCommittedToIsFinished:
         pilot = self._pilot()
         road, slow = self.started(pilot)
         slow.gap = ALONGSIDE * 3.0               # still well in front
-        road._clear = False
+        road.clear = False
         pilot.controls(road, 1 / 60)
         assert pilot.passing is None
 
@@ -989,10 +980,10 @@ class TestAPassCommittedToIsFinished:
         pilot = self._pilot()
         road, slow = self.started(pilot)
         slow.gap = ALONGSIDE / 2.0
-        road._clear = False
+        road.clear = False
         pilot.controls(road, 1 / 60)
         slow.gap = -PASSED_BY - 5.0              # past it now
-        road._ahead = None
+        road.ahead = None
         pilot.controls(road, 1 / 60)
         assert pilot.passing is None
         assert pilot.lane == pytest.approx(1.8)
@@ -1287,7 +1278,7 @@ class TestFinishingAPassWaitsForRoomToSitIn:
         pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(-1.8), 'never pulled out'
         slow.gap = -PASSED_BY - 10.0             # past it now
-        road._own_lane = _Ahead(*ahead)
+        road.own_lane = _Ahead(*ahead)
         return road
 
     def test_it_stays_out_for_something_it_cannot_slot_in_behind(self) -> None:
@@ -1457,7 +1448,7 @@ class TestAPassingLaneIsPreferredToTheOncomingOne:
         pilot, road = self._pilot(), self._session(clear=False)
         pilot.controls(road, 1 / 60)
         taken = pilot.lane
-        road._ahead.gap = -30.0                  # by it now
+        road.ahead.gap = -30.0                  # by it now
         for _ in range(120):
             pilot.controls(road, 1 / 60)
         assert pilot.lane == pytest.approx(1.8), f'sat out in {taken}'
@@ -1601,7 +1592,7 @@ class TestHowMuchRoadAPassActuallyUses:
         crawling = _Road(_Car(position=(1.8, 0.0, -100.0), speed=3.0),
                          ahead=_Ahead(40.0, 0.0))
         taking = pilot.pass_seconds(3.0, 40.0, 0.0, quick=top)
-        assert pilot._pass_room(crawling, 3.0, top, crawling._ahead) \
+        assert pilot._pass_room(crawling, 3.0, top, crawling.ahead) \
             == pytest.approx(pilot.pass_distance(3.0, taking, top)
                              + pilot.oncoming_speed(top) * taking)
 
@@ -1612,7 +1603,7 @@ class TestHowMuchRoadAPassActuallyUses:
         crawling = _Road(_Car(position=(1.8, 0.0, -100.0), speed=3.0),
                          ahead=_Ahead(40.0, 0.0))
         taking = pilot.pass_seconds(3.0, 40.0, 0.0, quick=top)
-        asked = pilot._pass_room(crawling, 3.0, top, crawling._ahead)
+        asked = pilot._pass_room(crawling, 3.0, top, crawling.ahead)
         assert asked < (top + pilot.oncoming_speed(top)) * taking * 0.85
 
     def test_and_a_pass_taken_at_speed_asks_for_what_it_always_did(self
@@ -1624,8 +1615,18 @@ class TestHowMuchRoadAPassActuallyUses:
         road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=top),
                      ahead=_Ahead(40.0, top - 12.0))
         taking = pilot.pass_seconds(top, 40.0, top - 12.0, quick=top)
-        assert pilot._pass_room(road, top, top, road._ahead) \
+        assert pilot._pass_room(road, top, top, road.ahead) \
             == pytest.approx((top + pilot.oncoming_speed(top)) * taking)
+
+
+class _Kept:
+    """A journal that keeps every mark written to it."""
+
+    def __init__(self):
+        self.marks = []
+
+    def mark(self, name, **fields):
+        self.marks.append((name, fields))
 
 
 class TestWritingDownWhyAPassWasNotOn:
@@ -1643,17 +1644,10 @@ class TestWritingDownWhyAPassWasNotOn:
     and one that did not is folded into the stretch it interrupted.
     """
 
-    class _Kept:
-        def __init__(self):
-            self.marks = []
-
-        def mark(self, name, **fields):
-            self.marks.append((name, fields))
-
     def _pilot(self):
         pilot = Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
         road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=40.0))
-        road.telemetry = self._Kept()
+        road.telemetry = _Kept()
         return pilot, road
 
     def test_a_reason_that_held_is_written_down(self) -> None:
@@ -1730,7 +1724,7 @@ class TestWritingDownACrawl:
     def _pilot(self):
         pilot = Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
         road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=1.0))
-        road.telemetry = TestWritingDownWhyAPassWasNotOn._Kept()
+        road.telemetry = _Kept()
         return pilot, road
 
     def test_a_run_that_ends_crawling_says_so(self) -> None:
@@ -1753,7 +1747,7 @@ class TestARestartedRaceStartsTheDriverAfresh:
     def test_nothing_of_the_last_race_is_carried(self) -> None:
         pilot = Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
         road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=1.0))
-        road.telemetry = TestWritingDownWhyAPassWasNotOn._Kept()
+        road.telemetry = _Kept()
         pilot.refused(road, 'other lane not clear', 3.0)
         pilot.held_back(road, 1.0, 30.0, 3.0)
         pilot._pull_out(road, -1.8, _Ahead(40.0, 10.0), 200.0)

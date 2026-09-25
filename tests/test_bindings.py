@@ -5,7 +5,7 @@ to notice from inside the window: nothing raises, the key or the pointer simply
 has no effect. So the table of what to bind is worked out here, where a test can
 read it, and the window's job is to hand each entry to the runtime.
 """
-from glisteel.game import bindings
+from glisteel.game import GlisteelContext, bindings
 from glisteel.steering import CONTROLS
 
 
@@ -57,6 +57,5 @@ class TestTheRest:
         assert _named(bindings(), 'keyboard', '<escape>')
 
     def test_every_binding_names_a_handler_the_window_has(self) -> None:
-        from glisteel.game import GlisteelContext
         for one in bindings():
             assert hasattr(GlisteelContext, one.handler), one.handler

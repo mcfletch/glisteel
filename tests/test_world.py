@@ -1,11 +1,23 @@
 """A baked world as a game sees it: the course, and where a car is on it."""
 
 import dataclasses
+import json
 import math
+import os
 
 import numpy as np
 import pytest
+from omi_physics.world import PhysicsWorld
+from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+from OpenGLContext.scenegraph.props import Prop, props_table
 from OpenGLContext.scenegraph.road import SIGHT_REACH
+from OpenGLContext.scenegraph.roadworks import BoreCut, TunnelProfile
+from OpenGLContext.scenegraph.terrain import HeightField
+
+from glisteel import game
+from glisteel.car import Car
+from glisteel.traffic import TrafficCar
+from glisteel.world import Course, RaceWorld, Structure, courses_in, load_courses, static_ground
 
 
 class TestWhereALapBegins:
@@ -20,7 +32,6 @@ class TestWhereALapBegins:
     """
 
     def _ring(self, start=0.0, points=64, radius=100.0):
-        from glisteel.world import courses_in
         angle = np.linspace(0.0, 2 * math.pi, points, endpoint=False)
         line = np.stack([radius * np.cos(angle), np.zeros(points),
                          radius * np.sin(angle)], axis=-1)
@@ -49,7 +60,6 @@ class TestHowFarOffTheLineACarIs:
     but half way between two samples is on the line."""
 
     def _straight(self, spacing=8.0, points=40):
-        from glisteel.world import Course
         line = np.stack([np.arange(points) * spacing, np.zeros(points),
                          np.zeros(points)], axis=-1)
         return Course(name='straight', centreline=line, carriageway_width=7.2,
@@ -81,7 +91,6 @@ class TestHowFarOffTheLineACarIs:
         assert course.nearest((17.0, 0.0, 0.0))[0] == 2
 
     def test_a_closed_course_measures_across_its_join(self) -> None:
-        from glisteel.world import Course
         angle = np.linspace(0.0, 2 * math.pi, 64, endpoint=False)
         line = np.stack([100.0 * np.cos(angle), np.zeros(64),
                          100.0 * np.sin(angle)], axis=-1)
@@ -109,7 +118,6 @@ class TestTheRoadsOwnSection:
     the world."""
 
     def _course(self, **profile):
-        from glisteel.world import Course
         line = np.stack([np.arange(20) * 8.0, np.zeros(20), np.zeros(20)],
                         axis=-1)
         return Course(name='r', centreline=line, carriageway_width=7.2,
@@ -133,9 +141,6 @@ class TestTheRoadsOwnSection:
         assert profile.total_width == pytest.approx(3.0 * 2 + 2 * (0.5 + 0.8))
 
     def test_it_is_read_out_of_a_baked_world(self, tmp_path) -> None:
-        import json
-
-        from glisteel.world import load_courses
         line = [[float(i) * 8.0, 0.0, 0.0] for i in range(20)]
         document = {'asset': {'version': '1.1'}, 'geometricError': 1.0,
                     'root': {'boundingVolume': {'box': [0] * 12},
@@ -161,7 +166,6 @@ class TestWhereTheGroundIsOpened:
     grid metres wide, and where the two meet it rides over the carriageway."""
 
     def _course(self):
-        from glisteel.world import Course, Structure
         line = np.stack([np.arange(200) * 8.0, np.zeros(200), np.zeros(200)],
                         axis=-1)
         return Course(name='r', centreline=line, carriageway_width=7.2,
@@ -211,7 +215,6 @@ class TestTheObstaclesInAWorld:
         assert len(_race(_world_with_props(tmp_path)).props.props) == 2
 
     def test_a_world_with_none_is_not_an_error(self, tmp_path) -> None:
-        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
         assert _race(build_sample_tileset(str(tmp_path))).props.props == []
 
     def test_they_are_not_in_the_physics_world_until_it_streams(self, tmp_path) -> None:
@@ -240,7 +243,6 @@ class TestTheStoneUnderfoot:
         assert len(_race(_world_with_stones(tmp_path)).stones.props) == 2
 
     def test_a_world_with_none_is_not_an_error(self, tmp_path) -> None:
-        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
         assert _race(build_sample_tileset(str(tmp_path))).stones.props == []
 
     def test_a_world_carrying_its_stone_as_a_table_reads_it(self, tmp_path) -> None:
@@ -277,18 +279,12 @@ class TestTheStoneUnderfoot:
 
 def _race(path):
     """A race world on a tileset, torn down by the test that made it."""
-    from glisteel.world import RaceWorld
     return RaceWorld(path)
 
 
 def _world_with_stones(directory, table=False):
     """A sample tileset with two stones: in its extras, or in a table beside
     it that its extras name."""
-    import json
-    import os
-
-    from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
-    from OpenGLContext.scenegraph.props import Prop, props_table
     path = build_sample_tileset(str(directory))
     document = json.load(open(path))
     stones = [
@@ -307,9 +303,6 @@ def _world_with_stones(directory, table=False):
 
 def _world_with_props(directory):
     """A sample tileset with two boulders written into its extras."""
-    import json
-
-    from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
     path = build_sample_tileset(str(directory))
     document = json.load(open(path))
     document.setdefault('extras', {})['props'] = [
@@ -327,7 +320,6 @@ class TestKeepingToALane:
     side is which."""
 
     def _course(self, count=101, length=1000.0):
-        from glisteel.world import Course
         z = np.linspace(0.0, length, count)
         return Course(name='road', centreline=np.stack(
             [np.zeros(count), np.zeros(count), z], axis=-1),
@@ -365,7 +357,6 @@ class TestKeepingToALane:
                                                                      abs=0.01)
 
     def test_and_it_is_the_same_side_traffic_keeps(self) -> None:
-        from glisteel.traffic import TrafficCar
         course = self._course()
         car = TrafficCar(course=course, station=100.0, heading=1, limit=20.0)
         lane, _heading = course.grid_position(index=10,
@@ -382,7 +373,6 @@ class TestTheGridFacesDownTheRoad:
     does."""
 
     def _diagonal(self, count=60, spacing=6.0):
-        from glisteel.world import Course
         step = spacing / math.sqrt(2.0)
         t = np.arange(count) * step
         return Course(name='diagonal', centreline=np.stack(
@@ -391,10 +381,6 @@ class TestTheGridFacesDownTheRoad:
             length=float((count - 1) * spacing))
 
     def test_a_placed_car_faces_along_the_road(self) -> None:
-        from omi_physics.world import PhysicsWorld
-
-        from glisteel.car import Car
-        from glisteel.world import static_ground
         course = self._diagonal()
         start, heading = course.grid_position(index=0, height=1.0)
         world = PhysicsWorld()
@@ -414,7 +400,6 @@ class TestTheWayAcrossAClosedRoad:
     on the other one for the length of a tile."""
 
     def _ring(self, count=61, radius=200.0):
-        from glisteel.world import Course
         angle = np.linspace(0.0, 2.0 * np.pi, count)
         line = np.stack([np.cos(angle) * radius, np.zeros(count),
                          np.sin(angle) * radius], axis=-1)
@@ -456,7 +441,6 @@ class TestAskingForAWorldThatIsNotThere:
     """
 
     def test_it_raises_something_ordinary_code_can_catch(self, tmp_path) -> None:
-        from glisteel.world import RaceWorld
         missing = str(tmp_path / 'nowhere' / 'tileset.json')
         with pytest.raises(Exception) as caught:
             RaceWorld(missing)
@@ -465,20 +449,17 @@ class TestAskingForAWorldThatIsNotThere:
         assert isinstance(caught.value, Exception)
 
     def test_it_is_a_missing_file(self, tmp_path) -> None:
-        from glisteel.world import RaceWorld
         missing = str(tmp_path / 'nowhere' / 'tileset.json')
         with pytest.raises(FileNotFoundError):
             RaceWorld(missing)
 
     def test_it_says_where_it_looked_and_what_to_do(self, tmp_path) -> None:
-        from glisteel.world import RaceWorld
         missing = str(tmp_path / 'nowhere' / 'tileset.json')
         with pytest.raises(FileNotFoundError, match='glisteel-bake'):
             RaceWorld(missing)
 
     def test_a_caller_can_go_on_afterwards(self, tmp_path) -> None:
         # What a menu does: try the track, say so, and stay running.
-        from glisteel.world import RaceWorld
         said = []
         try:
             RaceWorld(str(tmp_path / 'nowhere' / 'tileset.json'))
@@ -492,7 +473,6 @@ class TestHowFarDownTheRoadADriverCanSee:
     along, and a bend cannot be looked round."""
 
     def _ring(self, radius=200.0, points=256):
-        from glisteel.world import Course
         angle = np.linspace(0.0, 2 * math.pi, points, endpoint=False)
         line = np.stack([radius * np.cos(angle), np.zeros(points),
                          radius * np.sin(angle)], axis=-1)
@@ -501,7 +481,6 @@ class TestHowFarDownTheRoadADriverCanSee:
                       length=float(2 * math.pi * radius))
 
     def _straight(self, points=200, spacing=8.0):
-        from glisteel.world import Course
         line = np.stack([np.arange(points) * spacing, np.zeros(points),
                          np.zeros(points)], axis=-1)
         return Course(name='straight', centreline=line, carriageway_width=7.2,
@@ -537,7 +516,6 @@ class TestHowFarAlongTheRoadSomethingIs:
     steps unless the answer is worked out between them."""
 
     def _straight(self, spacing=10.0, points=41):
-        from glisteel.world import Course
         line = np.stack([np.arange(points) * spacing, np.zeros(points),
                          np.zeros(points)], axis=-1)
         return Course(name='straight', centreline=line, carriageway_width=7.2,
@@ -564,7 +542,6 @@ class TestHowFarAlongTheRoadSomethingIs:
         assert course.station_of((34.0, 0.0, 3.0)) == pytest.approx(34.0, abs=0.1)
 
     def test_a_closed_course_measures_across_its_join(self) -> None:
-        from glisteel.world import Course
         angle = np.linspace(0.0, 2 * math.pi, 64, endpoint=False)
         line = np.stack([100.0 * np.cos(angle), np.zeros(64),
                          100.0 * np.sin(angle)], axis=-1)
@@ -582,7 +559,6 @@ class TestHowFarItStaysSeeable:
 
     def _road(self, points=200, spacing=8.0, bend_from=100):
         """Straight, then a bend tight enough to shut the view down."""
-        from glisteel.world import Course
         along, across = [], []
         angle = 0.0
         x = z = 0.0
@@ -629,7 +605,6 @@ class TestWhatStandsBesideEachStretch:
     """
 
     def _course(self, structures=()):
-        from glisteel.world import Course
         angle = np.linspace(0.0, 2 * math.pi, 400, endpoint=False)
         line = np.stack([250.0 * np.cos(angle), np.zeros(400),
                          250.0 * np.sin(angle)], axis=-1)
@@ -641,28 +616,25 @@ class TestWhatStandsBesideEachStretch:
 
     def test_a_wood_is_what_the_road_runs_through_by_default(self) -> None:
         course = self._course()
-        assert np.allclose(course._clear, course.total_width / 2.0)
+        assert np.allclose(course._clear, course.total_width / 2.0)  # noqa: SLF001 the clear half-width the course caches per point
 
     def test_a_span_has_nothing_beside_it_to_see_past(self) -> None:
-        from glisteel.world import Structure
         course = self._course([Structure('bridge', 300.0, 700.0)])
         on_it = course.station_of(course.lane_point(
-            int(500.0 / course._spacing), 0.0))
+            int(500.0 / course._spacing), 0.0))  # noqa: SLF001 the point spacing the course caches
         assert 300.0 < on_it < 700.0
-        assert course._clear[int(500.0 / course._spacing)] > 10.0 * (
+        assert course._clear[int(500.0 / course._spacing)] > 10.0 * (  # noqa: SLF001 the clear half-width the course caches per point; the point spacing the course caches
             course.total_width / 2.0)
 
     def test_and_a_bore_has_its_own_wall(self) -> None:
-        from glisteel.world import Structure
         course = self._course([Structure('tunnel', 300.0, 700.0)])
-        inside = int(500.0 / course._spacing)
-        assert course._clear[inside] < course.total_width / 2.0
+        inside = int(500.0 / course._spacing)  # noqa: SLF001 the point spacing the course caches
+        assert course._clear[inside] < course.total_width / 2.0  # noqa: SLF001 the clear half-width the course caches per point
 
     def test_so_a_span_is_seen_along_where_the_wood_is_not(self) -> None:
-        from glisteel.world import Structure
         wood = self._course()
         span = self._course([Structure('bridge', 300.0, 700.0)])
-        at = int(500.0 / wood._spacing)
+        at = int(500.0 / wood._spacing)  # noqa: SLF001 the point spacing the course caches
         assert span.sight_ahead(at) > 3.0 * wood.sight_ahead(at)
 
 
@@ -679,7 +651,6 @@ class TestHowTightABendIsMeasuredOverARealLength:
     """
 
     def _arc(self, radius=200.0, spacing=6.0, jitter=0.0, seed=7):
-        from glisteel.world import Course
         angle = np.arange(0.0, 2.0 * math.pi, spacing / radius)
         line = np.stack([radius * np.cos(angle), np.zeros_like(angle),
                          radius * np.sin(angle)], axis=-1)
@@ -707,7 +678,6 @@ class TestHowTightABendIsMeasuredOverARealLength:
             self._arc(radius=400.0).radii.min()
 
     def test_and_a_straight_is_still_a_straight(self) -> None:
-        from glisteel.world import Course
         line = np.stack([np.arange(120) * 6.0, np.zeros(120),
                          np.zeros(120)], axis=-1)
         course = Course(name='straight', centreline=line,
@@ -726,7 +696,6 @@ class TestTheHillABoreRunsThrough:
     def test_the_terrain_is_given_the_holes_the_collider_got(self, tmp_path):
         """The same object, not an equal one: two closures over the same
         courses would answer alike today and drift apart on any change."""
-        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
         world = _race(build_sample_tileset(str(tmp_path)))
         assert world.terrain.holes is world.bores
         if world.ground is not None:
@@ -739,7 +708,6 @@ class TestTheHillABoreRunsThrough:
     def test_a_world_with_no_bore_asks_for_no_holes(self, tmp_path):
         """`_bores()` answers None where nothing tunnels, and None is right:
         every triangle is drawn, and nothing is tested per triangle."""
-        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
         world = _race(build_sample_tileset(str(tmp_path)))
         if not any(one.kind == 'tunnel'
                    for road in world.courses for one in road.structures):
@@ -747,7 +715,6 @@ class TestTheHillABoreRunsThrough:
 
     def test_the_ground_still_has_its_mesh(self, tmp_path):
         """A hole that swallowed the whole field would pass the check above."""
-        from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
         world = _race(build_sample_tileset(str(tmp_path)))
         if world.terrain.field is not None:
             assert world.terrain.field.mesh(holes=world.terrain.holes)[1].size
@@ -773,9 +740,6 @@ class TestTheMaskThatOpensABore:
 
     def world(self, ground=None):
         """A world with one tunnelled road and a landscape to cut."""
-        import numpy as np
-
-        from glisteel.world import Course, RaceWorld, Structure
         line = np.stack([np.linspace(0.0, 4000.0, 401), np.zeros(401),
                          np.zeros(401)], axis=-1)
         course = Course(name='road', centreline=line, carriageway_width=7.0,
@@ -790,9 +754,6 @@ class TestTheMaskThatOpensABore:
     def ridge(self, res=401, extent=8000.0):
         """A ridge across the bore: level with the road at each portal, forty
         metres over the middle of it, and under the road out in the open."""
-        import numpy as np
-        from OpenGLContext.scenegraph.terrain import HeightField
-
         axis = np.linspace(-extent / 2.0, extent / 2.0, res)
         x, _z = np.meshgrid(axis, axis)
         low, high = self.BORE
@@ -802,21 +763,19 @@ class TestTheMaskThatOpensABore:
                            base=-2.0)
 
     def bores(self, ground=None):
-        found = self.world(ground)._bores()
+        found = self.world(ground)._bores()  # noqa: SLF001 the bore holes the world cuts in its ground
         assert found is not None, 'a world with a bore in it needs a mask'
         return found
 
     def test_it_opens_the_mouth_of_a_bore(self) -> None:
         """Where the ridge stands over the carriageway but not yet over the
         arch, the ground is inside the bore."""
-        import numpy as np
         at = self.BORE[0] + 40.0
         assert bool(np.asarray(self.bores()(np.array([at]), np.array([0.0])))[0])
 
     def test_it_leaves_the_hill_over_the_bore_standing(self) -> None:
         """Forty metres of hillside is a hill, and the defect this is here for:
         a mask that took the whole corridor cut a canyon through it."""
-        import numpy as np
         middle = sum(self.BORE) / 2.0
         assert not bool(np.asarray(self.bores()(np.array([middle]),
                                                 np.array([0.0])))[0])
@@ -825,7 +784,6 @@ class TestTheMaskThatOpensABore:
         """Where the cutting meets the hillside the ground steps between two
         samples, and the step is drawn across the road. The carriageway covers
         what is cleared under it."""
-        import numpy as np
         at = self.BORE[0] - 30.0
         assert bool(np.asarray(self.bores()(np.array([at]),
                                             np.array([0.0])))[0])
@@ -833,7 +791,6 @@ class TestTheMaskThatOpensABore:
     def test_and_leaves_the_ground_beside_it_alone(self) -> None:
         """Past the surfaced width nothing covers a hole, so a hole there is a
         slot beside the carriageway to see the sky through."""
-        import numpy as np
         at = self.BORE[0] - 30.0
         assert not bool(np.asarray(self.bores()(np.array([at]),
                                                 np.array([8.0])))[0])
@@ -841,12 +798,10 @@ class TestTheMaskThatOpensABore:
     def test_it_leaves_the_open_road_alone(self) -> None:
         """A mask true everywhere would pass the rest of these and delete the
         world."""
-        import numpy as np
         assert not bool(np.asarray(self.bores()(np.array([3000.0]),
                                                 np.array([0.0])))[0])
 
     def test_and_leaves_the_country_either_side_alone(self) -> None:
-        import numpy as np
         at = self.BORE[0] + 40.0
         assert not bool(np.asarray(self.bores()(np.array([at]),
                                                 np.array([400.0])))[0])
@@ -854,9 +809,6 @@ class TestTheMaskThatOpensABore:
     def test_the_mouths_are_the_ones_the_world_recorded(self) -> None:
         """The bake cut the tiles with the figures it wrote beside the road;
         the collider is cut with the same, not with defaults of its own."""
-        import numpy as np
-        from OpenGLContext.scenegraph.roadworks import BoreCut, TunnelProfile
-
         cut = BoreCut(tunnel=TunnelProfile(portal_border=6.0), approach=90.0)
         world = self.world()
         world.courses[0] = dataclasses.replace(world.courses[0],
@@ -866,13 +818,12 @@ class TestTheMaskThatOpensABore:
                                 profile=course.road_profile())
         x = np.linspace(self.BORE[0] - 120.0, self.BORE[0] + 60.0, 181)
         z = np.zeros_like(x)
-        found = world._bores()(x, z)
+        found = world._bores()(x, z)  # noqa: SLF001 the bore holes the world cuts in its ground
         assert np.array_equal(found, expected(x, z))
         # 90 m of approach clears the road further out than six cells would.
         assert bool(found[np.searchsorted(x, self.BORE[0] - 80.0)])
 
     def test_a_road_record_carries_its_cut_into_the_course(self) -> None:
-        from glisteel.world import courses_in
         document = {'extras': {'roads': [{
             'name': 'r', 'centreline': [[0, 0, 0], [10, 0, 0]], 'length': 10.0,
             'bores': {'portalBorder': 5.0, 'approach': 12.0}}]}}
@@ -884,7 +835,7 @@ class TestTheMaskThatOpensABore:
         field the world was given or on nothing at all."""
         world = self.world()
         world.field = None
-        assert world._bores() is None
+        assert world._bores() is None  # noqa: SLF001 the bore holes the world cuts in its ground
 
 
 class TestABoreAcrossTheStartOfACircuit:
@@ -897,9 +848,6 @@ class TestABoreAcrossTheStartOfACircuit:
     HALF = 0.8
 
     def course(self):
-        import numpy as np
-
-        from glisteel.world import Course, Structure
         angle = np.linspace(0.0, 2.0 * np.pi, 721)[:-1]
         line = np.stack([self.RADIUS * np.cos(angle), np.zeros(len(angle)),
                          self.RADIUS * np.sin(angle)], axis=-1)
@@ -917,8 +865,6 @@ class TestABoreAcrossTheStartOfACircuit:
     def hill(self, res=401, extent=2000.0):
         """Forty metres over the start of the ring, level with the road at
         each portal and under it out in the open."""
-        import numpy as np
-        from OpenGLContext.scenegraph.terrain import HeightField
         axis = np.linspace(-extent / 2.0, extent / 2.0, res)
         x, z = np.meshgrid(axis, axis)
         round_from_start = np.abs(np.arctan2(z, x))
@@ -928,7 +874,6 @@ class TestABoreAcrossTheStartOfACircuit:
                            base=-2.0)
 
     def test_the_two_halves_are_one_run_in_road_order(self) -> None:
-        import numpy as np
         course = self.course()
         [run] = course.runs('tunnel')
         stepped = np.linalg.norm(np.diff(run, axis=0), axis=1)
@@ -936,13 +881,10 @@ class TestABoreAcrossTheStartOfACircuit:
         assert len(run) > 2 * int(self.HALF / (2.0 * np.pi) * 720) - 4
 
     def test_the_hill_over_the_start_is_left_standing(self) -> None:
-        import numpy as np
-
-        from glisteel.world import RaceWorld
         world = RaceWorld.__new__(RaceWorld)
         world.courses = [self.course()]
         world.field = self.hill()
-        opened = world._bores()
+        opened = world._bores()  # noqa: SLF001 the bore holes the world cuts in its ground
         assert opened is not None
         # Just short of the start, on the road, under the hill.
         angle = -0.03
@@ -972,7 +914,6 @@ class TestNeitherWritingModeIsPacedByADisplay:
 
     @pytest.mark.parametrize('mode', ['capture', 'record'])
     def test_it_asks_for_no_vsync(self, monkeypatch, mode) -> None:
-        import os
         monkeypatch.delenv('OPENGLCONTEXT_NO_VSYNC', raising=False)
         _run_writing_setup(monkeypatch, mode)
         assert os.environ.get('OPENGLCONTEXT_NO_VSYNC') == '1'
@@ -982,7 +923,6 @@ class TestNeitherWritingModeIsPacedByADisplay:
                                                        ) -> None:
         """`setdefault`: somebody watching one on a real desktop may want it
         paced, and saying so has to keep working."""
-        import os
         monkeypatch.setenv('OPENGLCONTEXT_NO_VSYNC', '0')
         _run_writing_setup(monkeypatch, mode)
         assert os.environ.get('OPENGLCONTEXT_NO_VSYNC') == '0'
@@ -1001,7 +941,6 @@ class TestNeitherWritingModeDrawsTheDeveloperOverlay:
 
     @pytest.mark.parametrize('mode', ['capture', 'record'])
     def test_it_asks_for_a_clean_frame(self, monkeypatch, mode) -> None:
-        import os
         monkeypatch.delenv('OPENGLCONTEXT_DISABLE_FPS_DISPLAY', raising=False)
         _run_writing_setup(monkeypatch, mode)
         assert os.environ.get('OPENGLCONTEXT_DISABLE_FPS_DISPLAY') == '1'
@@ -1011,7 +950,6 @@ class TestNeitherWritingModeDrawsTheDeveloperOverlay:
                                                            mode) -> None:
         """Recording a run to show what the counters did is a real thing to
         want, and saying so has to keep working."""
-        import os
         monkeypatch.setenv('OPENGLCONTEXT_DISABLE_FPS_DISPLAY', '')
         _run_writing_setup(monkeypatch, mode)
         assert os.environ.get('OPENGLCONTEXT_DISABLE_FPS_DISPLAY') == ''
@@ -1019,20 +957,18 @@ class TestNeitherWritingModeDrawsTheDeveloperOverlay:
 
 def _run_writing_setup(monkeypatch, mode='capture'):
     """`_capture` or `_record` up to the window, and no further."""
-    from glisteel import game
-
     class _Stop(Exception):
         pass
 
     class _Context:
         @classmethod
-        def ContextMainLoop(cls, **named):
+        def ContextMainLoop(cls, **named):  # noqa: ARG003 the engine's ContextMainLoop
             raise _Stop()
 
     monkeypatch.setattr(game, 'GlisteelContext', _Context)
     argument, entry = {
-        'capture': (['--capture', 'x.png'], game._capture),
-        'record': (['--record', 'x.mp4'], game._record),
+        'capture': (['--capture', 'x.png'], game._capture),  # noqa: SLF001 which window entry main picks
+        'record': (['--record', 'x.mp4'], game._record),  # noqa: SLF001 which window entry main picks
     }[mode]
     options = game.build_parser().parse_args(argument)
     try:

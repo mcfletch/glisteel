@@ -9,9 +9,11 @@ lives, so all of it can be driven a step at a time and read back.
 
 import numpy as np
 import pytest
+from omi_physics import model
 
 from glisteel import scenarios
-from glisteel.driver import ALONGSIDE
+from glisteel.driver import ALONGSIDE, Autopilot
+from glisteel.race import SURVIVABLE, Lap
 from glisteel.run import COUNTDOWN
 from glisteel.session import (
     BUMP_AGAIN,
@@ -21,6 +23,7 @@ from glisteel.session import (
     STUCK_SECONDS,
     Session,
 )
+from glisteel.traffic import TrafficCar
 
 FRAME = 1.0 / 60.0
 
@@ -34,7 +37,7 @@ class _Pedals:
         self.calls = 0
         self.steps: list[float] = []
 
-    def controls(self, session, dt):
+    def controls(self, session, dt):  # noqa: ARG002 a driver's controls(session, dt)
         self.calls += 1
         self.steps.append(dt)
         return self.held
@@ -344,7 +347,6 @@ class TestWhoIsDriving:
     @pytest.mark.slow
     def test_the_autopilot_drives_it_round(self) -> None:
         """The same loop, with the driver swapped: a lap of a small circuit."""
-        from glisteel.driver import Autopilot
         piece = scenarios.circuit()
         session = Session(piece.world())
         session.driver = Autopilot(session.world.course)
@@ -355,7 +357,6 @@ class TestWhoIsDriving:
         assert session.timing.laps, "the autopilot did not get round"
 
     def test_the_driver_can_be_changed_mid_run(self) -> None:
-        from glisteel.driver import Autopilot
         session = _session(scenarios.circuit())
         session.driver = Autopilot(session.world.course)
         _drive(session, 3.0)
@@ -397,14 +398,12 @@ class TestHowARunCameOut:
         assert session.result().seconds is None
 
     def test_a_completed_lap_is_the_time_it_carries(self) -> None:
-        from glisteel.race import Lap
         session = _session(scenarios.circuit())
         session.timing.laps.append(Lap(number=1, seconds=84.115))
         session.run.update(0.0, laps=1)
         assert session.result().seconds == pytest.approx(84.115)
 
     def test_and_the_quickest_of_several(self) -> None:
-        from glisteel.race import Lap
         session = _session(scenarios.circuit(), laps=3)
         for number, seconds in enumerate((90.0, 84.1, 88.0), start=1):
             session.timing.laps.append(Lap(number=number, seconds=seconds))
@@ -412,7 +411,6 @@ class TestHowARunCameOut:
         assert session.result().seconds == pytest.approx(84.1)
 
     def test_it_says_how_many_laps_were_driven(self) -> None:
-        from glisteel.race import Lap
         session = _session(scenarios.circuit(), laps=2)
         for number in (1, 2):
             session.timing.laps.append(Lap(number=number, seconds=90.0))
@@ -435,7 +433,6 @@ def _traffic_at(session, across, station=45.0, speed=8.0, heading=1):
     how far to a car's *own* right it sits, so one heading the other way holds
     the negative of where it is on the road.
     """
-    from glisteel.traffic import TrafficCar
     course = session.world.course
     index, _distance = course.nearest(session.car.position)
     here = float(course.stations[index])
@@ -566,6 +563,34 @@ class TestHittingACar:
         assert _drive_into(session, 40.0) is None
 
 
+def _events(session):
+    """What a run writes down, the periodic sample aside.
+
+    These are about the *events*, and a run also says what the car was
+    doing every half second (:data:`glisteel.session.SAMPLE_SECONDS`).
+    """
+    kept: list = []
+
+    class Keeping:
+        @staticmethod
+        def mark(name, **fields):
+            if name != 'driving':
+                kept.append((name, fields))
+
+    session.telemetry = Keeping()
+    return kept
+
+
+def _crash(session, across=0.0, speed=40.0, heading=1):
+    """Drive into a car, having started keeping what gets written down."""
+    other = _traffic_at(session, session.across() + across,
+                        station=120.0 if heading < 0 else 45.0,
+                        speed=30.0 if heading < 0 else 8.0, heading=heading)
+    kept = _events(session)
+    assert _drive_into(session, speed) == 'HIT A CAR'
+    return kept, other
+
+
 class TestWritingDownACrash:
     """A run that ends against another car is read backwards from the moment
     it did, and "HIT A CAR" on its own says nothing about which car or where
@@ -573,38 +598,10 @@ class TestWritingDownACrash:
     nose to nose and one clipped on the way back into lane are told apart.
     """
 
-    @staticmethod
-    def _kept(session):
-        """What a run writes down, the periodic sample aside.
-
-        These are about the *events*, and a run also says what the car was
-        doing every half second (:data:`glisteel.session.SAMPLE_SECONDS`).
-        """
-        kept: list = []
-
-        class Keeping:
-            @staticmethod
-            def mark(name, **fields):
-                if name != 'driving':
-                    kept.append((name, fields))
-
-        session.telemetry = Keeping()
-        return kept
-
-    @staticmethod
-    def _crash(session, across=0.0, speed=40.0, heading=1):
-        """Drive into a car, having started keeping what gets written down."""
-        other = _traffic_at(session, session.across() + across,
-                            station=120.0 if heading < 0 else 45.0,
-                            speed=30.0 if heading < 0 else 8.0, heading=heading)
-        kept = TestWritingDownACrash._kept(session)
-        assert _drive_into(session, speed) == 'HIT A CAR'
-        return kept, other
-
     def test_it_says_what_the_car_hit(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        kept, _other = self._crash(session)
+        kept, _other = _crash(session)
         assert [name for name, _ in kept] == ['crash', 'drive-ended']
         fields = kept[0][1]
         assert fields['oncoming'] is False
@@ -614,13 +611,13 @@ class TestWritingDownACrash:
     def test_and_that_one_was_coming_the_other_way(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        kept, _other = self._crash(session, heading=-1)
+        kept, _other = _crash(session, heading=-1)
         assert kept[0][1]['oncoming'] is True
 
     def test_and_which_side_of_the_road_each_of_them_was_on(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        kept, other = self._crash(session)
+        kept, other = _crash(session)
         fields = kept[0][1]
         assert fields['across'] == pytest.approx(session.across(), abs=0.5)
         assert fields['theirs'] == pytest.approx(other.side(), abs=0.5)
@@ -629,13 +626,13 @@ class TestWritingDownACrash:
         session = _session(traffic=1, driver=_Pedals())
         session.advance(FRAME)
         session.driver.overtaking = True
-        kept, _other = self._crash(session)
+        kept, _other = _crash(session)
         assert kept[0][1]['passing'] is True
 
     def test_a_crash_is_written_down_once_rather_than_every_frame(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        kept, _other = self._crash(session)
+        kept, _other = _crash(session)
         for _ in range(5):
             session.advance(FRAME)
         assert [name for name, _ in kept] == ['crash', 'drive-ended']
@@ -650,7 +647,7 @@ class _Keeping(_Pedals):
         self.flushed = 0
         self.restarted = 0
 
-    def flush(self, session):
+    def flush(self, session):  # noqa: ARG002 the session calls a driver's flush with itself
         self.flushed += 1
 
     def restart(self):
@@ -661,7 +658,7 @@ class TestTheDriverIsToldHowTheRunWent:
     def test_a_run_that_ends_has_the_driver_write_down_what_is_open(self):
         session = _session(traffic=1, driver=_Keeping())
         session.advance(FRAME)
-        TestWritingDownACrash._crash(session)
+        _crash(session)
         for _ in range(5):
             session.advance(FRAME)
         assert session.driver.flushed == 1
@@ -669,7 +666,7 @@ class TestTheDriverIsToldHowTheRunWent:
     def test_and_so_does_a_finished_one(self) -> None:
         session = _session(driver=_Keeping())
         session.advance(FRAME)
-        session.run._enter('finished')
+        session.run._enter('finished')  # noqa: SLF001 ends the run without driving it to the line
         session.advance(FRAME)
         session.advance(FRAME)
         assert session.driver.flushed == 1
@@ -682,7 +679,7 @@ class TestTheDriverIsToldHowTheRunWent:
     def test_a_driver_with_nothing_to_keep_is_left_alone(self) -> None:
         session = _session(traffic=1, driver=_Pedals())
         session.advance(FRAME)
-        TestWritingDownACrash._crash(session)
+        _crash(session)
         session.restart()
 
 
@@ -693,20 +690,20 @@ class TestEveryFailureIsWrittenDown:
     def test_after_being_put_back(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        TestWritingDownACrash._crash(session)
+        _crash(session)
         session.return_to_track()
         session.advance(FRAME)
-        kept, _other = TestWritingDownACrash._crash(session)
+        kept, _other = _crash(session)
         assert [name for name, _ in kept] == ['crash', 'drive-ended']
 
     def test_after_a_restart(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
-        TestWritingDownACrash._crash(session)
+        _crash(session)
         session.restart()
         session.run.go()
         session.advance(FRAME)
-        kept, _other = TestWritingDownACrash._crash(session)
+        kept, _other = _crash(session)
         assert [name for name, _ in kept] == ['crash', 'drive-ended']
 
 
@@ -728,7 +725,6 @@ class TestWhereARestartStandsTheCar:
 
     def _slab_over_the_grid(self, session, rise):
         """Ground arriving over what was there, as a finer tile does."""
-        from omi_physics import model
         standing, _ = session.course.grid_position(
             session.grid, height=0.0, lane=session.lane)
         top = self._grid_height(session) + rise
@@ -847,7 +843,7 @@ class TestACarThatIsNotGoingAnywhereIsRecovered:
         for _ in range(int(seconds / FRAME)):
             session.car.control(throttle=throttle, brake=brake)
             session.world.physics.linear_velocity[session.car.body] = 0.0
-            session._recover_if_stuck(FRAME)
+            session._recover_if_stuck(FRAME)  # noqa: SLF001 the recovery step alone, without the frame loop
         return moved
 
     def test_stopped_on_the_road_with_the_power_on(self) -> None:
@@ -998,32 +994,19 @@ class TestARunSaysWhenTheCarHitTheWorld:
     What ends a run is still other cars: this is a note, not a rule.
     """
 
-    @staticmethod
-    def _kept(session):
-        kept: list = []
-
-        class Keeping:
-            @staticmethod
-            def mark(name, **fields):
-                if name != 'driving':
-                    kept.append((name, fields))
-
-        session.telemetry = Keeping()
-        return kept
-
     def test_a_hard_one_is_written_down(self) -> None:
         session = _session()
-        kept = self._kept(session)
+        kept = _events(session)
         session.advance(FRAME)
-        session._note_a_bump(18.0)
+        session._note_a_bump(18.0)  # noqa: SLF001 a bump of a given closing speed, without a collision
         assert [name for name, _ in kept] == ['hit-the-world']
         assert kept[0][1]['closing'] == pytest.approx(18.0)
 
     def test_and_it_says_where_on_the_road_that_was(self) -> None:
         session = _session()
-        kept = self._kept(session)
+        kept = _events(session)
         session.advance(FRAME)
-        session._note_a_bump(18.0)
+        session._note_a_bump(18.0)  # noqa: SLF001 a bump of a given closing speed, without a collision
         fields = kept[0][1]
         assert 'station' in fields and 'across' in fields
         assert fields['speed'] >= 0.0
@@ -1031,9 +1014,9 @@ class TestARunSaysWhenTheCarHitTheWorld:
     def test_a_scrape_is_not_one(self) -> None:
         """Kerbs, verges and a wing brushing a hedge happen all lap."""
         session = _session()
-        kept = self._kept(session)
+        kept = _events(session)
         session.advance(FRAME)
-        session._note_a_bump(0.4)
+        session._note_a_bump(0.4)  # noqa: SLF001 a bump of a given closing speed, without a collision
         assert kept == []
 
     def test_it_does_not_end_the_run(self) -> None:
@@ -1041,14 +1024,14 @@ class TestARunSaysWhenTheCarHitTheWorld:
         clipped a parapet and drove on has driven on."""
         session = _session()
         session.advance(FRAME)
-        session._note_a_bump(30.0)
+        session._note_a_bump(30.0)  # noqa: SLF001 a bump of a given closing speed, without a collision
         assert session.ended is None
 
     def test_it_is_heard(self) -> None:
         session = _session()
         heard = _listening(session)
         session.advance(FRAME)
-        session._note_a_bump(18.0)
+        session._note_a_bump(18.0)  # noqa: SLF001 a bump of a given closing speed, without a collision
         assert heard == [18.0]
 
     def test_and_heard_once_rather_than_on_every_step_of_it(self) -> None:
@@ -1056,26 +1039,26 @@ class TestARunSaysWhenTheCarHitTheWorld:
         heard = _listening(session)
         session.advance(FRAME)
         for _ in range(60):
-            session._note_a_bump(18.0)
+            session._note_a_bump(18.0)  # noqa: SLF001 a bump of a given closing speed, without a collision
         assert heard == [18.0]
 
     def test_a_restarted_race_writes_down_its_first_bump(self) -> None:
         """What was held off in the last race says nothing about this one."""
         session = _session()
-        kept = self._kept(session)
+        kept = _events(session)
         session.advance(FRAME)
-        session._note_a_bump(18.0)
+        session._note_a_bump(18.0)  # noqa: SLF001 a bump of a given closing speed, without a collision
         session.restart()
-        session._note_a_bump(18.0)
+        session._note_a_bump(18.0)  # noqa: SLF001 a bump of a given closing speed, without a collision
         assert [name for name, _ in kept] == ['hit-the-world'] * 2
 
     def test_one_bump_is_one_line_and_not_sixty_a_second(self) -> None:
         """A car wedged against a wall is closing on it on every step."""
         session = _session()
-        kept = self._kept(session)
+        kept = _events(session)
         session.advance(FRAME)
         for _ in range(60):
-            session._note_a_bump(18.0)
+            session._note_a_bump(18.0)  # noqa: SLF001 a bump of a given closing speed, without a collision
         assert len(kept) == 1
 
 
@@ -1188,7 +1171,7 @@ touching_it_does_not`: two cars going nearly the same speed meet at the
         """
         other = _traffic_at(session, session.across(), station=12.0,
                             speed=26.0)
-        kept = TestWritingDownACrash._kept(session)
+        kept = _events(session)
         met = False
         for _ in range(int(6.0 / FRAME)):
             if not met:
@@ -1210,7 +1193,6 @@ touching_it_does_not`: two cars going nearly the same speed meet at the
         session.advance(FRAME)
         kept = self._touch(session)
         fields = dict(kept)['hit-a-car']
-        from glisteel.race import SURVIVABLE
         assert 0.0 <= fields['closing'] <= SURVIVABLE
         assert fields['oncoming'] is False
         assert fields['across'] == pytest.approx(session.across(), abs=1.0)
@@ -1231,17 +1213,17 @@ touching_it_does_not`: two cars going nearly the same speed meet at the
         session = _session(traffic=1)
         session.advance(FRAME)
         other = _traffic_at(session, session.across(), station=300.0)
-        kept = TestWritingDownACrash._kept(session)
-        session._note_a_touch(other, 3.0)
+        kept = _events(session)
+        session._note_a_touch(other, 3.0)  # noqa: SLF001 a touch of a given closing speed, without a collision
         _drive(session, BUMP_AGAIN * 2.0)
-        session._note_a_touch(other, 3.0)
+        session._note_a_touch(other, 3.0)  # noqa: SLF001 a touch of a given closing speed, without a collision
         assert [name for name, _ in kept].count('hit-a-car') == 2
 
     def test_and_a_crash_is_still_a_crash_rather_than_a_touch(self) -> None:
         session = _session(traffic=1)
         session.advance(FRAME)
         _traffic_at(session, session.across())
-        kept = TestWritingDownACrash._kept(session)
+        kept = _events(session)
         assert _drive_into(session, 40.0) == 'HIT A CAR'
         assert 'crash' in [name for name, _ in kept]
 
@@ -1277,8 +1259,6 @@ class TestGettingPastSomethingStopped:
         ``oncoming`` is how far up the road the car coming the other way is;
         None leaves that lane empty.
         """
-        from glisteel.driver import Autopilot
-        from glisteel.traffic import TrafficCar
         session = _session(scenarios.oval(straight=1400.0), traffic=1)
         course = session.world.course
         # A road that posts a limit, as every baked one does: what is coming

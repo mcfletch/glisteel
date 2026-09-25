@@ -87,7 +87,7 @@ def bake(into: str, named: str | None = None, depth: int | None = None) -> str:
     carried once rather than four times.
     """
     try:
-        from glisteel_editor import bake as baker
+        from glisteel_editor import bake as baker  # noqa: PLC0415 optional: glisteel-editor
     except ImportError as error:              # pragma: no cover - needs the editor
         raise SystemExit(
             'baking needs glisteel-editor, which is not installed: %s. Check '

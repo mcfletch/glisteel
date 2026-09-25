@@ -39,7 +39,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 from typing import Any
 
 from OpenGLContext import atomicfiles
@@ -56,6 +56,11 @@ KEPT = 5
 
 #: What the file is called, under the player's own directory.
 RECORDS = 'times.json'
+
+
+def _today() -> str:
+    """The player's own calendar date, as ``YYYY-MM-DD``."""
+    return datetime.now().astimezone().date().isoformat()
 
 
 def records_path() -> str:
@@ -129,7 +134,7 @@ class Records:
         if not seconds > 0.0:
             return None
         record = Record(seconds=seconds,
-                        when=when if when is not None else date.today().isoformat())
+                        when=when if when is not None else _today())
         table = self._tables.setdefault(str(track), [])
         table.append(record)
         # Sorted by time, and by nothing else, so two equal laps keep the order

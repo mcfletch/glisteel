@@ -45,14 +45,20 @@ os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')
 os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')
 
 from OpenGLContext import quaternion, telemetry, testingcontext
+from OpenGLContext.capture import SettleCapture
+from OpenGLContext.contentpacks.fetch import FetchJob
 from OpenGLContext.events.systemtime import systemTime
+from OpenGLContext.scenegraph.fog import Fog
+from OpenGLContext.scenegraph.light import PointLight, SpotLight
 from OpenGLContext.scenegraph.scenegraph import SceneGraph
+from OpenGLContext.ui import settings
 from OpenGLContext.ui.overlay import OverlayMixin
 from OpenGLContext.video.recorder import RecordingMixin
 from OpenGLContext.viewer import environment
 from OpenGLContext.viewer.sceneviewer import ViewerContext
 
 from glisteel import (
+    content,
     menu,
     schemes,
     tracks,
@@ -190,7 +196,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self._show_hud()
         self._bind_keys()
         self.sg = SceneGraph(children=[environment.horizon_background()])
-        from glisteel import content
         if not content.art_is_here():
             self.show_first_run()
             return
@@ -210,7 +215,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         Before the menu and before any world is built: every car is read from
         that art. Closing the screen without it leaves the game.
         """
-        from glisteel import content
         self._first_run = menu.first_run_screen(
             content.CONTENT.needed_to_start(),
             on_fetch=lambda _pack: content.CONTENT.base_job(
@@ -220,7 +224,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.pushOverlay(self._first_run.panel)
 
     def _first_run_finished(self, job: Any) -> None:  # pragma: no cover
-        from glisteel import content
         if job.failed is None and not job.cancelled and content.art_is_here():
             screen, self._first_run = self._first_run, None
             if screen is not None:
@@ -313,7 +316,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         a light is a shader slot, and a scenegraph that gains and loses one
         every twenty-five metres recompiles for it.
         """
-        from OpenGLContext.scenegraph.light import PointLight, SpotLight
         self.headlights = Headlights(
             fitted=self.config.headlights)
         self._beam = SpotLight(color=BEAM_COLOUR,
@@ -385,7 +387,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
 
     # -- the screens -----------------------------------------------------------
 
-    def show_menu(self, event: Any = None,
+    def show_menu(self, event: Any = None,  # noqa: ARG002 a key or pointer handler is called with its event
                   subtitle: str | None = None) -> None:  # pragma: no cover - a window
         """The menu, over whatever is behind it.
 
@@ -437,7 +439,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
 
     def _download_screens(self) -> Any:          # pragma: no cover - needs a window
         if self._downloads is None:
-            from glisteel import content
             self._downloads = menu.Downloads(
                 content.offered, content.wanted_for, self._start_fetch,
                 on_arrived=self._on_arrived)
@@ -449,9 +450,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         A track without the art it shares arrives as bare ground, and a user
         who agreed to a track agreed to a track that works.
         """
-        from OpenGLContext.contentpacks.fetch import FetchJob
-
-        from glisteel import content
         store = content.store()
         return FetchJob(content.wanted_for(pack, store), store,
                         on_progress=self.triggerRedraw, within=pack)
@@ -538,7 +536,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.show_menu()
 
     def _on_settings(self) -> None:              # pragma: no cover - needs a window
-        from OpenGLContext.ui import settings
         self._drop_menu()
         settings.open_settings(self)
 
@@ -599,18 +596,18 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         wheel.resize(int(width or wheel.width))
         wheel.moved(int(event.getPickPoint()[0]))
 
-    def _on_camera(self, event: Any) -> None:    # pragma: no cover - needs a window
+    def _on_camera(self, event: Any) -> None:    # pragma: no cover - needs a window  # noqa: ARG002 a key or pointer handler is called with its event
         if self.session is None:
             return
         self.session.camera.cycle()
         self.triggerRedraw(1)
 
-    def _on_reset(self, event: Any) -> None:     # pragma: no cover - needs a window
+    def _on_reset(self, event: Any) -> None:     # pragma: no cover - needs a window  # noqa: ARG002 a key or pointer handler is called with its event
         if self.session is None:
             return
         self.session.return_to_track()
 
-    def _on_restart(self, event: Any) -> None:   # pragma: no cover - needs a window
+    def _on_restart(self, event: Any) -> None:   # pragma: no cover - needs a window  # noqa: ARG002 a key or pointer handler is called with its event
         if self.session is None:
             return
         self.session.restart()
@@ -618,7 +615,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
 
     # -- the frame -------------------------------------------------------------
 
-    def OnIdle(self, *args: Any) -> int:         # pragma: no cover - needs a window
+    def OnIdle(self, *args: Any) -> int:         # pragma: no cover - needs a window  # noqa: ARG002 the engine's idle callback
         now = systemTime()
         elapsed = now - self._clock
         self._clock = now
@@ -818,7 +815,6 @@ def race_fog() -> Any:
     closes in over a distance rather than at one, since an exponential
     fall-off has no visible edge.
     """
-    from OpenGLContext.scenegraph.fog import Fog
     return Fog(color=environment.HORIZON_HAZE, fogType='EXPONENTIAL',
                visibilityRange=VISIBILITY)
 
@@ -1076,8 +1072,6 @@ def _capture(options: Any, width: int, height: int) -> None:  # pragma: no cover
     and the same input on the same frames, so frame N is the same picture on
     every machine.
     """
-    from OpenGLContext.capture import SettleCapture
-
     _unpaced()
 
     class CapturingContext(GlisteelContext):
