@@ -198,7 +198,6 @@ class TestWhatAFirstRunDoes:
 
     def test_and_from_the_pack_once_it_is(self, store) -> None:
         from OpenGLContext.contentpacks import catalog
-        from OpenGLContext.contentpacks import catalog
         pack = catalog.pack_for_key(content.BASE, content.registry())
         root = store.directory_for(pack)
         os.makedirs(os.path.join(root, 'cars'), exist_ok=True)
@@ -372,8 +371,9 @@ class TestTheArtIsLookedForWhenItIsUsed:
 
     def test_the_models_follow_a_pack_installed_after_import(
             self, tmp_path, monkeypatch) -> None:
-        from glisteel import models
         from OpenGLContext.contentpacks import catalog
+
+        from glisteel import models
         pack = catalog.pack_for_key(content.BASE, content.registry())
         root = tmp_path / 'local' / content.NAMESPACE / pack.directory
         (root / 'cars').mkdir(parents=True)
