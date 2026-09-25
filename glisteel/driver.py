@@ -428,11 +428,12 @@ class Autopilot:
         """
         speed = float(session.car.speed())
         index, _distance = self.course.nearest(session.car.position)
-        self.choose_lane(session, speed, self.road_speed(index, speed), dt)
+        allowed = self.road_speed(index, speed)
+        self.choose_lane(session, speed, allowed, dt)
         self.ease(dt)
         found = self.what_to_follow(session, speed)
         self.following(*(found if found is not None else (None, 0.0)))
-        self.held_back(session, speed, self.road_speed(index, speed), dt)
+        self.held_back(session, speed, allowed, dt)
         return self.update(session.car)
 
     def held_back(self, session: SessionLike, speed: float, allowed: float,

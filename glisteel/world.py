@@ -34,6 +34,7 @@ from OpenGLContext.scenegraph.road import (
     cornering_radius,
     sight_distances,
 )
+from OpenGLContext.scenegraph.roadcourse import RoadCourse, Tracker
 from OpenGLContext.scenegraph.roadworks import (
     BORE_APPROACH_CELLS,
     BORE_INSET,
@@ -365,35 +366,28 @@ class Course:
         return self._section.section_offset(across, bank)
 
     @functools.cached_property
+    def road(self) -> RoadCourse:
+        """The engine's runtime queries on this centreline
+        (:class:`~OpenGLContext.scenegraph.roadcourse.RoadCourse`)."""
+        return RoadCourse(self.centreline, closed=self.closed,
+                          bank=self.bank if len(self.bank) else None)
+
+    @functools.cached_property
     def stations(self) -> np.ndarray:
         """Distance along the road to each centreline point.
 
         Worked out once. A course is read from a baked world and does not move
-        after that, and this is asked for by everything that places anything
-        along the road -- every traffic car, every frame. Call :meth:`moved` if
-        the line is ever replaced under it.
+        after that; call :meth:`moved` if the line is ever replaced under it.
         """
-        steps = np.linalg.norm(np.diff(self.centreline, axis=0), axis=1)
-        return np.concatenate([[0.0], np.cumsum(steps)])
+        found: np.ndarray = self.road.stations
+        return found
 
-    @functools.cached_property
+    @property
     def segments(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """The road's segments on the ground: where each starts, where it goes,
-        and the square of how long it is.
-
-        What :meth:`nearest` measures against, worked out once rather than per
-        question: the alternative is a fresh copy of the whole centreline, two
-        dot products and a division every time anything asks where the car is,
-        which several things do about the same car in the same frame.
-        """
-        line = self.centreline[:, [0, 2]]
-        if self.closed:
-            starts = line
-            delta = np.roll(line, -1, axis=0) - line
-        else:
-            starts, delta = line[:-1], line[1:] - line[:-1]
-        length2 = np.einsum('ij,ij->i', delta, delta)
-        return starts, delta, np.where(length2 > 0, length2, 1.0)
+        and the square of how long it is (:attr:`RoadCourse.segments`)."""
+        found: tuple[np.ndarray, np.ndarray, np.ndarray] = self.road.segments
+        return found
 
     @functools.cached_property
     def radii(self) -> np.ndarray:
@@ -436,6 +430,7 @@ class Course:
 
     #: The last position :meth:`nearest` was asked about and what it answered.
     _last_nearest: tuple[tuple[float, float], tuple[int, float]] | None = None
+    _tracker: Tracker | None = dataclasses.field(default=None, repr=False)
 
     def corner_speed(self, index: int) -> float:
         """How fast the bend at that point of the road may be taken, in m/s.
@@ -591,11 +586,12 @@ class Course:
         but a tool that edits a course in place has to be able to say so, and a
         cache with no way to clear it is a trap rather than a saving.
         """
-        for name in ('stations', 'segments', 'ground_line', 'radii',
+        for name in ('road', 'stations', 'ground_line', 'radii',
                      '_section', 'start_index', '_spacing', '_clear', '_sight',
                      'caution_speeds'):
             self.__dict__.pop(name, None)
         self._last_nearest = None
+        self._tracker = None
 
     @functools.cached_property
     def ground_line(self) -> np.ndarray:
@@ -683,62 +679,36 @@ class Course:
     def nearest(self, position: Any) -> tuple[int, float]:
         """The nearest centreline point's index, and how far off the *road* it is.
 
-        Distance is to the line, not to the points written down for it: a course
-        is a shape sampled every few metres, and a car exactly on the line half
-        way between two samples is on the line, not four metres off it. The
-        index is still a point -- what a caller wants it for is to look up the
-        road ahead -- and it is the nearer of the two the car lies between.
+        Distance is to the line, not to the points written down for it, and
+        measured across the ground, so a car in the air over the track is
+        still on it. The index is the nearer end of the segment the position
+        is beside.
 
-        Measured across the ground, so a car in the air over the track is still
-        on it.
-
-        The last answer is kept. Within one physics step the lap timing, the
-        off-road watch, whoever is driving and the steering aid all ask about
-        the same car, which has not moved in between -- so the second and third
-        of those are answered without another pass over the line.
+        Searched near the last answer (:class:`~OpenGLContext.scenegraph.roadcourse.Tracker`),
+        and the last answer is kept: within one physics step the lap timing,
+        the off-road watch, whoever is driving and the steering aid all ask
+        about the same car.
         """
         wanted = np.asarray(position, dtype='d').reshape(-1)
         key = (float(wanted[0]), float(wanted[2]))
         if self._last_nearest is not None and self._last_nearest[0] == key:
             found: tuple[int, float] = self._last_nearest[1]
             return found
-        answer = self._nearest(key)
+        if self._tracker is None:
+            self._tracker = self.road.tracker()
+        index, off = self._tracker.nearest(wanted)
+        answer = (int(index), float(off))
         self._last_nearest = (key, answer)
         return answer
 
-    def _nearest(self, where: tuple[float, float]) -> tuple[int, float]:
-        """:meth:`nearest`, without the memo in front of it."""
-        point = np.asarray(where, dtype='d')
-        line = self.ground_line
-        gaps = np.linalg.norm(line - point, axis=1)
-        index = int(gaps.argmin())
-        start, delta, length2 = self.segments
-        along = np.clip(np.einsum('ij,ij->i', point - start, delta) / length2,
-                        0.0, 1.0)
-        off = np.linalg.norm(start + along[:, None] * delta - point, axis=1)
-        return index, float(off.min())
-
     def station_of(self, position: Any) -> float:
-        """How far along the road something is, in metres.
+        """How far along the road something is, in metres, between the samples.
 
-        Between the samples rather than at the nearest one: a course is a line
-        written down every few metres, and anything watching a distance along
-        it -- what the car is driving through, how far off what is in front is
-        -- moves in those steps unless the answer is worked out between them.
-
-        The point is put on the *segment* it is beside rather than on the
-        sample it is nearest, which is the same distinction :meth:`nearest`
-        makes when it measures how far off the line something is.
+        Searched near the last answer, as :meth:`nearest` is.
         """
-        at = np.asarray(position, dtype='d').reshape(-1)[:3][[0, 2]]
-        start, delta, length2 = self.segments
-        along = np.clip(np.einsum('ij,ij->i', at - start, delta) / length2,
-                        0.0, 1.0)
-        off = np.linalg.norm(start + along[:, None] * delta - at, axis=1)
-        index = int(off.argmin())
-        stations = self.stations
-        return float(stations[index]
-                     + along[index] * math.sqrt(float(length2[index])))
+        if self._tracker is None:
+            self._tracker = self.road.tracker()
+        return float(self._tracker.station_of(position))
 
     def on_road(self, position: Any) -> bool:
         """Whether a point is on the carriageway rather than beside it."""
@@ -756,39 +726,13 @@ class Course:
     def across(self, index: int) -> np.ndarray:
         """The unit vector across the road there, pointing to its own right.
 
-        The same frame everything swept along a road uses
-        (:func:`OpenGLContext.scenegraph.road.sweep_frames`), so the driving
-        line, the grid, the signs and the traffic all agree which side is
-        which.
+        Rolled by however far the road leans there, so anything that goes out
+        from the crown -- a driving line, a grid slot, a car keeping its own
+        side -- follows the surface (:meth:`RoadCourse.across`). The same frame
+        everything swept along a road uses
+        (:func:`OpenGLContext.scenegraph.road.sweep_frames`).
         """
-        # A closed course's last point is its first, so the segment between
-        # them has no direction. Looking on to the next one that does is what
-        # keeps the seam agreeing with the road either side of it.
-        here = self.point(index)
-        for step in range(1, min(len(self.centreline), 8)):
-            along = self.point(index + step) - here
-            right = np.cross(along, (0.0, 1.0, 0.0))
-            length = float(np.linalg.norm(right))
-            if length > 1e-9:
-                return self._leaning(right / length, along / max(
-                    float(np.linalg.norm(along)), 1e-9), index)
-        return np.array([1.0, 0.0, 0.0])         # pragma: no cover - a point
-
-    def _leaning(self, right: np.ndarray, along: np.ndarray,
-                 index: int) -> np.ndarray:
-        """A level across vector rolled by however far the road leans there.
-
-        A banked corner turns the whole road about its own centreline, so the
-        way across it runs downhill on the inside. Anything that goes *out* from
-        the crown -- a driving line, a grid slot, a car keeping its own side --
-        follows the surface rather than the horizon, which is what this is.
-        """
-        lean = self.bank_at(index)
-        if not lean:
-            return right
-        angle = math.atan(lean)
-        found: np.ndarray = (math.cos(angle) * right
-                             - math.sin(angle) * np.cross(right, along))
+        found: np.ndarray = self.road.across(index)
         return found
 
     def lane_point(self, index: int, offset: float = 0.0) -> np.ndarray:
