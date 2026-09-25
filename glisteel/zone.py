@@ -16,7 +16,7 @@ where the lanes are, and which of them have something coming the other way.
     >>> round(zone.step(-1.8, 1), 2)
     1.8
 
-**Offsets are metres to the road's own right**, which is the frame the whole
+Offsets are metres to the road's own right, which is the frame the whole
 game measures across a road in -- :meth:`glisteel.world.Course.across`, the
 grid, the traffic and the line the steering aid holds. Right-hand traffic, so a
 driver's own lanes are the right-hand ones and the crown is the line they cross

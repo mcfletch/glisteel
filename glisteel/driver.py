@@ -4,7 +4,7 @@ The same three pedals, produced by looking at the road instead of at a keyboard.
 It runs the demo lap, it is what an opponent car would use, and it is a way to
 ask whether a circuit is actually drivable without anyone having to drive it.
 
-**Pure pursuit** for the steering: aim at a point some distance up the road,
+Pure pursuit for the steering: aim at a point some distance up the road,
 steer toward it, and let the distance grow with speed so the car looks further
 ahead the faster it goes. It is the oldest path-following rule there is and it
 holds a racing line better than anything of its size.
@@ -16,7 +16,7 @@ can see under itself, as an angle that softens with speed -- the same metres off
 the line is a smaller correction the faster you are going, or what settles at
 20 m/s saws the wheel at 50.
 
-**Corner-limited speed** for the pedals: how fast a car may go through a bend of
+Corner-limited speed for the pedals: how fast a car may go through a bend of
 radius *r* is `sqrt(grip * g * r)`, so the target speed comes from the curvature
 of the road ahead rather than from a number written down per corner. Below the
 target it accelerates, above it brakes -- and it looks far enough ahead to brake
@@ -124,12 +124,8 @@ CRAWL_HOLDS = 1.0
 #: stopped car while crawling is three seconds of room and a perfectly ordinary
 #: place to pull out from. Not the whole following distance either, which at
 #: speed is the better part of a hundred metres and would refuse every pass
-#: there is -- this is only about the bumper.
-#:
-#: What comes of not asking is on the Beacon journal: `pass-started gap=10.6`
-#: at 80 km/h, given up a tenth of a second later and stranded on the wrong
-#: side, then another declared `pass-done` in 0.1 s, and the car off the road
-#: at the next station.
+#: there is -- this is only about the bumper. A pass started off a bumper is
+#: given up at once and leaves the car stranded across the crown.
 PASS_FROM_SECONDS = 0.8
 PASS_FROM_LEAST = 6.0
 
@@ -143,7 +139,7 @@ LANE_RATE = 2.5
 #: How far apart two cars sit to pass on one side of the crown, in metres.
 #: A car is 1.85 m across the mirrors and wants a little air beside it, which
 #: on an ordinary 3.6 m half-carriageway does not fit and on a widened 5.4 m
-#: one does. That difference is the whole of what a climbing lane is for.
+#: one does, which is what makes a climbing lane a place to pass.
 ABREAST = 2.4
 
 #: The shortest time a driver is allowed to take recovering a following
@@ -156,14 +152,10 @@ MINIMUM_FALL_BACK = 0.5
 #: How much of the road's speed a driver gives up while crossing it, as a
 #: fraction, and the width of crossing that asks for all of it, in metres.
 #:
-#: A lane change at the absolute limit has nothing left to correct with. From
-#: the Beacon journal: a pass finished at 143.6 km/h where the road allows
-#: 145.7, flat out and on the wrong side, and the car had to cross back with no
-#: margin at all -- two metres wide of its line in six tenths of a second on a
-#: straight, a wheel on the grip-0.45 verge, mired twenty metres off the road.
-#: A tenth of the speed, given up only while the line is still moving, buys the
-#: grip to arrive on the lane rather than past it and costs a pass a fraction
-#: of a second.
+#: A lane change at the absolute limit has nothing left to correct with: a car
+#: crossing back flat out overshoots its lane onto the verge. A tenth of the
+#: speed, given up only while the line is still moving, buys the grip to arrive
+#: on the lane rather than past it and costs a pass a fraction of a second.
 CROSSING_LIFT = 0.12
 CROSSING_SPAN = 2.4
 
@@ -183,10 +175,10 @@ STEER_LOCK = 0.55
 class DriverStyle:
     """How hard this driver tries.
 
-    ``grip`` is the cornering acceleration it believes it has, in g -- the
-    single number that decides how fast it takes a bend, and deliberately less
-    than the tyres actually have: a driver who believes the limit exactly is
-    over it whenever the road is bumpy, off camber, or crests as it turns.
+    ``grip`` is the cornering acceleration it drives to, in g -- the single
+    number that decides how fast it takes a bend, and deliberately less than
+    the tyres have: a driver at the limit exactly is over it whenever the road
+    is bumpy, off camber, or crests as it turns.
     ``margin`` scales the speed it aims for on top of that, so a cautious
     opponent is the same driver at 0.85.
     """
@@ -206,17 +198,17 @@ class DriverStyle:
     #: Speed error, in m/s, at which it goes to full throttle or full brake.
     pedal_span: float = 6.0
     #: How close this driver will get to whatever is in front, in metres, and
-    #: how hard it believes it can brake, in metres per second squared. The two
+    #: how hard it plans to brake, in metres per second squared. The two
     #: together are the following rule: the speed it could still stop from in
     #: the room it has.
     standing_gap: float = 7.0
     #: How many seconds behind whatever is in front the driver sits, which with
-    #: ``standing_gap`` is the whole of how far back that is
+    #: ``standing_gap`` gives how far back that is
     #: (:meth:`Autopilot.following_gap`). Zero follows at ``standing_gap``
     #: whatever the speed, which is what getting *past* something asks for.
     following_seconds: float = FOLLOWING_SECONDS
     braking: float = 6.0
-    #: How hard it believes it accelerates, in metres per second squared.
+    #: How hard it plans to accelerate, in metres per second squared.
     #: What decides how long getting by something takes, since a pass is
     #: driven rather than coasted: at the speed the car happens to be doing, a
     #: standing start behind something stopped never closes at all.
@@ -401,14 +393,10 @@ class Autopilot:
     def ease(self, dt: float) -> float:
         """Move the line this car follows towards the lane it has chosen.
 
-        A lane is a **decision** and a lane change is a **manoeuvre**, and the
-        two are not the same length of time. Moved in one step, the line the
-        car is following jumps its whole width sideways, the steering darts at
-        it, and the car arrives past it: on the shipped Beacon road that put
-        the car at -3.8 m against a 3.6 m carriageway edge, on the last stretch
-        of a bridge, in every one of five runs -- two metres wide of the lane
-        it had been told to hold, on a straight where the corner speed never
-        entered into it. Twenty-one metres off the road, every time.
+        A lane is a decision and a lane change is a manoeuvre, and the two are
+        not the same length of time. Moved in one step, the line the car is
+        following jumps its whole width sideways, the steering darts at it,
+        and the car arrives past it and off the carriageway.
 
         :data:`LANE_RATE` is how fast it crosses, which is a second or so for a
         whole lane -- what a considered move across a road takes, and slow
@@ -482,17 +470,13 @@ class Autopilot:
         own position, so a driver crossing back from a pass is following the
         lane it is *leaving* -- which is empty, that being why it pulled out --
         and nothing tells it to brake until it has arrived.
-
-        Read off the Ashdown journal: a pass given up at 134.5 km/h, back into
-        its own lane, and 1.2 s later the back of a car doing 50 in it.
         """
         here = session.traffic_ahead()
         # Only ever its **own** side. Out on the far side what governs is the
         # pass -- finish it or give it up -- and a car coming the other way is
         # not something to keep station on: the gap to it shuts at the sum of
         # both speeds, so a driver that follows one brakes to a standstill in
-        # the wrong lane. Which it did: 108 km/h to 3.9 over 112 m, ten seconds
-        # stationary, and mired 8.5 m off the crown.
+        # the wrong lane.
         going = (session.lane_ahead(self.own_side, reach=self.looking(speed))
                  if abs(self.lane - self.own_side) < 1e-6 else None)
         if here is None or going is None:
@@ -506,15 +490,14 @@ class Autopilot:
         A driver that only ever follows spends the lap behind the first slow
         thing it meets, and the road behind it fills up with everything that
         would have gone quicker. So this is the other half of knowing about
-        traffic: not just how fast to go for what is in front, but whether to be
-        behind it at all.
+        traffic: whether to be behind what is in front at all.
 
         The decision is the driver's and the *room* is the road's -- the lane is
         only taken where :meth:`~glisteel.session.Session.lane_clear` says there
         is somewhere to go, both in front and behind, since a lane taken into
         something already in it is a pass nobody survives.
 
-        **How much room** is worked out from how long the pass will take. A
+        How much room is worked out from how long the pass will take. A
         pass is not a gap in front of the car being passed: it is a stretch of
         the *other side of the road*, and on a two-way road whatever is coming
         the other way is closing on it at both cars' speeds at once. So the
@@ -567,21 +550,14 @@ class Autopilot:
                 # one that finishes, *and* there is still giving up to do:
                 # beside the car being passed there is not. :data:`ALONGSIDE`
                 # is where that line falls, and finishing is the only way out
-                # past it -- re-deciding from scratch every frame and bailing
-                # at whatever appeared put twenty-three of twenty-five passes
-                # on one recorded run into the wrong side of the road and out
-                # again.
+                # past it; a driver re-deciding from scratch every frame bails
+                # out of most of its passes.
                 #
                 # Back there the lane it came from is still its own to return
                 # to, and the wrong side of a road is no place to wait and see.
-                #
-                # **Back to a lane that is there to go back to.** Alongside the
-                # car being passed there is nothing to come back to, and a
-                # driver that crosses the crown anyway crosses it into them --
-                # which is the same question the finished-pass branch above has
-                # always asked, and this one did not. Out here is the wrong
-                # side of the road and it is still the safer of the two until
-                # the lane is clear.
+                # It goes back only to a lane that is clear, as a finished pass
+                # does: crossing the crown into the car being passed is worse
+                # than staying out until the lane is clear.
                 self.note(session, 'pass-given-up',
                           why='no room to finish' if room is None
                               else 'the way through closed',
@@ -602,10 +578,8 @@ class Autopilot:
         if float(session.along(first)) < self.pulling_out_from(speed):
             # Inside its own following distance there is nowhere to pull out
             # from and nothing to see past: the room a driver keeps to follow
-            # is the room a pass is decided from. Pulling out off a bumper is
-            # what put the car across the crown and off the road on the Beacon
-            # run -- `pass-started gap=10.6`, given up a tenth of a second
-            # later and stranded, then another `pass-done` in 0.1 s.
+            # is the room a pass is decided from. A pass pulled out off a
+            # bumper is given up at once and strands the car across the crown.
             self.refused(session, 'too close to pull out', dt)
             return
         # A lane on this car's own side first, where the road has one: a pass
@@ -689,10 +663,7 @@ class Autopilot:
         Where a carriageway widens -- a climbing lane, a crawler lane, a
         stretch built to be overtaken on -- there is room for two cars abreast
         on one side of the crown, and a pass taken there wants nothing of the
-        oncoming road at all. It is the safest pass there is and the driver
-        could not see one: it only ever considered ``-own_side``, so 1183 m of
-        the shipped Ashdown circuit was invisible to it while it spent two
-        fifths of every run refusing passes for want of an oncoming lane.
+        oncoming road at all, which makes it the safest pass there is.
 
         Answers the middle of that outer lane, which is a car's width beyond
         the line this one holds. None where the widened road is not wide enough
@@ -714,23 +685,15 @@ class Autopilot:
         Finishing one asks :meth:`room_in` as well -- out there it is already
         past what it overtook and going faster, so waiting costs nothing, where
         a driver that has abandoned a pass is sitting on the wrong side of the
-        road with something coming. The Ashdown journal has the difference in
-        it: a pass completed at 137 km/h, back to its own lane, and a third of
-        a second later the back of a car doing 32 in it.
+        road with something coming.
 
-        **Being on the wrong side of a road is worse than arriving in the right
-        one too fast**, and that
-        is a measured comparison rather than an opinion: made to wait for road
-        enough to shed its speed into as well, the driver stayed out for 3.4 s
-        and met a car head-on at 44.8 m/s of closing speed, where coming back
-        at once had cost a same-direction contact at 10.3. Four times the
-        severity, to avoid arriving too quickly behind something.
-
-        So the room to hold a lane decides how hard to *brake* once in it --
-        the following rule does that from the car's own position, which after
-        this is its own lane -- and never whether to be in it. A driver that
-        will not come back is a driver in the oncoming lane, and there is
-        nothing on the road worse to be.
+        Being on the wrong side of the road is worse than arriving in the right
+        one too fast: a driver made to wait for room to shed its speed meets
+        oncoming traffic head-on at several times the closing speed of the
+        same-direction contact it avoided. So the room to hold a lane decides
+        how hard to brake once in it -- the following rule does that from the
+        car's own position, which after this is its own lane -- and never
+        whether to be in it.
         """
         return bool(session.lane_clear(self.own_side))
 
@@ -841,26 +804,21 @@ class Autopilot:
         Two different speeds go into it, and using one for both is what makes a
         pass look cheap and turn out expensive:
 
-        **How long it takes** is what this car *averages* over the pass against
+        How long it takes is what this car *averages* over the pass against
         the car in front: it is not doing its follow speed by the end, and it is
         not doing the road's speed at the start, so neither of those alone is
         the answer.
 
-        Taking the speed it has now is what a driver that never overtakes is
-        made of. A driver keeps a time gap, so within seconds of catching
-        something it is doing precisely what that thing is doing -- and a pass
-        sized on the difference between the two is then a pass of infinite
-        length, refused for ever. Watched on a recorded lap: the car pulled up
-        behind one van and drove the rest of the circuit at its speed.
+        The speed it has now is not the answer: a driver keeps a time gap, so
+        within seconds of catching something it is doing what that thing is
+        doing, and a pass sized on the difference between the two is a pass
+        of infinite length. The speed the road allows is not the answer
+        either: a driver crawling behind a stopped queue cannot be past in
+        half a second, and sizing the pass as though it could asks for forty
+        metres of road and then uses four hundred. The mean of the two is what
+        a car accelerating from one to the other covers the road at.
 
-        Taking the speed the road allows is the opposite mistake, and the
-        reason the first one was made. A driver crawling behind a stopped queue
-        cannot conjure the speed to be past in half a second, and sizing the
-        pass as though it could asks for forty metres of road and then uses
-        four hundred. The mean of the two is what a car accelerating from one
-        to the other actually covers the road at.
-
-        **How much road that consumes** is the stretch of the other lane the
+        How much road that consumes is the stretch of the other lane the
         two of them between them cover: this car from where it is now to where
         it finishes (:meth:`pass_distance`), and whatever is coming down that
         lane at *its* speed for as long as the pass lasts. What is coming the
@@ -869,19 +827,11 @@ class Autopilot:
         against another racer. A road that says nothing makes no promise about
         what is on it, and is sized for something as fast as this car.
 
-        The car's own share of that is the road it **covers** and not the speed
-        it will end at times the clock. The two are the same for a pass taken
-        at speed and a third apart for one begun from a crawl -- which is
-        exactly the pass that most needs to be on, since what a driver is
-        crawling behind is something barely moving. On the recorded Tidewater
-        lap the driver stood still behind a stopped car for ten seconds asking
-        for 344 m of clear oncoming lane, on a road whose oncoming cars sit
-        about 500 m apart; the pass it was measuring uses 260.
-
-        Measured on the 3 km circuit before that: the driver asked for a median
-        630 m of clear oncoming lane on the same spacing -- a pass that never
-        comes. Against the limit those cars actually drive it asks for a fifth
-        less.
+        The car's own share of that is the road it covers, not the speed it
+        will end at times the clock. The two are the same for a pass taken at
+        speed and a third apart for one begun from a crawl, which is the pass
+        behind something barely moving. The traffic on a two-way road is spaced
+        for a pass this size to fit (:func:`glisteel.traffic.passable_count`).
 
         Nothing is added for appetite. What bounds the exposure is
         :data:`PASS_SECONDS`, and a pass under way is judged again on every
@@ -943,16 +893,13 @@ class Autopilot:
         it is pointing, and a driver who would have rejoined ends up in the
         trees.
 
-        **Eased over the last :data:`EDGE_BAND` of the carriageway rather than
-        cut at its edge.** Running out of road is an approach, not an event,
-        and a rule that holds road speed at 3.59 m and lifts hard at 3.61 is a
-        driver reacting to a wheel that is already off -- and unsettling the
-        car at the one place it has least room to be unsettled. Off a structure
-        that costs a moment on the grass. On one there is no verge: the parapet
-        stands 0.9 m beyond the edge, and a car that reaches it is thrown into
-        the air. Measured on the shipped Ashdown circuit, six excursions in a
-        lap, every one at 3.68 m against a 3.60 m edge -- a tenth of a metre
-        wide of the road, each time.
+        Eased over the last :data:`EDGE_BAND` of the carriageway rather than
+        cut at its edge. Running out of road is an approach, not an event, and
+        a rule that holds road speed at 3.59 m and lifts hard at 3.61 is a
+        driver reacting to a wheel that is already off, unsettling the car at
+        the one place it has least room to be. Off a structure that costs a
+        moment on the grass; on one there is no verge, and the parapet stands
+        0.9 m beyond the edge.
 
         The edge is **where the road actually ends at that point**: a widened
         stretch has more of it, and a driver measuring from the ordinary width
@@ -1112,7 +1059,7 @@ class Autopilot:
         number twice over -- the tight part is one corner of two hundred metres
         of road, the car drives the rest of it at what the rest of it holds,
         and a pass planned at the speed of the slowest corner in it is a pass
-        the driver believes it has no acceleration for and never takes.
+        planned with no acceleration, which is never taken.
         """
         radii = self.course.radii
         points = max(2, self._points_for(max(float(metres), 0.0)))
@@ -1152,12 +1099,11 @@ class Autopilot:
         doing: the braking distance read backwards. The same rule the traffic
         uses on itself, so a queue behaves the same way whoever is in it.
 
-        **Too close asks for less than the car in front.** Matching its speed
+        Too close asks for less than the car in front. Matching its speed
         holds whatever gap the driver arrived with, which is not the same as
-        keeping a following distance: read off a recorded Tidewater lap, 4.3 m
-        behind a car at 77 km/h -- a fifth of a second -- held there for a
-        kilometre. So a driver inside its distance bleeds the shortfall off
-        over the same time the gap is measured in, and the room comes back.
+        keeping a following distance, so a driver inside its distance bleeds
+        the shortfall off over the same time the gap is measured in, and the
+        room comes back.
         """
         if self.ahead is None:
             return self.style.maximum_speed
@@ -1743,10 +1689,9 @@ class StandIn:
         """Why this driver is not pulling out, or None when it would.
 
         The same decision :meth:`can_pull_out` answers, with the reason kept
-        rather than thrown away. A lap that passes nothing says nine passes or
-        none and never *which* check said no, and that one word is the whole of
-        what is wanted when a drive turns out boring: the road was too blind,
-        or something was coming, or it had already arrived at the car in front.
+        rather than thrown away, so a lap that passes nothing says which check
+        said no: the road was too blind, or something was coming, or it had
+        already arrived at the car in front.
         It goes into the session record (:mod:`OpenGLContext.telemetry`), so a
         drive nobody watched can still be read afterwards.
 
@@ -1937,8 +1882,8 @@ class StandIn:
         out of the very piece of road that was empty a moment ago.
 
         The road is measured from *here*, over the little of it that getting
-        back out of a pass uses. How much has to be seen is the caller's
-        question (:meth:`room_to_finish`), and it is asked again every frame:
+        back out of a pass uses. :meth:`room_to_finish` says how much has to
+        be seen, and it is asked again every frame:
         a driver part-way past has less of the manoeuvre left and needs less
         of the road, so a requirement carried over the whole stretch at its
         opening value is a requirement no straight is long enough for.

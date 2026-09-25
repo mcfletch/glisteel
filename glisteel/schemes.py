@@ -29,7 +29,7 @@ Because the source is separate, ``--mouse`` is available under every scheme
 rather than being one of its own, and the window presses keys on
 ``scheme.source`` without knowing or caring which scheme is on.
 
-**These are experiments.** The point of the switch is that the same drive can be
+These are experiments. The point of the switch is that the same drive can be
 run under each of them and measured (:mod:`glisteel.trace`,
 `plans/CONTROL-SCHEMES.md`); which of them the game finally offers is a decision
 for the numbers, and a scheme here is a candidate rather than a commitment.
@@ -270,7 +270,7 @@ class Lanes(Line):
     road does -- it is a lane switch, and what it switches between is lanes.
     The driver's job is the pedals and the decision about when to pass.
 
-    **It does the steering and nothing else.** It does not touch the pedals,
+    It does the steering and nothing else. It does not touch the pedals,
     it does not look for what is coming the other way, and it will not stop a
     driver arriving at a corner too fast. A player can still crash it; what
     they cannot do is crash it *because of the steering*, which is what
@@ -385,8 +385,8 @@ class Lanes(Line):
 
         A lane with something in it is *asked for* rather than taken, and taken
         the moment there is room in it (:data:`QUEUED_FOR`, :meth:`clear_to`).
-        On an open road that moment is this one, and the press behaves as it
-        always has.
+        On an open road that moment is this one, and the press takes the lane
+        at once.
         """
         wanted = self.asked_for(line)
         if wanted is not None:

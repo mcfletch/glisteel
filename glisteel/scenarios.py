@@ -24,7 +24,7 @@ seconds.
 Drive one with :class:`~glisteel.session.Session`. The catalogue is
 :data:`CATALOGUE`, and :func:`named` looks a piece up by name.
 
-**The ground sits at the road's own outer edge.** A road is built up from the
+The ground sits at the road's own outer edge. A road is built up from the
 land it crosses, and its cross-section already falls from the crown to the far
 side of the verge; the field is put at that depth, so the two surfaces meet
 where the road ends rather than fighting over the same triangles.
@@ -193,7 +193,7 @@ class Scenario:
                               radius=1.1, height=1.8))
         return found
 
-    # -- the whole thing -------------------------------------------------------
+    # -- the world -------------------------------------------------------------
 
     def world(self, traffic: int = 0) -> RaceWorld:
         """A world to drive this piece of road in, with nothing drawn."""

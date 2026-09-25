@@ -6,7 +6,7 @@ per tile, and the textures they share. The game streams it through
 in around the car and hands each one to the physics world as a static collider,
 so the car drives on the same triangles the player sees.
 
-**The roads come with it.** A pile of triangles does not say where a track goes,
+The roads come with it. A pile of triangles does not say where a track goes,
 so the baker writes the centreline into the tileset's ``extras`` and
 :class:`Course` reads it back. That is what puts the car on the grid, decides
 which way it faces, and tells the timing where the lap begins.
@@ -1029,8 +1029,8 @@ class RaceWorld:
         should meet somebody, and then bounded by whether there is room to get
         *past* them: a circuit shorter than a driver can see otherwise gets a
         whole reach's worth of traffic spread round the whole of it, with
-        nowhere between the oncoming cars for a pass to fit. The 1695 m circuit
-        was given sixteen and could not be overtaken on; it takes six.
+        nowhere between the oncoming cars for a pass to fit (a 1695 m circuit
+        takes six).
         """
         from glisteel.traffic import SPEED_LIMIT, cars_for
         course = self.course

@@ -1,14 +1,12 @@
 """Which way a thing is pointing, said once.
 
-There are two questions here and they are each other's negation, which is
-exactly why writing them out where they are needed goes wrong: four copies
-appeared in this package, in two conventions, and no two of the docstrings said
-which was which.
+There are two questions here and they are each other's negation, so each is
+answered here once rather than written out where it is needed.
 
-**Reading an angle off a direction** is :func:`yaw_of`. A view platform wants
+Reading an angle off a direction is :func:`yaw_of`. A view platform wants
 one of these, and so does anything measuring how fast a frame is turning.
 
-**Turning something to point that way** is :func:`yaw_to_face`. A mesh's nose
+Turning something to point that way is :func:`yaw_to_face`. A mesh's nose
 points down -Z, so a yaw of ``t`` sends it to ``(-sin t, 0, -cos t)`` -- and the
 angle that achieves a wanted direction is therefore read off the *negated* one.
 Taken from the direction itself instead, a car ends up square across the road,

@@ -22,7 +22,7 @@ are drawn. The car is a rigid body on four spring-loaded rays
 (:class:`~omi_physics.vehicle.RaycastVehicle`); everything about how it feels
 is in :class:`~glisteel.car.CarSpec`.
 
-**The run is not in here.** The loop -- fixed-step physics, the camera, the lap
+The run is not in here. The loop -- fixed-step physics, the camera, the lap
 timing and the rules about leaving the road -- is
 :class:`~glisteel.session.Session`, which needs no window and can be driven a
 step at a time by a test. What is here is the window: the scene it draws, the
@@ -516,12 +516,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self.open(track)
 
     def show_driving(self) -> None:              # pragma: no cover - needs a window
-        """Which of the five ways of driving is in use.
-
-        The lane switch and the chauffeur have existed for as long as the wheel
-        has and could only be reached by typing `--control`, which is to say
-        they could not be reached.
-        """
+        """Offer the ways of driving, with the one in use chosen."""
         self._drop_menu()
         self.pushOverlay(menu.driving_screen(
             chosen=self.config.driving(), on_choose=self._on_driving,
@@ -819,8 +814,8 @@ def race_fog() -> Any:
     A baked world runs out, and past the last of it a camera at ground level
     sees the background. The fog is the colour the background's horizon is, so
     the ground fades into the same air rather than ending at a line, and it
-    closes in over a distance rather than at one -- an exponential fall-off has
-    no visible edge, which is the whole point of it here.
+    closes in over a distance rather than at one, since an exponential
+    fall-off has no visible edge.
     """
     from OpenGLContext.scenegraph.fog import Fog
     return Fog(color=environment.HORIZON_HAZE, fogType='EXPONENTIAL',
@@ -992,7 +987,7 @@ def _unpaced() -> None:
     Two of those -- :func:`_capture` and :func:`_record` -- and what they need
     is the same twice, so it is written down once.
 
-    **A clean frame.** What comes out is a picture of the game, looked at by
+    A clean frame. What comes out is a picture of the game, looked at by
     somebody who is not running it. The developer overlay is up by default and
     fills the left third of the window, and
     ``OPENGLCONTEXT_DISABLE_FPS_DISPLAY`` is what the engine's capture harness
@@ -1001,7 +996,7 @@ def _unpaced() -> None:
     the counters did* is a real thing to want, so this is a default rather
     than a rule.
 
-    **No pacing.** A compositor throttles the buffer swap to its own frame
+    No pacing. A compositor throttles the buffer swap to its own frame
     callback, and a window it is not presenting never gets one --
     ``swap_buffers`` then blocks for ever and the first frame never finishes.
     No error, no output, a run that simply never ends. The first fix for that

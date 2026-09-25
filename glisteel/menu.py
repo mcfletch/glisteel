@@ -136,7 +136,7 @@ def track_screen(tracks: Sequence[Any],
     :data:`NEVER_DRIVEN` rather than nothing, so the row is the same shape
     either way.
 
-    **More** is offered here whether or not there are any, because this is
+    More is offered here whether or not there are any, because this is
     where a player comes when they want something to drive: an install with
     nothing yet finds the answer in the same place as one looking for another
     circuit.
@@ -198,14 +198,9 @@ def driving_screen(chosen: str | None = None,
                    on_cancel: Callable[[], None] | None = None) -> Panel:
     """How the car is driven.
 
-    Five ways exist and only one of them has ever been reachable: `DEFAULT` is
-    the wheel, and `--control` is a command line a player starting the game the
-    ordinary way never types. So the work that went into the others -- the lane
-    switch that asks for the next lane over and takes the car there, the
-    chauffeur that drives until anything is touched -- reads as missing because
-    it *is* missing, to everyone who has not read the source.
-
-    Each is offered with the summary it already carries, because a list of five
+    Every way of driving (:mod:`glisteel.schemes`) is offered here, since a
+    player starting the game the ordinary way never types `--control`. Each is
+    offered with the summary it already carries, because a list of five
     names makes a player start five races to find out which is which.
     """
     from glisteel import schemes

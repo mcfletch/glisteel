@@ -13,7 +13,7 @@ keyboard and draws what it says.
     >>> session.advance(1.0 / 60.0)                          # doctest: +ELLIPSIS
     CameraPose(...)
 
-**Whoever is driving is a** :class:`Controller`: one method, handed the session
+Whoever is driving is a :class:`Controller`: one method, handed the session
 and the length of the step, answering with the throttle, the brake and the
 wheel. :class:`~glisteel.driver.Autopilot` is one, the keyboard is one
 (:class:`~glisteel.steering.KeyboardDriver`), and so is anything a test scripts.
@@ -92,12 +92,11 @@ QUEUED = 20.0
 #: metres per second of closing speed, and how long one bump keeps the next
 #: from being written, in seconds.
 #:
-#: A parapet, a portal, a tree: what a run hits that is not another car. Read
-#: off a shipped Beacon run, at the same place twice, 117 km/h to 66 in 0.23 s
-#: -- six times what the brakes can do -- with nothing in the journal between
-#: that and the car already off the road. Above a scrape, because kerbs and
-#: hedges happen all lap; held off for a moment afterwards, because a car
-#: wedged against a wall is closing on it on every step.
+#: A parapet, a portal, a tree: what a run hits that is not another car, and
+#: what explains a car that loses speed faster than its brakes can take it.
+#: Above a scrape, because kerbs and hedges happen all lap; held off for a
+#: moment afterwards, because a car wedged against a wall is closing on it on
+#: every step.
 BUMPED = 2.0
 BUMP_AGAIN = 0.5
 
@@ -321,9 +320,7 @@ class Session:
         A hill climb finishes at the end of its road, so the car crosses the
         line at racing speed with nothing in front of it but scenery; it is
         brought to a stop and the stopping takes a couple of hundred metres it
-        has not got. Read off a recorded Beacon climb: the lap complete,
-        ``drive-ended why='off the road' lap=1`` eight tenths of a second
-        later, and a finished climb written down as a failure.
+        has not got, which is not a failure of the climb.
         """
         if self.run.phase == FINISHED:
             return None
@@ -785,11 +782,9 @@ class Session:
         """Note the car meeting the world: a parapet, a portal, a tree.
 
         :meth:`_watch_for_a_crash` asks about the traffic, because what ends a
-        run is other cars. This asks about everything else, and only writes it
-        down: a car that clipped a parapet and drove on has driven on, and a
-        journal that said nothing at all left the reader of a failed run with
-        a car that lost fifty km/h in a fifth of a second and no line saying
-        why.
+        run is other cars. This asks about everything else, and writes it down
+        and sounds it without ending the run: a car that clipped a parapet and
+        drove on has driven on, and the journal says why it lost the speed.
 
         The wheels are on the road on every step and the body is not, so a
         blow to the body is something beside the road rather than the road.

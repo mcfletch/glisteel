@@ -425,3 +425,60 @@ treatment applied to the tool.
       [2026-08-19-PLAY-REVIEW.md](2026-08-19-PLAY-REVIEW.md) — that review is
       what a play session is worth, and an editor session should be worth the
       same.
+
+## 8. The journal evidence behind the driving figures
+
+The driver's and the session's constants are explained in their docstrings by
+what they do. The recorded runs that set them are kept here (moved out of the
+docstrings in the 2026-09-25 review, which asked for docstrings that describe
+the code as it is).
+
+- `PASS_FROM_SECONDS` — the Beacon journal had `pass-started gap=10.6` at
+  80 km/h, given up a tenth of a second later and stranded on the wrong side,
+  then another declared `pass-done` in 0.1 s, and the car off the road at the
+  next station.
+- `CROSSING_LIFT` — the Beacon journal had a pass finished at 143.6 km/h where
+  the road allows 145.7, flat out on the wrong side; crossing back, the car went
+  two metres wide of its line in 0.6 s on a straight, put a wheel on the
+  grip-0.45 verge and mired twenty metres off the road.
+- `Autopilot.ease` / `LANE_RATE` — with the lane moved in one step, the shipped
+  Beacon road put the car at -3.8 m against a 3.6 m carriageway edge on the last
+  stretch of a bridge in every one of five runs, twenty-one metres off the road
+  each time.
+- `Autopilot.what_to_follow` — the Ashdown journal had a pass given up at
+  134.5 km/h, back into its own lane, and 1.2 s later the back of a car doing
+  50 in it. Following an oncoming car took one run from 108 km/h to 3.9 over
+  112 m, ten seconds stationary, mired 8.5 m off the crown.
+- Giving up a pass only before `ALONGSIDE` — re-deciding every frame put 23 of
+  25 passes on one recorded run into the wrong side of the road and out again.
+- `Autopilot.passing_lane` — considering only `-own_side` left 1183 m of the
+  shipped Ashdown circuit's climbing lanes unused while the driver spent two
+  fifths of every run refusing passes for want of an oncoming lane.
+- `Autopilot.coming_back` — the Ashdown journal had a pass completed at
+  137 km/h and, a third of a second later, the back of a car doing 32 in its
+  own lane. Made to wait for room to shed its speed as well, the driver stayed
+  out 3.4 s and met a car head-on at 44.8 m/s closing, where coming back at
+  once cost a same-direction contact at 10.3.
+- `Autopilot._pass_room` — sized on the speed the car had, a driver pulled up
+  behind one van and drove the rest of the circuit at its speed. Sized on the
+  speed it would finish at, the recorded Tidewater lap stood still behind a
+  stopped car for ten seconds asking for 344 m of clear oncoming lane, on a road
+  whose oncoming cars sit about 500 m apart; the pass uses 260. On the 3 km
+  circuit before that the driver asked for a median 630 m on the same spacing.
+- `Autopilot.refused` / `REASON_HOLDS` — the recorded Tidewater lap had 164
+  `pass-wanted` entries from a gap sitting on the distance a pass is decided
+  from; they are now one stretch naming both reasons.
+- `EDGE_BAND` — the shipped Ashdown circuit had six excursions in a lap, every
+  one at 3.68 m against a 3.60 m edge.
+- `Autopilot._room` — a recorded Tidewater lap held 4.3 m behind a car at
+  77 km/h, a fifth of a second, for a kilometre.
+- `BUMPED` — a shipped Beacon run lost 117 km/h to 66 in 0.23 s at the same
+  place twice, six times what the brakes can do, with nothing in the journal
+  between that and the car off the road.
+- `Session.ended` — a recorded Beacon climb wrote `drive-ended why='off the
+  road' lap=1` eight tenths of a second after the lap completed.
+- Recovery by "asking to go" — on the 7.2 km circuit the car stopped against
+  the world at station 3640 and sat there with the throttle at 1.00 for the
+  remaining five hundred seconds of the run, with the traffic queued behind.
+- `World.cars_the_road_carries` — the 1695 m circuit was given sixteen cars and
+  could not be overtaken on; it takes six.

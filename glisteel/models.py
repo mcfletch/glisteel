@@ -6,7 +6,7 @@ finds a model under :data:`ART`, hands back a copy to draw or a copy to repaint,
 and returns nothing rather than raising when a file will not load. What is here
 is the table, and the names inside a file that the game reaches for.
 
-**The names are the interface between the art and the game.** A vehicle model
+The names are the interface between the art and the game. A vehicle model
 carries its bodywork, its interior and its glass as named subtrees -- and the
 player's car its bonnet as a fourth, because that is the one thing on the
 outside a driver still sees from inside -- with its seats, its pillars and its

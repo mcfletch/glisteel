@@ -14,7 +14,7 @@ was, where the camera looked, and how far off the line it all ran.
     >>> trace.time_to_centre(after=2.4) < 0.5
     True
 
-**A drive is recorded at the physics step**, one frame per step, so the record
+A drive is recorded at the physics step, one frame per step, so the record
 has no gaps in it and the same script gives the same numbers every time. That is
 not how the game runs -- a frame is several steps -- and running a trace at
 1/60 as well is how a measure is shown not to depend on the frame rate.

@@ -36,7 +36,7 @@ UP = np.array([0.0, 1.0, 0.0])
 
 #: The chase camera's resting place, and how far ahead of the car it looks.
 #:
-#: **A metre back of the rear bumper and a metre over it**, derived from the
+#: A metre back of the rear bumper and a metre over it, derived from the
 #: bodywork rather than written down, so a car of another size puts the camera
 #: in the same place relative to itself. Measured from the middle of the
 #: bodywork, which is what :meth:`ChaseCamera._wanted` works in.
@@ -83,10 +83,9 @@ CHASE_RESPONSE = 6.0
 #: The camera is pushed back as the car speeds up, which is what makes speed
 #: read on screen: metres per metre per second, and the most it ever adds.
 #:
-#: Modest, because the resting place is now over the boot rather than above and
-#: behind: six metres of pull-back would put a car at racing speed back where
-#: the old resting place was and undo the point of moving it. A metre and a
-#: half still reads as speed without leaving the car.
+#: Modest, because the resting place is over the boot: six metres of pull-back
+#: would put a car at racing speed high and far behind, in the canopy. A metre
+#: and a half reads as speed without leaving the car.
 SPEED_PULL_BACK = 0.03
 MAXIMUM_PULL_BACK = 1.5
 

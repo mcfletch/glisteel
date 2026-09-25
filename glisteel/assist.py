@@ -22,7 +22,7 @@ needs to be to hold the car on the line it is on.
     >>> assist.steer(session, wanted=0.4)             # doctest: +SKIP
     0.4
 
-**The line is the player's, not the aid's.** Whatever the car is on when the
+The line is the player's, not the aid's. Whatever the car is on when the
 player lets go of the wheel is what gets held (:attr:`Straighten.line`), out to
 :data:`MARGIN` inside the carriageway's own edge. An aid that held a line of its
 own -- the middle of the road, or the middle of a lane -- would pull the car

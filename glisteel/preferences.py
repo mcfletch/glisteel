@@ -13,7 +13,7 @@ It lives beside the times table and the track library, under the player's own
 directory (:func:`glisteel.tracks.home`), because a player's things belong in
 one place rather than three.
 
-**Losing it costs one menu visit**, and that is what decides how it handles a
+Losing it costs one menu visit, and that is what decides how it handles a
 file it cannot read: a corrupt preferences file is ignored rather than raised
 on. The times table takes the opposite view of its own corruption and says so;
 the difference is that a lost best lap cannot be re-driven and a lost setting is

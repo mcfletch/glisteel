@@ -4,15 +4,15 @@ A renderer binds a handful of lights in a frame -- :data:`BUDGET` of them -- and
 a tunnel has one every twenty-five metres. So a bore is lit **twice**, and the
 two halves do different jobs:
 
-**The lining lights itself.** The pool each luminaire throws is baked onto the
+The lining lights itself. The pool each luminaire throws is baked onto the
 lining's vertices when the world is built
 (:func:`OpenGLContext.scenegraph.roadworks.bore_shade`), so the whole length of
 a bore is lit at any distance and costs nothing to draw. What that cannot do is
 light anything *in* the bore: a car under a lamp has no idea it is under one.
 
-**The few fittings the driver is among become real lights.** That is
-:class:`Luminaires`, and it is the whole reason the lamp positions travel in the
-tileset rather than being left in the geometry.
+The few fittings the driver is among become real lights. That is
+:class:`Luminaires`, and it is why the lamp positions travel in the tileset
+rather than being left in the geometry.
 
 The budget then divides:
 

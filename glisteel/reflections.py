@@ -10,7 +10,7 @@ bores and the bridges are, and everywhere else is the forest it was cut
 through. This turns that into an environment the renderer lights and reflects
 with, and changes it only when the road changes rather than every frame.
 
-**The environments are drawn rather than photographed.** Each is a small
+The environments are drawn rather than photographed. Each is a small
 equirectangular panorama built from what the place is: a canopy overhead with
 the sky broken through it, trunks around the horizon, road below; a bore is a
 dark tube with a lit portal at either end; a viaduct is open sky over a
@@ -19,7 +19,7 @@ rather than a picture, and because :class:`~OpenGLContext.passes.ibl.IBLProbe`
 convolves what it is given -- the sharpest thing it keeps is the shape of the
 light, not its detail.
 
-**A world baked with zones does this itself.** Its bores, causeways, bridges
+A world baked with zones does this itself. Its bores, causeways, bridges
 and wooded stretches each carry an ``OGLC_zone`` whose environment is captured
 from the road inside it, so the tunnel really is *this* tunnel, and the engine
 cross-fades between them per fragment rather than for the whole scene at once
@@ -175,7 +175,7 @@ class Reflections:
     """The environment the car is lit and reflected by, kept up with the road.
 
     ``apply`` is what the environment is handed to -- by default the engine's
-    IBL probe, which notices it changed and rebuilds. Rebuilding costs a few
+    IBL probe, which rebuilds when it is handed a different one. Rebuilding costs a few
     milliseconds, so it happens when the road changes and not otherwise: a lap
     crosses a handful of portals, not a thousand frames.
     """

@@ -45,7 +45,7 @@ PULLING_OFF = 'pulling-off'
 EVADING = 'evading'
 
 #: How hard a traffic car accelerates and brakes, in metres per second squared.
-#: An ordinary car being driven ordinarily, which is the point of it.
+#: An ordinary car being driven ordinarily.
 PULL = 2.4
 BRAKE = 4.5
 
@@ -105,7 +105,7 @@ BARRELLING = 15.0
 #: How long a driver takes to get from seeing that to doing something about it,
 #: in seconds.
 #:
-#: **This is what makes traffic hittable.** Seeing somebody at four seconds is
+#: This is what makes traffic hittable. Seeing somebody at four seconds is
 #: ample; seeing them at one is a driver who watches them arrive, because the
 #: wheel does not move until this has passed and then the car still has to
 #: gather itself against :data:`GRIP`. Traffic that always got out of the way
@@ -274,7 +274,7 @@ IN_THE_WAY = 2.8
 
 #: How far ahead a driver looks for something in its own lane, in metres. Long
 #: enough to cover stopping from the limit with room over: a window shorter than
-#: the braking distance is a car that notices the queue too late to join it.
+#: the braking distance leaves a car too little road to stop behind a queue.
 LOOK_AHEAD = 130.0
 
 #: How much road is left clear around the player when a car is put out, in
@@ -436,7 +436,7 @@ class TrafficCar:
         into a ditch, a fence or the trees, which are all somewhere for a
         driver out of time to end up.
 
-        **Where the road is carried there is no such place.** A bore is lined
+        Where the road is carried there is no such place. A bore is lined
         at the road's edge and a deck or a causeway carries a parapet there, so
         both the stop and the swerve are held to what the structure holds up
         (:meth:`_room_beside`): a car that takes the verge on a viaduct stands
@@ -542,9 +542,8 @@ class TrafficCar:
 
         The mesh's nose is down -Z, and a yaw of ``t`` about the vertical sends
         that to ``(-sin t, 0, -cos t)`` -- so the angle is read off the
-        *negated* direction. Taken from the direction itself the car is
-        sideways across the road on every axis but one, which is exactly the
-        sort of thing one road running the other way finds.
+        *negated* direction; taken from the direction itself, the car stands
+        across any road not lying along an axis.
         """
         return yaw_to_face(self.forward())
 
@@ -756,13 +755,13 @@ class Traffic:
         road. Take any of the four away and a driver holds their line, which is
         what makes the swerve mean something when it comes.
 
-        **In front** is what separates being met from being caught. Somebody in
+        In front is what separates being met from being caught. Somebody in
         the mirror is somebody about to overtake, which is what a road is for,
         and it is also the case a driver can do nothing about: a car arriving at
         sixty-five kilometres an hour over is on the bumper by the time the
         mirror has been looked at.
 
-        **Own lane** is what decides how often any of this happens. Racing an
+        Own lane is what decides how often any of this happens. Racing an
         800 m circuit with six cars out, a driver keeping their own side
         provokes no swerves in the thirty seconds a race lasts, and one holding
         the centreline provokes six -- every oncoming car, each met with under
@@ -955,7 +954,7 @@ class Traffic:
         Only the paint moves: the glass, the bright trim and what is inside are
         the model's own, and repainting those would cost the car its windows.
 
-        **One scene per kind and colour, not per car.** The paint comes from a
+        One scene per kind and colour, not per car. The paint comes from a
         fixed palette, so a road's worth of traffic is a handful of versions of
         five models however many cars are on it: each is read and painted once
         and then mounted wherever it is needed, which keeps a car appearing off
@@ -1079,7 +1078,7 @@ class Traffic:
         counts -- a car's width by default, so the other lane does not; a
         driver deciding whether it has room to swerve asks for the whole road.
 
-        **Along the road**, not along the line the nose points down. A straight
+        Along the road, not along the line the nose points down. A straight
         line from the nose leaves the road at the first bend, so a car a couple
         of hundred metres up a curving road is off that line and reads as
         nothing in front -- until the bend swings it onto the line all at once,
