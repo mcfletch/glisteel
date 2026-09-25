@@ -48,10 +48,10 @@ from OpenGLContext import quaternion, telemetry, testingcontext
 from OpenGLContext.capture import SettleCapture
 from OpenGLContext.contentpacks.fetch import FetchJob
 from OpenGLContext.events.systemtime import systemTime
+from OpenGLContext.processexit import flush_and_exit
 from OpenGLContext.scenegraph.fog import Fog
 from OpenGLContext.scenegraph.light import PointLight, SpotLight
 from OpenGLContext.scenegraph.scenegraph import SceneGraph
-from OpenGLContext.testing.process_exit import flush_and_exit
 from OpenGLContext.ui import settings
 from OpenGLContext.ui.overlay import OverlayMixin
 from OpenGLContext.video.recorder import RecordingMixin

@@ -420,7 +420,7 @@ class TestDownloadsAcrossOpenings:
                               on_arrived=lambda: self.arrived.append(1))
 
     def finish(self, downloads):
-        downloads.screen.job._thread.join(timeout=10)  # noqa: SLF001 FetchJob has no public way to wait for its worker
+        downloads.screen.job.wait(timeout=10)
         downloads.poll()
 
     def test_a_download_that_arrives_is_said_and_leaves_the_offer(
