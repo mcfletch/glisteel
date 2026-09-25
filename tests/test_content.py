@@ -330,3 +330,27 @@ class TestWhatTheRegistrySaysAWorldIsMadeOf:
     def test_a_bake_that_recorded_none_falls_back_to_the_trees(
             self, tmp_path) -> None:
         assert self.credit(tmp_path, '   ') == release_assets().TREE_CREDIT
+
+
+class TestACreditReadsAsText:
+    """A credit is shown to a player in the game, where a Markdown link is
+    brackets and a path relative to a file they do not have."""
+
+    def test_a_link_in_the_cars_credits_is_its_text(self, tmp_path) -> None:
+        os.makedirs(str(tmp_path / 'cars'))
+        with open(str(tmp_path / 'cars' / 'CREDITS.md'), 'w',
+                  encoding='utf-8') as handle:
+            handle.write('# Cars\n\nOurs, built by '
+                         '[`tools/cars.py`](../../../tools/cars.py).\n')
+        assert release_assets()._credits(str(tmp_path)) == \
+            'Ours, built by tools/cars.py.'
+
+    def test_and_so_is_one_in_a_track_s(self, tmp_path) -> None:
+        assert TestWhatTheRegistrySaysAWorldIsMadeOf().credit(
+            tmp_path, 'Ground by [ambientCG](https://ambientcg.com), CC0.') \
+            == 'Ground by ambientCG, CC0.'
+
+    def test_the_shipped_registry_carries_none(self) -> None:
+        for one in content.registry():
+            assert '](' not in one.copyright and '`' not in one.copyright, \
+                one.key

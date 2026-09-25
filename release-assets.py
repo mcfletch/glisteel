@@ -40,6 +40,7 @@ import argparse
 import glob
 import json
 import os
+import re
 from typing import Any
 
 from OpenGLContext.contentpacks import publish
@@ -209,7 +210,7 @@ def _world_credit(where: str) -> str:
     credits = os.path.join(where, 'CREDITS.txt')
     if os.path.isfile(credits):
         with open(credits, encoding='utf-8') as handle:
-            said = handle.read().strip().replace('\n', ' ')
+            said = _plain(handle.read().strip().replace('\n', ' '))
         if said:
             return said
     return TREE_CREDIT
@@ -221,8 +222,21 @@ def _credits(where: str) -> str:
         with open(found, encoding='utf-8') as handle:
             for line in handle:
                 if line.strip() and not line.startswith('#'):
-                    return line.strip()
+                    return _plain(line.strip())
     return 'glisteel project, BSD-3-Clause'
+
+
+#: A Markdown link, ``[text](target)``.
+MARKDOWN_LINK = re.compile(r'\[([^\]]*)\]\([^)]*\)')
+
+
+def _plain(text: str) -> str:
+    """A credit as the game shows it: a Markdown link is its text, unquoted.
+
+    The registry's copyright is read out on the download screen, where a
+    link target relative to a credits file is a path the player does not have.
+    """
+    return MARKDOWN_LINK.sub(r'\1', text).replace('`', '')
 
 
 RELEASE = publish.Release(

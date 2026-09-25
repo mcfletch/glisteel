@@ -9,7 +9,7 @@
    "archive": "tar",
    "approximate_bytes": 505096,
    "sha256": "d0cbf0b48dfa3e53a9be28c0d6e3e1f6be56f87fc927686d26d41d41fb9cd607",
-   "copyright": "Every model here is this project's own, built by [`tools/cars.py`](../../../tools/cars.py)",
+   "copyright": "Every model here is this project's own, built by tools/cars.py",
    "marker": "cars/hero.glb",
    "base": true,
    "notes": "The hero car, its wheels and five traffic cars."
