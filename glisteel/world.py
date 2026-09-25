@@ -27,7 +27,11 @@ from omi_physics.raycast import raycast
 from omi_physics.world import PhysicsWorld
 from OpenGLContext.loaders import resolver
 from OpenGLContext.loaders.documentvalues import (
-    DocumentValues, JSONObject, parse_object, require_numbers, require_object,
+    DocumentValues,
+    JSONObject,
+    parse_object,
+    require_numbers,
+    require_object,
 )
 from OpenGLContext.loaders.tiles3d import fetch
 from OpenGLContext.loaders.tiles3d.frustum import view_projection as frustum_matrix
