@@ -259,6 +259,27 @@ class Course:
         return tuple((one.start, one.end) for one in self.structures
                      if one.kind in CARRIED_ON_AN_EDGE)
 
+    def runs(self, kind: str) -> list[np.ndarray]:
+        """The centreline under each structure of ``kind``, in road order.
+
+        A baked circuit writes a structure its start falls inside as two, one
+        ending at the last point and one beginning at the first. On a closed
+        course those come back as one run across the start, so a caller
+        building along it -- a bore's two portals -- sees one structure.
+        """
+        stations = self.stations
+        found = [np.flatnonzero(np.asarray(one.holds(stations), dtype=bool))
+                 for one in self.structures if one.kind == kind]
+        found = [one for one in found if len(one)]
+        last = len(stations) - 1
+        ending = [i for i, one in enumerate(found) if one[-1] == last]
+        starting = [i for i, one in enumerate(found) if one[0] == 0]
+        if self.closed and ending and starting and ending[0] != starting[0]:
+            joined = np.concatenate([found[ending[0]], found[starting[0]]])
+            found = [one for i, one in enumerate(found)
+                     if i not in (ending[0], starting[0])] + [joined]
+        return [self.centreline[one] for one in found]
+
     def carried(self, station: Any) -> Any:
         """Whether the road is built rather than laid there.
 
@@ -1094,12 +1115,9 @@ class RaceWorld:
         spacing = float(field.extent) / max(int(field.res) - 1, 1)
         mouths = []
         for road in self.courses:
-            for one in road.structures:
-                if one.kind != 'tunnel':
-                    continue
+            for run in road.runs('tunnel'):
                 # A bore the road carries on one point of its line has no
                 # direction to build a mouth along.
-                run = road.centreline[one.holds(road.stations)]
                 if len(run) > 1:
                     mouths.append(bore_opening(
                         run, field.sample, profile=road.road_profile(),

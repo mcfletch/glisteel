@@ -842,6 +842,74 @@ class TestTheMaskThatOpensABore:
         assert world._bores() is None
 
 
+class TestABoreAcrossTheStartOfACircuit:
+    """A baked circuit writes a structure that its start falls inside as two,
+    one ending at the last point and one beginning at the first. The bore is
+    one bore: one pair of portals, and the hill over the seam left standing."""
+
+    RADIUS = 600.0
+    #: How far round from the start each half of the bore reaches, in radians.
+    HALF = 0.8
+
+    def course(self):
+        import numpy as np
+
+        from glisteel.world import Course, Structure
+        angle = np.linspace(0.0, 2.0 * np.pi, 721)[:-1]
+        line = np.stack([self.RADIUS * np.cos(angle), np.zeros(len(angle)),
+                         self.RADIUS * np.sin(angle)], axis=-1)
+        course = Course(name='ring', centreline=line, carriageway_width=7.0,
+                        total_width=12.0, closed=True,
+                        length=2.0 * np.pi * self.RADIUS)
+        last = float(course.stations[-1])
+        course.structures = (
+            Structure(kind='tunnel', start=0.0,
+                      end=self.RADIUS * self.HALF),
+            Structure(kind='tunnel',
+                      start=last - self.RADIUS * self.HALF, end=last))
+        return course
+
+    def hill(self, res=401, extent=2000.0):
+        """Forty metres over the start of the ring, level with the road at
+        each portal and under it out in the open."""
+        import numpy as np
+        from OpenGLContext.scenegraph.terrain import HeightField
+        axis = np.linspace(-extent / 2.0, extent / 2.0, res)
+        x, z = np.meshgrid(axis, axis)
+        round_from_start = np.abs(np.arctan2(z, x))
+        over = np.clip(1.0 - round_from_start / self.HALF, 0.0, 1.0)
+        height = 42.0 * np.sin(0.5 * np.pi * over) - 2.0
+        return HeightField((height + 2.0) / 42.0, extent=extent, relief=42.0,
+                           base=-2.0)
+
+    def test_the_two_halves_are_one_run_in_road_order(self) -> None:
+        import numpy as np
+        course = self.course()
+        [run] = course.runs('tunnel')
+        stepped = np.linalg.norm(np.diff(run, axis=0), axis=1)
+        assert stepped.max() < 2.0 * float(np.median(stepped)), 'a jump'
+        assert len(run) > 2 * int(self.HALF / (2.0 * np.pi) * 720) - 4
+
+    def test_the_hill_over_the_start_is_left_standing(self) -> None:
+        import numpy as np
+
+        from glisteel.world import RaceWorld
+        world = RaceWorld.__new__(RaceWorld)
+        world.courses = [self.course()]
+        world.field = self.hill()
+        opened = world._bores()
+        assert opened is not None
+        # Just short of the start, on the road, under the hill.
+        angle = -0.03
+        at = self.RADIUS * np.array([np.cos(angle), np.sin(angle)])
+        assert not bool(np.asarray(opened(at[:1], at[1:]))[0])
+
+    def test_a_road_that_is_not_a_circuit_keeps_them_apart(self) -> None:
+        course = self.course()
+        course.closed = False
+        assert len(course.runs('tunnel')) == 2
+
+
 class TestNeitherWritingModeIsPacedByADisplay:
     """`--capture` and `--record` both draw N frames and write a file.
 
