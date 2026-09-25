@@ -434,13 +434,42 @@ class TrafficCar:
         """How far out from its own side this car is trying to be, in metres.
 
         Zero for a car that is driving, the verge for one that is stopping
-        there, and past the verge for one that is getting out of the way.
+        there, and past the verge for one that is getting out of the way --
+        into a ditch, a fence or the trees, which are all somewhere for a
+        driver out of time to end up.
+
+        **Where the road is carried there is no such place.** A bore is lined
+        at the road's edge and a deck or a causeway carries a parapet there, so
+        both the stop and the swerve are held to what the structure holds up
+        (:meth:`_room_beside`): a car that takes the verge on a viaduct stands
+        in the wall of it, which is what a player sees for as long as the
+        viaduct lasts.
         """
-        if self.state == PULLING_OFF:
-            return self._pulled_off()
+        if self.state not in (PULLING_OFF, EVADING):
+            return 0.0
+        wanted = self._pulled_off()
         if self.state == EVADING:
-            return self._pulled_off() + DITCH
-        return 0.0
+            wanted += DITCH
+            if not self._carried():
+                return wanted
+        return min(wanted, self._room_beside())
+
+    def _carried(self) -> bool:
+        """Whether the road is built rather than laid where this car is."""
+        return bool(self.course.carried(self.station))
+
+    def _room_beside(self) -> float:
+        """How much further out than its own side this car may go, in metres.
+
+        What the road has beside it
+        (:meth:`~glisteel.world.Course.standing_room`), less the side this car
+        already keeps and half its own bodywork, so what is placed is the car
+        rather than the point it is drawn around. Never less than nothing: a
+        road narrower than the car on it leaves the car where it is rather than
+        pulling it across the crown.
+        """
+        room = float(self.course.standing_room(self.station))
+        return max(room - self.kind.width / 2.0 - self.lane, 0.0)
 
     def _sideways_rate(self) -> float:
         """How fast it may cross the road to get there, in metres per second.
@@ -537,6 +566,13 @@ class TrafficCar:
         Getting out of the way comes before anything else and overrides
         whatever the car was doing: a driver braking for a hazard who then sees
         somebody coming at them has a larger problem than the hazard.
+
+        What a driver *chooses* to do depends on where they are. Pulling off is
+        a turning, a gate or a lay-by, and a road that is :meth:`_carried` has
+        none of those beside it, so on a viaduct or in a bore the same moment
+        is a driver slowing instead. Both random draws happen either way, so
+        what a given car does where is the same every time the same world is
+        driven.
         """
         if self._alarmed is not None and self.state != EVADING:
             if self._elapsed >= self._alarmed:
@@ -549,7 +585,7 @@ class TrafficCar:
                 self._alarmed = None
             return
         if self._rng.random() < EVENT_RATE * dt:
-            if self._rng.random() < PULL_OFF_SHARE:
+            if self._rng.random() < PULL_OFF_SHARE and not self._carried():
                 self.pull_off()
             else:
                 self.brake_for('something in the road')

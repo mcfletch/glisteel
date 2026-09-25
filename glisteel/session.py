@@ -267,6 +267,7 @@ class Session:
         self.telemetry: Any = NOT_RECORDING
         self._sampled = 0.0
         self._bumped = 0.0
+        self._touched = 0.0
         self._settle()
 
     # -- the state of the run --------------------------------------------------
@@ -866,18 +867,41 @@ class Session:
         # hear. How gentle is too gentle to be a bang is the soundtrack's own
         # question, and it answers it with silence.
         self.sound.hit(closing)
+        other = traffic.car_of(body)
         if self.crashes.update(closing) is not None:
-            self._mark_the_crash(traffic.car_of(body), closing)
+            self._mark_the_car('crash', other, closing)
+        else:
+            self._note_a_touch(other, closing)
 
-    def _mark_the_crash(self, other: Any, closing: float) -> None:
-        """Write down what the car hit, on the frame it hit it.
+    def _note_a_touch(self, other: Any, closing: float) -> None:
+        """Write down one car met and driven away from, at most one a moment.
+
+        **A contact the run survives is still a contact**, and until it was
+        written down nothing anywhere said one had happened: what ends a run is
+        :class:`~glisteel.race.Collisions`' rule, and everything under it left
+        the reader of a recorded lap watching the car bounce off somebody with
+        a journal that mentioned no such thing. Two cars stay in contact for as
+        long as they are touching, so this is held off in the same way a blow
+        against the world is (:meth:`_note_a_bump`) rather than written on
+        every step of the scrape.
+        """
+        self._touched = max(self._touched - PHYSICS_STEP, 0.0)
+        if self._touched > 0.0:
+            return
+        self._touched = BUMP_AGAIN
+        self._mark_the_car('hit-a-car', other, closing)
+
+    def _mark_the_car(self, name: str, other: Any, closing: float) -> None:
+        """Write down what the car met, on the step it met it.
 
         A run that ends in a crash is read backwards from here, and the
         question is always the same one: what was it and where did it come
         from. So the record carries the other car's side of the road and
         whether it was coming the other way, alongside the car's own -- two
         cars nose to nose in the same lane and one clipped coming back in are
-        the same closing speed and different bugs.
+        the same closing speed and different bugs. A contact driven away from
+        is written down under its own name and says all of the same things,
+        because the question a reader brings to it is the same.
         """
         between = np.asarray(other.position(), dtype='d').reshape(-1)[:3] \
             - np.asarray(self.car.position, dtype='d').reshape(-1)[:3]
@@ -886,7 +910,7 @@ class Session:
                               np.asarray(other.forward(),
                                          dtype='d').reshape(-1)[:3]))
         self.telemetry.mark(
-            'crash', closing=round(float(closing), 1),
+            name, closing=round(float(closing), 1),
             gap=round(float(np.linalg.norm(between)), 1),
             across=round(self.across(), 2),
             theirs=round(float(other.side()), 2),

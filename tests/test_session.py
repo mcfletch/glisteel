@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from glisteel import scenarios
+from glisteel.driver import ALONGSIDE
 from glisteel.run import COUNTDOWN
 from glisteel.session import (
     MAXIMUM_CATCHUP,
@@ -1037,3 +1038,161 @@ class TestTheSampleSaysWhatTheCarIsFollowing:
         assert found, 'the car in front was never written down'
         assert 0.0 < found[-1]['gap'] < 140.0
         assert found[-1]['theirs'] == pytest.approx(36.0, abs=5.0)
+
+
+class TestWritingDownATouch:
+    """A car the run *survives* meeting is still a car it met.
+
+    `_watch_for_a_bump` writes down every blow against the world and hands the
+    traffic to `_watch_for_a_crash`, which until now wrote nothing at all
+    unless the blow ended the run. So a car bounced off at anything under
+    :data:`glisteel.race.SURVIVABLE` left no trace anywhere -- and a recorded
+    lap where the player plainly hit somebody could not say whether the game
+    had noticed. What ends a run is a rule (:class:`glisteel.race.Collisions`);
+    what *happened* is a fact, and the journal carries facts.
+    """
+
+    @staticmethod
+    def _touch(session):
+        """Catch a car up and nudge it, and note what gets written down.
+
+        The same drive as :meth:`TestHittingACar.test_catching_one_up_and_\
+touching_it_does_not`: two cars going nearly the same speed meet at the
+        difference between them, which is a nudge rather than a crash. The
+        speed is held only up to the moment they touch, so what happens
+        afterwards is the game's rather than the harness leaning on it.
+        """
+        other = _traffic_at(session, session.across(), station=12.0,
+                            speed=26.0)
+        kept = TestWritingDownACrash._kept(session)
+        met = False
+        for _ in range(int(6.0 / FRAME)):
+            if not met:
+                _hold(session, 30.0)
+            session.advance(FRAME)
+            met = met or _touching(session, other)
+        assert met, 'the two never met'
+        return kept
+
+    def test_a_touch_the_run_survives_is_written_down(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        kept = self._touch(session)
+        assert session.crashes.ended is None, 'that was meant to be survivable'
+        assert 'hit-a-car' in [name for name, _ in kept]
+
+    def test_and_it_says_how_hard_and_which_side_of_the_road(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        kept = self._touch(session)
+        fields = dict(kept)['hit-a-car']
+        from glisteel.race import SURVIVABLE
+        assert 0.0 <= fields['closing'] <= SURVIVABLE
+        assert fields['oncoming'] is False
+        assert fields['across'] == pytest.approx(session.across(), abs=1.0)
+
+    def test_one_contact_is_one_line_rather_than_one_a_step(self) -> None:
+        """Two cars in contact are in contact for as long as they touch, and a
+        line a step is a journal nobody reads."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        kept = self._touch(session)
+        touches = [name for name, _ in kept if name == 'hit-a-car']
+        assert len(touches) <= 2, '%d lines for one touch' % (len(touches),)
+
+    def test_and_a_crash_is_still_a_crash_rather_than_a_touch(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        _traffic_at(session, session.across())
+        kept = TestWritingDownACrash._kept(session)
+        assert _drive_into(session, 40.0) == 'HIT A CAR'
+        assert 'crash' in [name for name, _ in kept]
+
+
+@pytest.mark.slow
+class TestGettingPastSomethingStopped:
+    """A car standing in the lane is what a driver most has to get by, and it
+    is the pass the road asks most road for.
+
+    A pass is longer from a standstill than from speed because the car has to
+    wind up to the speed it will make it at -- and on a two-way road the
+    oncoming traffic is spaced so that one pass *just* fits
+    (:func:`glisteel.traffic.passable_count`). So a driver that over-states
+    what the pass costs is a driver that never gets one, and what a player
+    watches instead is the game coming to a halt behind a parked car.
+
+    Recorded on the Tidewater lap: the driver braked from 135 km/h to 1.2 and
+    sat behind a stopped car for ten seconds, asking for 344 m of clear
+    oncoming lane on a road whose oncoming cars sit about 500 m apart. It never
+    passed it -- the car in front eventually drove off.
+    """
+
+    #: How far up the road the oncoming car starts, in metres. Chosen so the
+    #: gap is one the pass fits in and one it does not fit in when the car's
+    #: own share of the road is sized at the speed it will finish at rather
+    #: than at the road it covers: measured on this piece, the pass is on from
+    #: 440 m and, sized the other way, off at every distance up to 500.
+    ONCOMING = 440.0
+
+    def _behind_a_parked_car(self, oncoming=None):
+        """An autopilot arriving at a stopped car, with a gap in the far lane.
+
+        ``oncoming`` is how far up the road the car coming the other way is;
+        None leaves that lane empty.
+        """
+        from glisteel.driver import Autopilot
+        from glisteel.traffic import TrafficCar
+        session = _session(scenarios.oval(straight=1400.0), traffic=1)
+        course = session.world.course
+        # A road that posts a limit, as every baked one does: what is coming
+        # the other way is traffic driving it, and a road that says nothing is
+        # sized for another racer (:meth:`Autopilot.oncoming_speed`).
+        course.posted = 80
+        session.driver = Autopilot(course, lane=course.driving_lane)
+        _drive(session, 6.0)                     # up to road speed
+        here = float(course.stations[course.nearest(session.car.position)[0]])
+        session.world.traffic.release()
+        parked = TrafficCar(course, here + 140.0, heading=1, limit=0.0,
+                            speed=0.0)
+        parked.lane = session.across()
+        session.world.traffic.put_out(parked)
+        if oncoming is not None:
+            met = TrafficCar(course, here + float(oncoming), heading=-1,
+                             limit=22.2, speed=22.2)
+            met.lane = session.across()
+            session.world.traffic.put_out(met)
+        return session, parked
+
+    def _past(self, session, other, seconds=26.0):
+        """Drive until the car is clear of ``other``, and say how far past."""
+        for _ in range(int(seconds / FRAME)):
+            session.advance(FRAME)
+            along = float(session.along(other))
+            if along < -ALONGSIDE:
+                return along
+        return float(session.along(other))
+
+    def test_the_driver_gets_by_it(self) -> None:
+        session, other = self._behind_a_parked_car()
+        assert self._past(session, other) < -ALONGSIDE, (
+            'still behind it after twenty-six seconds')
+
+    def test_and_goes_through_a_gap_the_pass_actually_fits_in(self) -> None:
+        """The case that decides whether a lap has any overtaking in it. The
+        gap is longer than the pass and shorter than the pass over-stated, so a
+        driver that sizes its own share at the speed it will finish at sits
+        behind the parked car and watches the road go by."""
+        session, other = self._behind_a_parked_car(oncoming=self.ONCOMING)
+        assert self._past(session, other) < -ALONGSIDE, (
+            'refused a gap the pass fits in')
+
+    def test_and_ends_up_back_on_its_own_side(self) -> None:
+        session, other = self._behind_a_parked_car()
+        self._past(session, other)
+        _drive(session, 4.0)
+        assert session.across() * session.driver.own_side > 0.0
+
+    def test_and_does_not_hit_it_on_the_way(self) -> None:
+        session, other = self._behind_a_parked_car()
+        self._past(session, other)
+        assert session.crashes.ended is None

@@ -7,6 +7,7 @@ PyPI with the code: it is attached to a GitHub release and fetched by
 
     ./release-assets.py                 # bake, archive, write the registry
     ./release-assets.py --install       # ...and put it in this machine's store
+    ./release-assets.py --reinstall     # ...over whatever that store already holds
     ./release-assets.py --push          # ...and attach it to the release tag
 
 ``--install`` is what makes a content release testable before it is a release:
@@ -180,8 +181,12 @@ def declare(baked: str, assets: str, into: str,
     return packs
 
 
-def install(into: str) -> None:
+def install(into: str, replace: bool = False) -> None:
     """Put what was built into the store the game reads, and say where.
+
+    ``replace`` throws away what is installed under each key first, which is
+    what a second build of a world wants: the store holds the last one, and an
+    install that leaves it there shows the world before the change.
 
     Through the game's own :mod:`glisteel.content`, so what is installed is
     what it will look for -- the registry it ships, the namespace it declares
@@ -197,7 +202,8 @@ def install(into: str) -> None:
         # As a download does: the choice, and the art it is incomplete
         # without, into the chosen pack's own directory.
         for pack in catalog.with_needed(chosen, packs):
-            where = publish.install(pack, store, into, within=chosen)
+            where = publish.install(pack, store, into, within=chosen,
+                                    replace=replace)
             print('  %-24s %s' % (pack.key,
                                   os.path.relpath(where, store.root)))
 
@@ -238,6 +244,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="install what was built into this machine's own "
                              'store, so the game runs against it with nothing '
                              'published')
+    parser.add_argument('--reinstall', action='store_true',
+                        help='install, throwing away what is already in the '
+                             'store under this key first, which is what a '
+                             'rebuilt world needs to be the one that opens')
     parser.add_argument('--push', action='store_true',
                         help='attach the archives and the registry bundle to '
                              'the release at --tag, creating it if it is not '
@@ -268,8 +278,8 @@ def main(argv: list[str] | None = None) -> int:
               % (one['key'], one['approximate_bytes'] / 1048576,
                  one['sha256'][:12]))
 
-    if options.install:
-        install(options.into)
+    if options.install or options.reinstall:
+        install(options.into, replace=options.reinstall)
     if options.push:
         push(options.tag,
              [os.path.join(options.into, one['url'].rsplit('/', 1)[-1])

@@ -27,7 +27,7 @@ from glisteel.traffic import (
     Traffic,
     TrafficCar,
 )
-from glisteel.world import Course
+from glisteel.world import Course, Structure
 
 LIMIT = 25.0
 
@@ -1162,3 +1162,82 @@ class TestARoadHasToBePassable:
         from glisteel.driver import PASS_SECONDS
         from glisteel.traffic import PASSING_SECONDS
         assert PASSING_SECONDS == PASS_SECONDS
+
+
+class TestLeavingARoadThatIsCarried:
+    """A car only leaves the carriageway where there is ground beside it.
+
+    Two or three of ten cars are standing at the roadside at any moment, and
+    the same drivers swerve for anybody arriving who is not going to stop. Both
+    are worked out from how far across the road there is to go, and on a
+    structure there is none: the bore is lined at the road's edge, the deck and
+    the causeway carry a parapet there. A car that took the verge on one stood
+    in the wall of it, which is what a player sees over half a kilometre of
+    viaduct.
+    """
+
+    def _course(self, kind, length=2000.0, count=201):
+        z = np.linspace(0.0, length, count)
+        return Course(name='road', centreline=np.stack(
+            [np.zeros(count), np.zeros(count), z], axis=-1),
+            carriageway_width=7.2, total_width=10.6, closed=False,
+            length=length,
+            structures=(Structure(kind=kind, start=0.0, end=length),))
+
+    def _widest(self, car, seconds=6.0):
+        """The furthest the car's own bodywork reaches from the crown, in
+        metres, over the whole of a swerve.
+
+        The whole of it, because a swerve is over in eight seconds and the car
+        comes back to its lane afterwards: a measurement taken at the end would
+        say every road was fine.
+        """
+        reach = 0.0
+        for _ in range(int(seconds * 60)):
+            car.advance(1.0 / 60.0)
+            reach = max(reach, abs(float(car.position()[0])))
+        return reach + car.kind.width / 2.0
+
+    @pytest.mark.parametrize('kind', ['tunnel', 'bridge', 'causeway'])
+    def test_a_driver_pulled_out_of_stays_on_the_carriageway(self, kind
+                                                             ) -> None:
+        course = self._course(kind)
+        reach = self._widest(self._evading(_car(course=course)))
+        assert reach <= course.carriageway_width / 2.0 + 1e-6, (
+            'the car reaches %.2f m and the %s ends at %.2f m'
+            % (reach, kind, course.carriageway_width / 2.0))
+
+    def test_and_on_open_road_it_still_takes_the_ditch(self) -> None:
+        """Where there is somewhere to go it goes there: getting out of the way
+        is what this is for, and a rule that stopped it everywhere would be a
+        road nobody ever got off."""
+        course = _course()
+        reach = self._widest(self._evading(_car(course=course)))
+        assert reach > course.total_width / 2.0
+
+    @pytest.mark.parametrize('kind', ['tunnel', 'bridge', 'causeway'])
+    def test_nobody_stops_at_a_gateway_that_is_not_there(self, kind) -> None:
+        """A turning, a gate or a lay-by is a thing beside a road, and a bore
+        has none. A driver inside one goes on driving."""
+        course = self._course(kind)
+        car = TrafficCar(course=course, station=1000.0, heading=1,
+                         limit=LIMIT, seed=1)
+        for _ in range(60 * 600):
+            car.advance(1.0 / 60.0)
+            assert car.state != PULLING_OFF
+
+    def test_but_on_open_road_somebody_still_does(self) -> None:
+        car = _car(course=_ring(), station=0.0)
+        seen = set()
+        for _ in range(60 * 600):
+            car.advance(1.0 / 60.0)
+            seen.add(car.state)
+        assert PULLING_OFF in seen
+
+    def _evading(self, car):
+        car.alarm(True)
+        for _ in range(int((REACTION + 0.1) * 60)):
+            car.advance(1.0 / 60.0)
+            car.alarm(True)
+        assert car.state == EVADING
+        return car

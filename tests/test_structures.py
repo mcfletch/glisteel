@@ -199,3 +199,48 @@ class TestACarThatHasPulledOff:
     def test_it_never_pulls_off_towards_the_middle(self) -> None:
         course = self.course()
         assert self.pulled_off(course) >= course.carriageway_width / 2.0 - 1.2
+
+
+class TestWhatThereIsToStandOnBesideTheRoad:
+    """A road that is carried has nothing beside it to pull onto.
+
+    On the ground a verge runs alongside the carriageway and the forest floor
+    past that, so a car leaving the road has somewhere to put itself. Inside a
+    bore the lining stands at the road's edge; on a deck or a causeway the
+    parapet does, and past it is the water the structure was built to cross.
+    A car that takes the verge there takes the wall.
+    """
+
+    def _course(self, *kinds, carriageway=7.2, total=10.6):
+        line = np.stack([np.linspace(0.0, 400.0, 41), np.zeros(41),
+                         np.zeros(41)], axis=-1)
+        built = tuple(Structure(kind=kind, start=100.0, end=200.0)
+                      for kind in kinds)
+        return Course(name='road', centreline=line,
+                      carriageway_width=carriageway, total_width=total,
+                      closed=False, length=400.0, structures=built)
+
+    def test_open_road_offers_its_whole_width(self) -> None:
+        course = self._course()
+        assert course.standing_room(50.0) == pytest.approx(
+            course.total_width / 2.0)
+
+    def test_a_bore_offers_nothing_past_the_carriageway(self) -> None:
+        course = self._course('tunnel')
+        assert course.standing_room(150.0) == pytest.approx(
+            course.carriageway_width / 2.0)
+
+    def test_a_deck_offers_nothing_past_the_carriageway(self) -> None:
+        course = self._course('bridge')
+        assert course.standing_room(150.0) == pytest.approx(
+            course.carriageway_width / 2.0)
+
+    def test_a_causeway_offers_nothing_past_the_carriageway(self) -> None:
+        course = self._course('causeway')
+        assert course.standing_room(150.0) == pytest.approx(
+            course.carriageway_width / 2.0)
+
+    def test_the_road_either_side_of_one_is_open_again(self) -> None:
+        course = self._course('tunnel')
+        assert course.standing_room(250.0) == pytest.approx(
+            course.total_width / 2.0)

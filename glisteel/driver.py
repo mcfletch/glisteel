@@ -650,9 +650,18 @@ class Autopilot:
         What a reader wants is the *stretch* -- it wanted to pass from here to
         there and the other lane was never clear -- so the mark carries where
         it started wanting and the next one carries where it stopped.
+
+        And only a reason that **held** for :data:`REASON_HOLDS`, which is what
+        separates a driver changing its mind from a boundary being sat on. Two
+        reasons either side of one swap at whatever rate the driver is asked:
+        a car following at exactly the distance a pass is decided from flips
+        between being too close to pull out and having nowhere to pull out to
+        on every step, and each flip wrote a line. The recorded Tidewater lap
+        has 164 of them, and the handful of stretches a reader came for are
+        underneath.
         """
         if why != self._refusing:
-            if self._refusing:
+            if self._refused_for >= REASON_HOLDS and self._refusing:
                 self.note(session, 'pass-wanted', why=self._refusing,
                           seconds=round(self._refused_for, 1),
                           **self._refused_with)
@@ -705,6 +714,26 @@ class Autopilot:
                                   - max(now, 0.0)) / pull
         return PASS_ACROSS + winding + (room - gained) / max(top, 1e-3)
 
+    def pass_distance(self, speed: float, seconds: float,
+                      quick: float) -> float:
+        """How far this car travels in ``seconds`` of a pass, in metres.
+
+        A pass is driven: the car pulls at :attr:`DriverStyle.pull` from the
+        speed it has now up to ``quick``, the speed the road allows, and holds
+        that from there. So the road it covers is the area under those two
+        pieces and not ``quick`` times the clock -- which is the whole road a
+        pass from a crawl would have to ask for if it were measured at the
+        speed it ends at.
+        """
+        speed = max(float(speed), 0.0)
+        seconds = max(float(seconds), 0.0)
+        pull = max(self.style.pull, 1e-6)
+        winding = max(float(quick) - speed, 0.0) / pull
+        if seconds <= winding:
+            return speed * seconds + 0.5 * pull * seconds * seconds
+        return (speed * winding + 0.5 * pull * winding * winding
+                + float(quick) * (seconds - winding))
+
     def _pass_room(self, session: SessionLike, speed: float, making: float,
                    other: Any, oncoming: bool = True) -> Any:
         """How much of the other side of the road a pass needs, in metres.
@@ -731,18 +760,32 @@ class Autopilot:
         four hundred. The mean of the two is what a car accelerating from one
         to the other actually covers the road at.
 
-        **How much road that consumes** is the speed things close on that
-        stretch at: this car at the speed the road allows, and whatever is
-        coming down it at *its* speed. What is coming the other way is traffic,
-        and traffic drives the posted limit -- so a road that posts one is a
-        road where the pass is shorter than it would be against another racer.
-        A road that says nothing makes no promise about what is on it, and is
-        sized for something as fast as this car.
+        **How much road that consumes** is the stretch of the other lane the
+        two of them between them cover: this car from where it is now to where
+        it finishes (:meth:`pass_distance`), and whatever is coming down that
+        lane at *its* speed for as long as the pass lasts. What is coming the
+        other way is traffic, and traffic drives the posted limit -- so a road
+        that posts one is a road where the pass is shorter than it would be
+        against another racer. A road that says nothing makes no promise about
+        what is on it, and is sized for something as fast as this car.
 
-        Measured on the 3 km circuit before this: the driver asked for a median
-        630 m of clear oncoming lane, on a road whose oncoming cars sit about
-        500 m apart -- a pass that never comes. Against the limit those cars
-        actually drive it asks for a fifth less.
+        The car's own share of that is the road it **covers** and not the speed
+        it will end at times the clock. The two are the same for a pass taken
+        at speed and a third apart for one begun from a crawl -- which is
+        exactly the pass that most needs to be on, since what a driver is
+        crawling behind is something barely moving. On the recorded Tidewater
+        lap the driver stood still behind a stopped car for ten seconds asking
+        for 344 m of clear oncoming lane, on a road whose oncoming cars sit
+        about 500 m apart; the pass it was measuring uses 260.
+
+        Measured on the 3 km circuit before that: the driver asked for a median
+        630 m of clear oncoming lane on the same spacing -- a pass that never
+        comes. Against the limit those cars actually drive it asks for a fifth
+        less.
+
+        Nothing is added for appetite. What bounds the exposure is
+        :data:`PASS_SECONDS`, and a pass under way is judged again on every
+        step and given up when the way through closes.
 
         ``oncoming`` is what makes a climbing lane worth having: a lane going
         the same way has nothing closing down it, so what has to be clear is
@@ -758,7 +801,7 @@ class Autopilot:
         if taking > PASS_SECONDS:
             return None
         closing = self.oncoming_speed(making) if oncoming else 0.0
-        return (float(making) + closing) * taking
+        return self.pass_distance(speed, taking, making) + closing * taking
 
     def oncoming_speed(self, making: float) -> float:
         """How fast whatever is coming the other way is going, in m/s.

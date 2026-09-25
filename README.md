@@ -275,7 +275,9 @@ Building that content is one command, `./release-assets.py`: it bakes every
 recipe, archives it, writes `glisteel/packs.json` from the archives it built,
 and — with `--push` — attaches them to the release the registry names.
 `--install` puts them straight into this machine's store, which is how a content
-release is driven before it is a release.
+release is driven before it is a release; it leaves a pack already there where
+it is, and `--reinstall` does the same over whatever the store already holds,
+which is what a rebuilt world needs to be the one that opens.
 
 Or bake your own, which is what [glisteel-editor](https://github.com/mcfletch/glisteel-editor)
 is for:
@@ -547,6 +549,15 @@ leaning with it and dropped by whatever camber the lean leaves at the distance
 across they keep -- through a bore, over a deck and on the ground alike. One pulled off stands on the verge, 1.6 m past the
 carriageway's edge, which leaves half a car between it and the treeline.
 
+**Nobody leaves a road that is carried.** A bore is lined at the road's edge and
+a deck or a causeway carries a parapet there, so there is no verge on one to
+pull onto and nothing past it but the hillside or the water the structure was
+built to cross. A driver inside a bore or out on a viaduct has no turning, gate
+or lay-by to stop at and goes on driving; one that has to get out of somebody's
+way there brakes and moves over as far as the carriageway allows. Otherwise a
+car that pulled off stands in the wall, which is what a player sees for as long
+as the structure lasts.
+
 **The steering keys wind a wheel on and off.** Left and right are a key each, so
 the raw input is full lock or none; held straight to the car that is a spin at
 speed. The keys drive a wheel that eases toward the held lock and back to centre
@@ -714,6 +725,13 @@ How hard is the speed the two were closing at along the contact when they met,
 and above `SURVIVABLE` (9 m/s) the run ends with `HIT A CAR`. Below it, a car
 brushed at walking pace or caught up to and nudged is a scrape, and the race
 carries on.
+
+**Both go in the journal.** What ends the run is written as `crash`; a contact
+driven away from is written as `hit-a-car`, at most one line per touch, and both
+carry the same facts — how hard, which car, which side of the road each of them
+was on, whether it was coming the other way, and whether a pass was under way.
+Contact with anything that is not a car is `hit-the-world`. So a recorded lap
+says what the car met whether or not the rule above ended it.
 
 Two things follow from asking the physics rather than the geometry. The speed is
 the one between the *pair*, so a car ahead doing 100 km/h that you touch at 105

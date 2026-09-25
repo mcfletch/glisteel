@@ -12,7 +12,14 @@ import pytest
 from omi_physics.world import PhysicsWorld
 
 from glisteel.car import Car
-from glisteel.driver import ALONGSIDE, PASSED_BY, REJOIN_SPEED, Autopilot, DriverStyle
+from glisteel.driver import (
+    ALONGSIDE,
+    PASSED_BY,
+    REASON_HOLDS,
+    REJOIN_SPEED,
+    Autopilot,
+    DriverStyle,
+)
 from glisteel.world import Course, static_ground
 
 STEP = 1.0 / 120.0
@@ -693,14 +700,18 @@ class TestGettingPastSomethingSlower:
         """The other half of the trade. A pass is run at neither the speed the
         car is doing nor the one the road allows, but at what it averages
         getting from one to the other -- so crawling behind a stopped queue
-        still asks for a lot of road rather than a little."""
+        still asks for a lot of road rather than a little.
+
+        A third more than the same pass taken at speed, which is how much
+        longer winding up to it takes.
+        """
         pilot = self._pilot()
         crawling = _Road(_Car(position=(1.8, 0.0, -100.0), speed=3.0),
                          ahead=_Ahead(9.0, 0.0))
         top = DriverStyle().maximum_speed
         crawl = pilot._pass_room(crawling, 3.0, top, crawling._ahead)
         flying = pilot._pass_room(crawling, top, top, crawling._ahead)
-        assert crawl > flying * 1.5, 'sized as though it were already up to speed'
+        assert crawl > flying * 1.25, 'sized as though it were already up to speed'
 
     def test_it_gives_the_pass_up_if_the_way_through_closes(self) -> None:
         """Being on the wrong side of a road is the one place not to wait and
@@ -851,7 +862,10 @@ class TestWhatIsComingTheOtherWayDrivesTheLimit:
         road, top = self._road(), DriverStyle().maximum_speed
         room = silent._pass_room(road, 40.0, top, road._ahead)
         taking = silent.pass_seconds(40.0, 40.0, 18.0, quick=top)
-        assert room == pytest.approx(2.0 * top * taking)
+        # What is left once this car's own share of the road is taken out is
+        # what it expects to meet coming down that lane.
+        coming = room - silent.pass_distance(40.0, taking, top)
+        assert coming == pytest.approx(top * taking)
 
     def test_and_the_room_still_grows_with_how_long_it_takes(self) -> None:
         near = self._pilot()
@@ -1537,3 +1551,135 @@ class TestADriverTooCloseFallsBack:
         gap = pilot.following_gap(30.0)
         pilot.following(gap - 2.0, 25.0)
         assert 20.0 < pilot._room(30.0) < 25.0
+
+
+class TestHowMuchRoadAPassActuallyUses:
+    """What has to be clear is the road the pass **covers**, not the road it
+    would cover if it were already going as fast as it will end up.
+
+    A pass consumes the oncoming lane from where the car is now to where it
+    finishes, plus whatever is coming down that lane in the meantime. Sized
+    instead at the speed the road allows for the whole of it, a pass begun from
+    a crawl asks for a third more road than it uses -- and the traffic on a
+    two-way road is spaced so that one pass *just* fits
+    (:func:`glisteel.traffic.passable_count`), so a third more is a window that
+    hardly ever opens. On the recorded Tidewater lap the driver asked for a
+    median 440 m of clear oncoming lane on a road whose oncoming cars sit about
+    500 m apart, wanted to pass 164 times and started 10.
+    """
+
+    def _pilot(self, lane=1.8):
+        return Autopilot(_straight(points=400, spacing=5.0), lane=lane)
+
+    def _top(self):
+        return DriverStyle().maximum_speed
+
+    def test_a_car_already_at_speed_covers_speed_times_time(self) -> None:
+        pilot = self._pilot()
+        top = self._top()
+        assert pilot.pass_distance(top, 4.0, top) == pytest.approx(top * 4.0)
+
+    def test_one_winding_up_covers_less_than_that(self) -> None:
+        pilot = self._pilot()
+        top = self._top()
+        covered = pilot.pass_distance(4.0, 4.0, top)
+        assert 4.0 * 4.0 < covered < top * 4.0
+
+    def test_and_reaches_the_top_speed_part_way_through(self) -> None:
+        """Beyond the winding-up it runs at the top speed, so a longer pass
+        gains exactly that much more road."""
+        pilot = self._pilot()
+        top = self._top()
+        gained = (pilot.pass_distance(4.0, 20.0, top)
+                  - pilot.pass_distance(4.0, 19.0, top))
+        assert gained == pytest.approx(top, abs=1e-6)
+
+    def test_the_room_asked_for_is_that_road_and_the_oncoming_car_s(self
+                                                                   ) -> None:
+        pilot = self._pilot()
+        top = self._top()
+        crawling = _Road(_Car(position=(1.8, 0.0, -100.0), speed=3.0),
+                         ahead=_Ahead(40.0, 0.0))
+        taking = pilot.pass_seconds(3.0, 40.0, 0.0, quick=top)
+        assert pilot._pass_room(crawling, 3.0, top, crawling._ahead) \
+            == pytest.approx(pilot.pass_distance(3.0, taking, top)
+                             + pilot.oncoming_speed(top) * taking)
+
+    def test_which_is_less_than_the_road_it_would_use_at_full_speed(self
+                                                                   ) -> None:
+        pilot = self._pilot()
+        top = self._top()
+        crawling = _Road(_Car(position=(1.8, 0.0, -100.0), speed=3.0),
+                         ahead=_Ahead(40.0, 0.0))
+        taking = pilot.pass_seconds(3.0, 40.0, 0.0, quick=top)
+        asked = pilot._pass_room(crawling, 3.0, top, crawling._ahead)
+        assert asked < (top + pilot.oncoming_speed(top)) * taking * 0.85
+
+    def test_and_a_pass_taken_at_speed_asks_for_what_it_always_did(self
+                                                                  ) -> None:
+        """Nothing here makes a driver braver: a car already doing what the
+        road allows covers exactly the road it always said it would."""
+        pilot = self._pilot()
+        top = self._top()
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=top),
+                     ahead=_Ahead(40.0, top - 12.0))
+        taking = pilot.pass_seconds(top, 40.0, top - 12.0, quick=top)
+        assert pilot._pass_room(road, top, top, road._ahead) \
+            == pytest.approx((top + pilot.oncoming_speed(top)) * taking)
+
+
+class TestWritingDownWhyAPassWasNotOn:
+    """The record wants the *stretch* -- it wanted to pass from here to there
+    and the other lane was never clear -- and a reason that lasted one step is
+    not a stretch.
+
+    Two reasons on either side of a boundary swap at whatever rate the driver
+    is asked, and each swap wrote a line. On the recorded Tidewater lap that is
+    what 164 `pass-wanted` entries are: the gap sat on the distance a pass is
+    decided from and the journal flipped between "too close to pull out" and
+    "other lane not clear" sixty times a second, burying the two stretches a
+    reader came for. :data:`REASON_HOLDS` is the line between a driver changing
+    its mind and a boundary being sat on, and :class:`StandIn` has always drawn
+    it.
+    """
+
+    class _Kept:
+        def __init__(self):
+            self.marks = []
+
+        def mark(self, name, **fields):
+            self.marks.append((name, fields))
+
+    def _pilot(self):
+        pilot = Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=40.0))
+        road.telemetry = self._Kept()
+        return pilot, road
+
+    def test_a_reason_that_held_is_written_down(self) -> None:
+        pilot, road = self._pilot()
+        pilot.refused(road, 'other lane not clear', REASON_HOLDS * 2)
+        pilot.refused(road, 'nothing in front', 0.1)
+        assert [name for name, _ in road.telemetry.marks] == ['pass-wanted']
+        assert road.telemetry.marks[0][1]['why'] == 'other lane not clear'
+
+    def test_a_reason_that_did_not_hold_is_not(self) -> None:
+        pilot, road = self._pilot()
+        for _ in range(60):
+            pilot.refused(road, 'too close to pull out', 1 / 60)
+            pilot.refused(road, 'other lane not clear', 1 / 60)
+        assert road.telemetry.marks == []
+
+    def test_and_the_stretch_underneath_the_flapping_still_is(self) -> None:
+        """What a reader came for: the driver wanted to pass for a second, and
+        then it stopped wanting to."""
+        pilot, road = self._pilot()
+        for _ in range(60):
+            pilot.refused(road, 'too close to pull out', 1 / 60)
+            pilot.refused(road, 'other lane not clear', 1 / 60)
+        pilot.refused(road, 'nothing in front', REASON_HOLDS * 2)
+        pilot.refused(road, 'other lane not clear', 0.1)
+        written = [fields['why'] for name, fields in road.telemetry.marks]
+        assert written == ['nothing in front']
+        assert road.telemetry.marks[0][1]['seconds'] == pytest.approx(
+            REASON_HOLDS * 2, abs=0.05)

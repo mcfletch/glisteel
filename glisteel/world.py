@@ -125,6 +125,12 @@ STONE_REACH = 60.0
 MOST_LUMINAIRES = 1_000_000
 
 
+#: The kinds of structure a road is **carried** on rather than laid on. Every
+#: one of them ends at the carriageway: a bore is lined at the road's edge, a
+#: deck and a causeway carry a parapet there, and there is no verge on any of
+#: them to pull onto (:meth:`Course.standing_room`).
+CARRIED = frozenset(('bridge', 'causeway', 'tunnel'))
+
 #: The kinds of structure a road is carried on that have an **edge**: run wide
 #: on one and there is nothing beside it. A bore is carried too and has no edge,
 #: since what is beside it is the hill it is in.
@@ -252,6 +258,41 @@ class Course:
         """
         return tuple((one.start, one.end) for one in self.structures
                      if one.kind in CARRIED_ON_AN_EDGE)
+
+    def carried(self, station: Any) -> Any:
+        """Whether the road is built rather than laid there.
+
+        A bore, a deck or a causeway: the road is held up by a structure and
+        the land is somewhere else. What is beside it is the structure's own
+        edge -- a lining, a parapet -- and past that the hillside it was driven
+        through or the water it was built over, so nothing beside such a
+        stretch is ground to put anything on.
+
+        Vectorised over ``station``, since the traffic asks it of every car on
+        the road at once.
+        """
+        along = np.asarray(station, dtype='d')
+        built = np.zeros(along.shape, dtype=bool)
+        for one in self.structures:
+            if one.kind in CARRIED:
+                built |= np.asarray(one.holds(along))
+        return built if built.ndim else bool(built)
+
+    def standing_room(self, station: Any) -> Any:
+        """How far from the crown something may stand there, in metres.
+
+        The road answering what it has beside it. On the ground that is its
+        whole width: the carriageway, the shoulder and the verge, which is made
+        ground a car can pull onto, with the forest floor past it.
+
+        Where the road is :meth:`carried` it is the carriageway and no more.
+        Anything placed by how far across the road it is asks this before it
+        leaves the carriageway.
+        """
+        beside = np.where(self.carried(station),
+                          float(self.carriageway_width) / 2.0,
+                          float(self.total_width) / 2.0)
+        return beside if beside.ndim else float(beside)
 
     def road_profile(self) -> Any:
         """The cut across the road, as the engine's own profile.
