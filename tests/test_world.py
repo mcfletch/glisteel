@@ -1,5 +1,6 @@
 """A baked world as a game sees it: the course, and where a car is on it."""
 
+import dataclasses
 import math
 
 import numpy as np
@@ -849,6 +850,34 @@ class TestTheMaskThatOpensABore:
         at = self.BORE[0] + 40.0
         assert not bool(np.asarray(self.bores()(np.array([at]),
                                                 np.array([400.0])))[0])
+
+    def test_the_mouths_are_the_ones_the_world_recorded(self) -> None:
+        """The bake cut the tiles with the figures it wrote beside the road;
+        the collider is cut with the same, not with defaults of its own."""
+        import numpy as np
+        from OpenGLContext.scenegraph.roadworks import BoreCut, TunnelProfile
+
+        cut = BoreCut(tunnel=TunnelProfile(portal_border=6.0), approach=90.0)
+        world = self.world()
+        world.courses[0] = dataclasses.replace(world.courses[0],
+                                               bores=cut.to_json())
+        course = world.courses[0]
+        expected = cut.openings(course.runs('tunnel'), world.field.sample,
+                                profile=course.road_profile())
+        x = np.linspace(self.BORE[0] - 120.0, self.BORE[0] + 60.0, 181)
+        z = np.zeros_like(x)
+        found = world._bores()(x, z)
+        assert np.array_equal(found, expected(x, z))
+        # 90 m of approach clears the road further out than six cells would.
+        assert bool(found[np.searchsorted(x, self.BORE[0] - 80.0)])
+
+    def test_a_road_record_carries_its_cut_into_the_course(self) -> None:
+        from glisteel.world import courses_in
+        document = {'extras': {'roads': [{
+            'name': 'r', 'centreline': [[0, 0, 0], [10, 0, 0]], 'length': 10.0,
+            'bores': {'portalBorder': 5.0, 'approach': 12.0}}]}}
+        assert courses_in(document)[0].bores == {'portalBorder': 5.0,
+                                                 'approach': 12.0}
 
     def test_a_world_with_no_landscape_asks_for_no_holes(self) -> None:
         """Nothing to cut, so nothing to say: a scenario's road stands on a

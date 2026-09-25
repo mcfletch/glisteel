@@ -37,8 +37,7 @@ from OpenGLContext.scenegraph.road import (
 from OpenGLContext.scenegraph.roadcourse import RoadCourse, Tracker
 from OpenGLContext.scenegraph.roadworks import (
     BORE_APPROACH_CELLS,
-    BORE_INSET,
-    bore_opening,
+    BoreCut,
 )
 from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
 
@@ -207,6 +206,11 @@ class Course:
     #: does not depend on the driver in front allowing it.
     widening: np.ndarray = dataclasses.field(
         default_factory=lambda: np.zeros(0, dtype='d'))
+    #: How the road's bores were cut out of the ground when the world was
+    #: baked, as the world wrote it
+    #: (:class:`~OpenGLContext.scenegraph.roadworks.BoreCut`), or empty for a
+    #: world that did not say.
+    bores: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @property
     def lanes(self) -> int:
@@ -810,6 +814,7 @@ def courses_in(document: Any) -> list[Course]:
             profile=dict(road.get('profile') or {}),
             bank=_along_of(road, 'bank', len(line)),
             widening=_along_of(road, 'widening', len(line)),
+            bores=dict(road.get('bores') or {}),
             structures=tuple(
                 Structure(kind=str(one.get('kind', 'dirt')),
                           start=float(one.get('from', 0.0)),
@@ -1062,25 +1067,26 @@ class RaceWorld:
         spacing = float(field.extent) / max(int(field.res) - 1, 1)
         mouths = []
         for road in self.courses:
-            for run in road.runs('tunnel'):
-                # A bore the road carries on one point of its line has no
-                # direction to build a mouth along.
-                if len(run) > 1:
-                    mouths.append(bore_opening(
-                        run, field.sample, profile=road.road_profile(),
-                        inset=BORE_INSET,
-                        approach=BORE_APPROACH_CELLS * spacing))
+            # The cut the bake recorded, so the collider is opened where the
+            # tiles were; a world that recorded none gets the engine's own
+            # figures, clearing six cells of this field.
+            cut = (BoreCut.from_json(road.bores) if road.bores
+                   else BoreCut(approach=BORE_APPROACH_CELLS * spacing))
+            opened = cut.openings(road.runs('tunnel'), field.sample,
+                                  profile=road.road_profile())
+            if opened is not None:
+                mouths.append(opened)
         if not mouths:
             return None
+        if len(mouths) == 1:
+            return mouths[0]
 
-        def opened(x: Any, z: Any) -> Any:
-            shape = np.broadcast_shapes(np.shape(np.asarray(x, dtype='d')),
-                                        np.shape(np.asarray(z, dtype='d')))
-            found = np.zeros(shape, dtype=bool)
-            for mouth in mouths:
-                found |= mouth(x, z)
+        def either(x: Any, z: Any) -> Any:
+            found = mouths[0](x, z)
+            for mouth in mouths[1:]:
+                found = found | mouth(x, z)
             return found
-        return opened
+        return either
 
     @property
     def course(self) -> Course | None:
