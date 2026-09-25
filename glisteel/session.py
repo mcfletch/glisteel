@@ -332,12 +332,19 @@ class Session:
 
         The line a reader looks for first: a session record four minutes long
         is read from its end, and what ended the drive is the question the
-        rest of it is evidence for.
+        rest of it is evidence for. The driver writes down whatever stretches
+        it still has open at the same moment, finished or failed, since a run
+        that ends while the car is crawling is the run that mark explains.
         """
         why = self.ended
-        if why is None or self._ended_at is not None:
+        if self._ended_at is not None or (why is None and not self.run.over):
             return
-        self._ended_at = why
+        self._ended_at = why or self.run.phase
+        flush = getattr(self.driver, 'flush', None)
+        if flush is not None:
+            flush(self)
+        if why is None:
+            return
         index, _distance = self.course.nearest(self.car.position)
         self.telemetry.mark(
             'drive-ended', why=why, speed=round(self.car.speed_kph(), 1),
@@ -667,6 +674,10 @@ class Session:
         self._sampled = 0.0
         self._bumped.clear()
         self._touched.clear()
+        self._ended_at = None
+        restart = getattr(self.driver, 'restart', None)
+        if restart is not None:
+            restart()
         self.reflections.context = None
         self._settle()
 
@@ -746,6 +757,7 @@ class Session:
 
     def _carry_on(self) -> None:
         """Let the race go on: the lap is abandoned, the race is not."""
+        self._ended_at = None
         self.timing.restart()
         self.watch.restart()
         self.crashes.restart()

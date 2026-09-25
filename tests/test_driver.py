@@ -1639,8 +1639,8 @@ class TestWritingDownWhyAPassWasNotOn:
     decided from and the journal flipped between "too close to pull out" and
     "other lane not clear" sixty times a second, burying the two stretches a
     reader came for. :data:`REASON_HOLDS` is the line between a driver changing
-    its mind and a boundary being sat on, and :class:`StandIn` has always drawn
-    it.
+    its mind and a boundary being sat on: a reason that held starts a stretch,
+    and one that did not is folded into the stretch it interrupted.
     """
 
     class _Kept:
@@ -1659,27 +1659,108 @@ class TestWritingDownWhyAPassWasNotOn:
     def test_a_reason_that_held_is_written_down(self) -> None:
         pilot, road = self._pilot()
         pilot.refused(road, 'other lane not clear', REASON_HOLDS * 2)
-        pilot.refused(road, 'nothing in front', 0.1)
+        pilot.refused(road, 'nothing in front', REASON_HOLDS * 2)
         assert [name for name, _ in road.telemetry.marks] == ['pass-wanted']
         assert road.telemetry.marks[0][1]['why'] == 'other lane not clear'
 
-    def test_a_reason_that_did_not_hold_is_not(self) -> None:
+    def test_a_reason_sat_on_a_boundary_is_one_stretch(self) -> None:
+        """Two reasons swapping on every step are one stretch of wanting to
+        pass, written once with the whole of its time and the other reason
+        named beside it."""
         pilot, road = self._pilot()
         for _ in range(60):
             pilot.refused(road, 'too close to pull out', 1 / 60)
             pilot.refused(road, 'other lane not clear', 1 / 60)
         assert road.telemetry.marks == []
-
-    def test_and_the_stretch_underneath_the_flapping_still_is(self) -> None:
-        """What a reader came for: the driver wanted to pass for a second, and
-        then it stopped wanting to."""
-        pilot, road = self._pilot()
-        for _ in range(60):
-            pilot.refused(road, 'too close to pull out', 1 / 60)
-            pilot.refused(road, 'other lane not clear', 1 / 60)
         pilot.refused(road, 'nothing in front', REASON_HOLDS * 2)
-        pilot.refused(road, 'other lane not clear', 0.1)
-        written = [fields['why'] for name, fields in road.telemetry.marks]
-        assert written == ['nothing in front']
-        assert road.telemetry.marks[0][1]['seconds'] == pytest.approx(
-            REASON_HOLDS * 2, abs=0.05)
+        [(name, fields)] = road.telemetry.marks
+        assert name == 'pass-wanted'
+        assert fields['why'] == 'too close to pull out'
+        assert fields['seconds'] == pytest.approx(2.0, abs=0.05)
+        assert fields['also'] == ['other lane not clear']
+
+    def test_a_reason_that_did_not_hold_joins_the_stretch_it_interrupted(
+            self) -> None:
+        pilot, road = self._pilot()
+        pilot.refused(road, 'other lane not clear', 1.0)
+        pilot.refused(road, 'too close to pull out', REASON_HOLDS / 2)
+        pilot.refused(road, 'other lane not clear', 1.0)
+        pilot.flush(road)
+        [(name, fields)] = road.telemetry.marks
+        assert fields['why'] == 'other lane not clear'
+        assert fields['seconds'] == pytest.approx(2.0 + REASON_HOLDS / 2,
+                                                  abs=0.05)
+
+    def test_the_mark_says_where_the_stretch_began(self) -> None:
+        pilot, road = self._pilot()
+        began = pilot.station(road)
+        pilot.refused(road, 'other lane not clear', 1.0)
+        road.car.position = np.asarray((1.8, 0.0, -300.0))
+        pilot.flush(road)
+        fields = road.telemetry.marks[0][1]
+        assert fields['at'] == pytest.approx(began, abs=0.1)
+        assert fields['until'] == pytest.approx(pilot.station(road), abs=0.1)
+
+    def test_a_stretch_still_open_at_the_end_of_a_run_is_written(self) -> None:
+        pilot, road = self._pilot()
+        pilot.refused(road, 'other lane not clear', 3.0)
+        pilot.flush(road)
+        assert [name for name, _ in road.telemetry.marks] == ['pass-wanted']
+        pilot.flush(road)
+        assert len(road.telemetry.marks) == 1, 'written twice'
+
+    def test_pulling_out_ends_the_stretch_before_it(self) -> None:
+        """A stretch before a pass and one after it are two stretches, and the
+        time spent passing is in neither."""
+        pilot, road = self._pilot()
+        pilot.refused(road, 'other lane not clear', 3.0)
+        pilot._pull_out(road, -1.8, _Ahead(40.0, 10.0), 200.0)
+        pilot.refused(road, 'other lane not clear', 1.0)
+        pilot.flush(road)
+        wanted = [fields['seconds'] for name, fields in road.telemetry.marks
+                  if name == 'pass-wanted']
+        assert wanted == [pytest.approx(3.0), pytest.approx(1.0)]
+
+
+class TestWritingDownACrawl:
+    """A stretch spent far under what the road allows, written once it ends --
+    or when the run does, since a run that ends crawling is the stuck run the
+    mark is there to explain."""
+
+    def _pilot(self):
+        pilot = Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=1.0))
+        road.telemetry = TestWritingDownWhyAPassWasNotOn._Kept()
+        return pilot, road
+
+    def test_a_run_that_ends_crawling_says_so(self) -> None:
+        pilot, road = self._pilot()
+        for _ in range(120):
+            pilot.held_back(road, 1.0, 30.0, 1 / 60)
+        pilot.flush(road)
+        [(name, fields)] = road.telemetry.marks
+        assert name == 'crawled'
+        assert fields['seconds'] == pytest.approx(2.0, abs=0.05)
+
+    def test_a_moment_below_the_road_is_not_a_crawl(self) -> None:
+        pilot, road = self._pilot()
+        pilot.held_back(road, 1.0, 30.0, 0.1)
+        pilot.flush(road)
+        assert road.telemetry.marks == []
+
+
+class TestARestartedRaceStartsTheDriverAfresh:
+    def test_nothing_of_the_last_race_is_carried(self) -> None:
+        pilot = Autopilot(_straight(points=400, spacing=5.0), lane=1.8)
+        road = _Road(_Car(position=(1.8, 0.0, -100.0), speed=1.0))
+        road.telemetry = TestWritingDownWhyAPassWasNotOn._Kept()
+        pilot.refused(road, 'other lane not clear', 3.0)
+        pilot.held_back(road, 1.0, 30.0, 3.0)
+        pilot._pull_out(road, -1.8, _Ahead(40.0, 10.0), 200.0)
+        pilot.passing_for = 4.0
+        road.telemetry.marks.clear()
+        pilot.restart()
+        pilot.flush(road)
+        assert road.telemetry.marks == []
+        assert pilot.passing is None and pilot.passing_for == 0.0
+        assert pilot.lane == pilot.line == pilot.own_side

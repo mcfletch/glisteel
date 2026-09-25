@@ -25,7 +25,7 @@ target it accelerates, above it brakes -- and it looks far enough ahead to brake
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -35,7 +35,8 @@ from glisteel import traffic
 from glisteel.interfaces import CarLike, CourseLike, SessionLike
 from glisteel.steering import KEY_FOR
 
-__all__ = ['Autopilot', 'DriverStyle', 'StandIn', 'PASSING_REACH',
+__all__ = ['Autopilot', 'DriverStyle', 'Held', 'StandIn', 'Stretch',
+           'PASSING_REACH',
            'WORTH_PASSING', 'PASS_ACROSS', 'CAR_LENGTHS', 'PASS_MARGIN',
            'PASS_AGAIN',
            'PASSED_BY', 'PASS_LONGEST', 'PACE', 'SETTLED', 'ALONGSIDE',
@@ -233,6 +234,93 @@ class DriverStyle:
     pull: float = 3.5
 
 
+@dataclass
+class Held:
+    """One reason that held over a stretch of the drive."""
+
+    why: str
+    #: Where along the course it began, in metres.
+    at: float
+    seconds: float = 0.0
+    #: What was written down about it when it began.
+    fields: dict[str, Any] = field(default_factory=dict)
+    #: Other reasons that came and went inside it without holding.
+    also: set[str] = field(default_factory=set)
+
+
+class Stretch:
+    """The reason something is so, kept as stretches of the drive.
+
+    :meth:`hold` is told the reason that holds on each step. A different reason
+    starts a new stretch only once it has held for ``holds`` seconds; one that
+    goes back sooner is folded into the stretch it interrupted, its time counted
+    there and its name kept in :attr:`Held.also`. So a driver sitting on the
+    boundary between two reasons is one stretch with both named, and a stretch
+    shorter than ``holds`` is not one at all.
+
+        >>> wanting = Stretch(holds=0.2)
+        >>> for _ in range(30):
+        ...     _ = wanting.hold('too close', 0.05, at=100.0)
+        ...     _ = wanting.hold('lane not clear', 0.05, at=100.0)
+        >>> done = wanting.end()
+        >>> done.why, round(done.seconds, 1), sorted(done.also)
+        ('too close', 3.0, ['lane not clear'])
+    """
+
+    def __init__(self, holds: float) -> None:
+        self.holds = float(holds)
+        #: The stretch under way, or None.
+        self.open: Held | None = None
+        self._next: Held | None = None
+        self._announced = False
+
+    def hold(self, why: str, dt: float, at: float,
+             **fields: Any) -> Held | None:
+        """``why`` held for ``dt`` more seconds, at station ``at``.
+
+        Returns the stretch this ended, where it lasted long enough to be one.
+        ``fields`` are kept only by the step that begins a stretch.
+        """
+        dt = max(float(dt), 0.0)
+        if self.open is None:
+            self.open = Held(why, float(at), fields=dict(fields))
+        if why == self.open.why:
+            self._fold()
+            self.open.seconds += dt
+            return None
+        if self._next is None or self._next.why != why:
+            self._fold()
+            self._next = Held(why, float(at), fields=dict(fields))
+        self._next.seconds += dt
+        if self._next.seconds < self.holds:
+            return None
+        done, self.open, self._next = self.open, self._next, None
+        self._announced = False
+        return done if done.seconds >= self.holds else None
+
+    def end(self) -> Held | None:
+        """Close the stretch under way; returns it if it lasted long enough."""
+        self._fold()
+        done, self.open, self._announced = self.open, None, False
+        return done if done is not None and done.seconds >= self.holds else None
+
+    def announce(self) -> bool:
+        """True once for each stretch, the first time it is asked after the
+        stretch has held for ``holds`` seconds."""
+        if self._announced or self.open is None \
+                or self.open.seconds < self.holds:
+            return False
+        self._announced = True
+        return True
+
+    def _fold(self) -> None:
+        """A reason that went back before it held joins the open stretch."""
+        if self._next is not None and self.open is not None:
+            self.open.seconds += self._next.seconds
+            self.open.also.add(self._next.why)
+        self._next = None
+
+
 class Autopilot:
     """Drives a car round a :class:`~glisteel.world.Course`.
 
@@ -267,11 +355,26 @@ class Autopilot:
         #: How long this pass has been under way, in seconds, for the record it
         #: writes when the pass ends one way or the other.
         self.passing_for = 0.0
-        self._refusing = ''
-        self._refused_for = 0.0
-        self._refused_with: dict[str, Any] = {}
-        self._crawled_for = 0.0
-        self._crawling: dict[str, Any] = {}
+        #: Why it is not passing, as stretches of road.
+        self.refusals = Stretch(REASON_HOLDS)
+        #: Stretches driven far under what the road allows.
+        self.crawling = Stretch(CRAWL_HOLDS)
+
+    def restart(self) -> None:
+        """Forget the last race: no pass under way and nothing being kept.
+
+        The car is back on its own side, since a restart stands it on the grid.
+        """
+        self.passing, self.passing_for = None, 0.0
+        self.lane = self.line = self.own_side
+        self.ahead = None
+        self.refusals = Stretch(REASON_HOLDS)
+        self.crawling = Stretch(CRAWL_HOLDS)
+
+    def flush(self, session: SessionLike) -> None:
+        """Write down every stretch still open, as at the end of a run."""
+        self._write_refusal(session, self.refusals.end())
+        self._write_crawl(session, self.crawling.end())
 
     def following(self, gap: float | None, speed: float = 0.0) -> None:
         """Say what is in front: how far, and how fast it is going."""
@@ -351,16 +454,13 @@ class Autopilot:
         :meth:`refused` does -- what a reader wants is that it crawled from
         here to there, not sixty notes a second saying it still is.
         """
-        crawling = speed < max(float(allowed), 1e-6) * CRAWLING
-        if not crawling:
-            if self._crawled_for >= CRAWL_HOLDS:
-                self.note(session, 'crawled', seconds=round(self._crawled_for, 1),
-                          **self._crawling)
-            self._crawled_for, self._crawling = 0.0, {}
+        if speed >= max(float(allowed), 1e-6) * CRAWLING:
+            self._write_crawl(session, self.crawling.end())
             return
-        if not self._crawled_for:
+        fields: dict[str, Any] = {}
+        if self.crawling.open is None:
             gap, theirs = self.ahead if self.ahead is not None else (None, None)
-            self._crawling = {
+            fields = {
                 'allowed': round(float(allowed) * 3.6, 1),
                 'asked': round(float(self.target_speed(
                     self.course.nearest(session.car.position)[0], speed)) * 3.6, 1),
@@ -368,7 +468,12 @@ class Autopilot:
                     getattr(session.car, 'vehicle', None), 'throttle', 0.0)), 2),
                 'gap': None if gap is None else round(float(gap), 1),
                 'theirs': None if theirs is None else round(float(theirs) * 3.6, 1)}
-        self._crawled_for += max(float(dt), 0.0)
+        self.crawling.hold('crawling', dt, self.station(session), **fields)
+
+    def _write_crawl(self, session: SessionLike, done: Held | None) -> None:
+        if done is not None:
+            self.note(session, 'crawled', at=round(done.at, 1),
+                      seconds=round(done.seconds, 1), **done.fields)
 
     def what_to_follow(self, session: SessionLike, speed: float
                        ) -> tuple[float, float] | None:
@@ -528,7 +633,12 @@ class Autopilot:
 
     def _pull_out(self, session: SessionLike, lane: float, first: Any,
                   room: float) -> None:
-        """Take ``lane`` to get past ``first``, and say so in the journal."""
+        """Take ``lane`` to get past ``first``, and say so in the journal.
+
+        Whatever stretch of refusing led up to it ends here, so the time spent
+        passing is counted in no refusal.
+        """
+        self._write_refusal(session, self.refusals.end())
         self.note(session, 'pass-started',
                   wanted=round(room), theirs=round(float(first.speed) * 3.6, 1),
                   gap=round(max(float(session.along(first)), 0.0), 1),
@@ -637,37 +747,32 @@ class Autopilot:
         rather than guarded -- and the guarded calls are exactly the ones that
         would have explained the failure nobody could reproduce.
         """
+        fields.setdefault('at', round(self.station(session), 1))
         getattr(session, 'telemetry', NOT_RECORDING).mark(
-            name, at=round(self.station(session), 1),
-            speed=round(float(session.car.speed()) * 3.6, 1), **fields)
+            name, speed=round(float(session.car.speed()) * 3.6, 1), **fields)
 
     def refused(self, session: SessionLike, why: str, dt: float = 0.0,
                 **fields: Any) -> None:
-        """Note that a pass was not on, the first time each reason is.
+        """Note that a pass was not on, as a stretch rather than a step.
 
-        Once per reason rather than once a frame: a reason that has not changed
-        is one already written down, and sixty a second is a file nobody reads.
-        What a reader wants is the *stretch* -- it wanted to pass from here to
-        there and the other lane was never clear -- so the mark carries where
-        it started wanting and the next one carries where it stopped.
-
-        And only a reason that **held** for :data:`REASON_HOLDS`, which is what
-        separates a driver changing its mind from a boundary being sat on. Two
-        reasons either side of one swap at whatever rate the driver is asked:
-        a car following at exactly the distance a pass is decided from flips
-        between being too close to pull out and having nowhere to pull out to
-        on every step, and each flip wrote a line. The recorded Tidewater lap
-        has 164 of them, and the handful of stretches a reader came for are
-        underneath.
+        What a reader wants is the stretch: it wanted to pass from here to
+        there and the other lane was never clear. So a ``pass-wanted`` mark is
+        written when a stretch ends, carrying where it began (``at``), where it
+        ended (``until``), how long it held and any reasons that came and went
+        inside it without holding for :data:`REASON_HOLDS` (:class:`Stretch`).
+        A car following at exactly the distance a pass is decided from flips
+        between two reasons on every step, and that is one stretch.
         """
-        if why != self._refusing:
-            if self._refused_for >= REASON_HOLDS and self._refusing:
-                self.note(session, 'pass-wanted', why=self._refusing,
-                          seconds=round(self._refused_for, 1),
-                          **self._refused_with)
-            self._refusing, self._refused_for = why, 0.0
-            self._refused_with = fields
-        self._refused_for += max(float(dt), 0.0)
+        self._write_refusal(session, self.refusals.hold(
+            why, dt, self.station(session), **fields))
+
+    def _write_refusal(self, session: SessionLike, done: Held | None) -> None:
+        if done is not None:
+            self.note(session, 'pass-wanted', why=done.why,
+                      at=round(done.at, 1),
+                      until=round(self.station(session), 1),
+                      seconds=round(done.seconds, 1),
+                      also=sorted(done.also), **done.fields)
 
     def station(self, session: SessionLike) -> float:
         """How far along the course the car is, in metres."""
@@ -1308,13 +1413,29 @@ class StandIn:
         #: How long it has been out there, in seconds.
         self.passing_for = 0.0
         self._waited = PASS_AGAIN
-        self._refused: str | None = None
-        self._refusing: str | None = None
-        self._refused_for = 0.0
+        #: Why it is not pulling out, as stretches of road.
+        self.refusals = Stretch(REASON_HOLDS)
         #: How long the last pass this driver thought about would have taken,
         #: in seconds -- what the decision to take it or refuse it was made on.
         self._planned = 0.0
         self._session: Any = None
+
+    def restart(self) -> None:
+        """Forget the last race: back on its own side, with no pass under way."""
+        self.pilot.restart()
+        self.overtaking = False
+        self.passes = 0
+        self.passing = self._slip_car = self.slipping = None
+        self._slipping_for = self.passing_for = self._planned = 0.0
+        self._waited = PASS_AGAIN
+        self.refusals = Stretch(REASON_HOLDS)
+
+    def flush(self, session: SessionLike) -> None:
+        """End every stretch still open, as at the end of a run.
+
+        A refusal is written as it is taken up, so ending one writes nothing.
+        """
+        self.refusals.end()
 
     def __repr__(self) -> str:
         return 'StandIn(%s%s)' % (getattr(self.scheme, 'name', '?'),
@@ -1464,7 +1585,7 @@ class StandIn:
         if why is not None:
             self.refused(session, why, dt)
             return
-        self._refused = None
+        self.refusals.end()
         found = session.traffic_ahead(self.deciding(session))
         self.overtaking = True
         self.passing = session.car_ahead(self.deciding(session))
@@ -1499,21 +1620,16 @@ class StandIn:
         self.come_back(session)
 
     def refused(self, session: SessionLike, why: str, dt: float = 0.0) -> None:
-        """Note that a pass was not on, the first time each reason is.
+        """Note that a pass was not on, once for each stretch of not passing.
 
-        Once per reason rather than once a frame: a reason that has not changed
-        is a reason already written down, and sixty of them a second is a file
-        nobody reads. What a reader wants is the *stretch* -- it wanted to pass
-        from here to there and the bend was too blind.
-
-        And only once the reason has *held* for :data:`REASON_HOLDS`.
+        What a reader wants is the stretch -- it wanted to pass from here to
+        there and the bend was too blind -- so a ``pass-refused`` mark is
+        written once a reason has held for :data:`REASON_HOLDS`, and not again
+        until a different reason holds or a pass begins (:class:`Stretch`).
         """
-        if why != self._refusing:
-            self._refusing, self._refused_for = why, 0.0
-        self._refused_for += max(float(dt), 0.0)
-        if why == self._refused or self._refused_for < REASON_HOLDS:
+        self.refusals.hold(why, dt, at=0.0)
+        if not self.refusals.announce():
             return
-        self._refused = why
         self.mark(session, 'pass-refused', why=why,
                   speed=round(float(session.car.speed()) * 3.6, 1),
                   sight=round(self.seen(session)[0], 1),

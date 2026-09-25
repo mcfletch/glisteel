@@ -641,6 +641,75 @@ class TestWritingDownACrash:
         assert [name for name, _ in kept] == ['crash', 'drive-ended']
 
 
+class _Keeping(_Pedals):
+    """A driver keeping stretches of its own, which a run asks it to write down
+    as it ends and to forget as a new race starts."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed = 0
+        self.restarted = 0
+
+    def flush(self, session):
+        self.flushed += 1
+
+    def restart(self):
+        self.restarted += 1
+
+
+class TestTheDriverIsToldHowTheRunWent:
+    def test_a_run_that_ends_has_the_driver_write_down_what_is_open(self):
+        session = _session(traffic=1, driver=_Keeping())
+        session.advance(FRAME)
+        TestWritingDownACrash._crash(session)
+        for _ in range(5):
+            session.advance(FRAME)
+        assert session.driver.flushed == 1
+
+    def test_and_so_does_a_finished_one(self) -> None:
+        session = _session(driver=_Keeping())
+        session.advance(FRAME)
+        session.run._enter('finished')
+        session.advance(FRAME)
+        session.advance(FRAME)
+        assert session.driver.flushed == 1
+
+    def test_a_restart_starts_the_driver_afresh(self) -> None:
+        session = _session(driver=_Keeping())
+        session.restart()
+        assert session.driver.restarted == 1
+
+    def test_a_driver_with_nothing_to_keep_is_left_alone(self) -> None:
+        session = _session(traffic=1, driver=_Pedals())
+        session.advance(FRAME)
+        TestWritingDownACrash._crash(session)
+        session.restart()
+
+
+class TestEveryFailureIsWrittenDown:
+    """A race goes on after the car is put back, and after a restart; the
+    next failure is its own line."""
+
+    def test_after_being_put_back(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        TestWritingDownACrash._crash(session)
+        session.return_to_track()
+        session.advance(FRAME)
+        kept, _other = TestWritingDownACrash._crash(session)
+        assert [name for name, _ in kept] == ['crash', 'drive-ended']
+
+    def test_after_a_restart(self) -> None:
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        TestWritingDownACrash._crash(session)
+        session.restart()
+        session.run.go()
+        session.advance(FRAME)
+        kept, _other = TestWritingDownACrash._crash(session)
+        assert [name for name, _ in kept] == ['crash', 'drive-ended']
+
+
 class TestWhereARestartStandsTheCar:
     """A restart puts the car back on the grid, on the ground that is there now.
 
