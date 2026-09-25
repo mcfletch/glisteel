@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -88,12 +89,20 @@ class Record:
 
     @classmethod
     def from_json(cls, document: Any) -> Record | None:
-        """One record from a document, or None for something that is not one."""
+        """One record from a document, or None for something that is not one.
+
+        A lap is a finite, non-negative number of seconds: a NaN compares false
+        with every other time, and would stand as the best lap for good.
+        """
         try:
-            return cls(seconds=float(document['seconds']),
-                       when=str(document.get('when', '')))
-        except (TypeError, ValueError, KeyError, IndexError):
+            seconds = document['seconds']
+            when = str(document.get('when', ''))
+        except (TypeError, KeyError, IndexError, AttributeError):
             return None
+        if (isinstance(seconds, bool) or not isinstance(seconds, (int, float))
+                or not math.isfinite(seconds) or seconds < 0):
+            return None
+        return cls(seconds=float(seconds), when=when)
 
 
 class Records:

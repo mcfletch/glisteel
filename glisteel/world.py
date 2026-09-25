@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import json
+import logging
 import math
 import os
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ import numpy as np
 from omi_physics import model
 from omi_physics.raycast import raycast
 from omi_physics.world import PhysicsWorld
+from OpenGLContext.loaders.documentvalues import DocumentValues
 from OpenGLContext.loaders.tiles3d import fetch
 from OpenGLContext.loaders.tiles3d.frustum import view_projection as frustum_matrix
 from OpenGLContext.loaders.tiles3d.props import baked_props
@@ -52,6 +54,8 @@ from glisteel.traffic import SPEED_LIMIT, Traffic, cars_for
 from glisteel.zone import LANES
 
 __all__ = ['Course', 'RaceWorld', 'courses_in', 'load_courses']
+
+log = logging.getLogger(__name__)
 
 #: How much memory the streamer may hold in tiles. A racing camera sees a long
 #: way and returns to the same ground every lap, so a circuit is worth keeping
@@ -336,15 +340,26 @@ class Course:
         """
         found = self.profile
         if found:
+            values = DocumentValues(logger=log)
+            standard = RoadProfile()
+
+            def width(key: str, default: float) -> float:
+                return values.number(found.get(key), default, 'road %s' % (key,),
+                                     minimum=0.0)
+
             return RoadProfile(
-                lane_width=float(found['laneWidth']),
-                lanes=int(found['lanes']),
-                shoulder_width=float(found['shoulderWidth']),
-                shoulder_drop=float(found['shoulderDrop']),
-                verge_width=float(found['vergeWidth']),
-                verge_drop=float(found['vergeDrop']),
-                crossfall=float(found['crossfall']),
-                texture_length=float(found['textureLength']))
+                lane_width=width('laneWidth', standard.lane_width),
+                lanes=values.integer(found.get('lanes'), standard.lanes, 'road lanes',
+                                     minimum=1),
+                shoulder_width=width('shoulderWidth', standard.shoulder_width),
+                shoulder_drop=width('shoulderDrop', standard.shoulder_drop),
+                verge_width=width('vergeWidth', standard.verge_width),
+                verge_drop=width('vergeDrop', standard.verge_drop),
+                crossfall=values.number(found.get('crossfall'), standard.crossfall,
+                                        'road crossfall'),
+                texture_length=values.number(found.get('textureLength'),
+                                             standard.texture_length,
+                                             'road textureLength', minimum=0.01))
         beside = max(self.total_width - self.carriageway_width, 0.0) / 2.0
         return RoadProfile(lane_width=self.carriageway_width / self.lanes,
                            lanes=self.lanes,
@@ -803,6 +818,11 @@ def courses_in(document: Any) -> list[Course]:
     them is three parses of a document that can be large.
     """
     roads = (document.get('extras') or {}).get('roads') or []
+    values = DocumentValues(logger=log)
+
+    def number(entry: Any, key: str, default: float) -> float:
+        return values.number(entry.get(key), default, 'road %s' % (key,), minimum=0.0)
+
     out = []
     for road in roads:
         line = np.asarray(road['centreline'], dtype='d')
@@ -811,20 +831,20 @@ def courses_in(document: Any) -> list[Course]:
         out.append(Course(
             name=str(road.get('name', 'road')),
             centreline=line,
-            carriageway_width=float(road.get('carriagewayWidth', 7.0)),
-            total_width=float(road.get('totalWidth', 12.0)),
-            closed=bool(road.get('closed', False)),
-            length=float(road.get('length', 0.0)),
-            start=float(road.get('start', 0.0)),
-            posted=int(road.get('posted', 0)),
+            carriageway_width=number(road, 'carriagewayWidth', 7.0),
+            total_width=number(road, 'totalWidth', 12.0),
+            closed=values.flag(road.get('closed'), False, 'road closed'),
+            length=number(road, 'length', 0.0),
+            start=number(road, 'start', 0.0),
+            posted=values.integer(road.get('posted'), 0, 'road posted', minimum=0),
             profile=dict(road.get('profile') or {}),
             bank=_along_of(road, 'bank', len(line)),
             widening=_along_of(road, 'widening', len(line)),
             bores=dict(road.get('bores') or {}),
             structures=tuple(
                 Structure(kind=str(one.get('kind', 'dirt')),
-                          start=float(one.get('from', 0.0)),
-                          end=float(one.get('to', 0.0)))
+                          start=number(one, 'from', 0.0),
+                          end=number(one, 'to', 0.0))
                 for one in road.get('structures') or ())))
     return out
 

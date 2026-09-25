@@ -464,7 +464,11 @@ they carry.
 The road comes with the world. A pile of triangles does not say where a
 track goes, so the baker writes the centreline, the cross-section, the lean of
 each corner, how much wider it is where there is room to pass, and the
-structures into the tileset's `extras` and the game reads them back.
+structures into the tileset's `extras` and the game reads them back. A
+figure the world gets wrong (a width that is not a number, a section missing a
+lane count) is logged and takes its default, so one bad value costs that value
+rather than the world. A best lap that is not a finite, non-negative time is
+not kept.
 That is what puts the car on the grid, points it the right way, times
 the lap, steers the autopilot, and — because it is a road and not a pile of
 triangles — decides what is under the wheels.

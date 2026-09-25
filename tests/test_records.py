@@ -245,3 +245,13 @@ class TestAHomeThatCannotBeWritten:
         assert table.save() is None
         assert 'could not save' in caplog.text
         assert [lap.seconds for lap in table.best('ashdown')] == [84.0]
+
+
+@pytest.mark.parametrize('seconds', [float('nan'), float('inf'), -3.0, '72.5', True, None])
+def test_a_time_that_is_not_a_lap_is_not_a_record(seconds):
+    """A NaN compares false with everything, so it would stand as the best lap forever."""
+    assert Record.from_json({'seconds': seconds}) is None
+
+
+def test_a_lap_time_is_a_record():
+    assert Record.from_json({'seconds': 72, 'when': '2026-09-25'}) == Record(72.0, '2026-09-25')

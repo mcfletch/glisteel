@@ -1594,8 +1594,10 @@ def patch_glb(path, mutate):
     for kind, payload in chunks:
         payload += (b'\x20' if kind == 0x4E4F534A else b'\x00') * (-len(payload) % 4)
         body += struct.pack('<II', len(payload), kind) + payload
-    with open(path, 'wb') as handle:
+    # Renamed over the model once written, so a cut-short run leaves it whole.
+    with open(path + '.partial', 'wb') as handle:
         handle.write(struct.pack('<4sII', b'glTF', 2, 12 + len(body)) + body)
+    os.replace(path + '.partial', path)
     return True
 
 

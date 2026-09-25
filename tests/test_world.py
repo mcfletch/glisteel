@@ -975,3 +975,28 @@ def _run_writing_setup(monkeypatch, mode='capture'):
         entry(options, 320, 180)
     except _Stop:
         pass
+
+
+class TestAMalformedRoad:
+    """A value a world's road gets wrong costs that value, reported, not the world."""
+
+    LINE = ((0.0, 0.0, 0.0), (100.0, 0.0, 0.0))
+
+    def road(self, **named):
+        return courses_in({'extras': {'roads': [dict(centreline=[list(point) for point in self.LINE], **named)]}})[0]
+
+    def test_a_flag_written_as_a_word_reads_as_the_word_says(self):
+        assert self.road(closed='false').closed is False
+
+    def test_a_width_that_is_not_a_number_takes_the_default(self, caplog):
+        road = self.road(carriagewayWidth='wide', posted=float('inf'))
+        assert (road.carriageway_width, road.posted) == (7.0, 0)
+        assert 'carriagewayWidth' in caplog.text
+
+    def test_a_structure_with_a_bad_end_keeps_its_start(self):
+        road = self.road(structures=[{'kind': 'bridge', 'from': 10.0, 'to': 'far'}])
+        assert (road.structures[0].start, road.structures[0].end) == (10.0, 0.0)
+
+    def test_a_section_missing_a_figure_takes_the_engine_s_default(self):
+        profile = self.road(profile={'laneWidth': 3.5, 'lanes': 'three'}).road_profile()
+        assert (profile.lane_width, profile.lanes, profile.crossfall) == (3.5, 2, 0.02)

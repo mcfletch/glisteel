@@ -41,8 +41,8 @@ from typing import Any
 import numpy as np
 
 # The engine reads these at import time, so they are set before it is imported.
-os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')
-os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')
+os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')  # noqa: TID251 the program's start-up sets the environment the engine reads
+os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')  # noqa: TID251 the program's start-up sets the environment the engine reads
 
 from OpenGLContext import quaternion, telemetry, testingcontext
 from OpenGLContext.capture import SettleCapture
@@ -51,6 +51,7 @@ from OpenGLContext.events.systemtime import systemTime
 from OpenGLContext.scenegraph.fog import Fog
 from OpenGLContext.scenegraph.light import PointLight, SpotLight
 from OpenGLContext.scenegraph.scenegraph import SceneGraph
+from OpenGLContext.testing.process_exit import flush_and_exit
 from OpenGLContext.ui import settings
 from OpenGLContext.ui.overlay import OverlayMixin
 from OpenGLContext.video.recorder import RecordingMixin
@@ -693,7 +694,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             # and offers no way to leave it from inside presenting a frame.
             # Every teardown that matters has happened above, which is what
             # :meth:`_finish` is for.
-            os._exit(0)
+            flush_and_exit(0)
             return result
         return super().presentFrame()
 
@@ -1003,8 +1004,8 @@ def _unpaced() -> None:
     ``setdefault`` on both, so a machine that wants the pacing, or a run that
     wants the numbers, still says so and is listened to.
     """
-    os.environ.setdefault('OPENGLCONTEXT_NO_VSYNC', '1')
-    os.environ.setdefault('OPENGLCONTEXT_DISABLE_FPS_DISPLAY', '1')
+    os.environ.setdefault('OPENGLCONTEXT_NO_VSYNC', '1')  # noqa: TID251 the program's start-up sets the environment the engine reads
+    os.environ.setdefault('OPENGLCONTEXT_DISABLE_FPS_DISPLAY', '1')  # noqa: TID251 the program's start-up sets the environment the engine reads
 
 
 def _record(options: Any, width: int, height: int) -> None:  # pragma: no cover
