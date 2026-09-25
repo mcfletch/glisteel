@@ -242,6 +242,14 @@ class TestTheStoneUnderfoot:
         from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
         assert _race(build_sample_tileset(str(tmp_path))).stones.props == []
 
+    def test_a_world_carrying_its_stone_as_a_table_reads_it(self, tmp_path) -> None:
+        """A baked world's stone is tens of thousands, written as a table
+        beside the tileset with only its name and count in the extras."""
+        world = _race(_world_with_stones(tmp_path, table=True))
+        assert [one.kind for one in world.stones.props] == ['stone0', 'stone1']
+        world.stream((0.0, 2.0, 0.0), 1080.0)
+        assert [one.kind for one in world.stones.standing] == ['stone0']
+
     def test_streaming_near_one_stands_it_up(self, tmp_path) -> None:
         world = _race(_world_with_stones(tmp_path))
         world.stream((0.0, 2.0, 0.0), 1080.0)
@@ -272,18 +280,26 @@ def _race(path):
     return RaceWorld(path)
 
 
-def _world_with_stones(directory):
-    """A sample tileset with two stones written into its extras."""
+def _world_with_stones(directory, table=False):
+    """A sample tileset with two stones: in its extras, or in a table beside
+    it that its extras name."""
     import json
+    import os
 
     from OpenGLContext.loaders.tiles3d.sample import build_sample_tileset
+    from OpenGLContext.scenegraph.props import Prop, props_table
     path = build_sample_tileset(str(directory))
     document = json.load(open(path))
-    document.setdefault('extras', {})['stones'] = [
+    stones = [
         {'kind': 'stone0', 'at': [0.0, 0.0, 6.0], 'radius': 0.4,
          'height': 0.45, 'shape': 'dome'},
         {'kind': 'stone1', 'at': [900.0, 0.0, 900.0], 'radius': 0.3,
          'height': 0.33, 'shape': 'dome'}]
+    if table:
+        with open(os.path.join(os.path.dirname(path), 'stones.npz'), 'wb') as out:
+            out.write(props_table([Prop.from_json(one) for one in stones]))
+        stones = {'table': 'stones.npz', 'count': 2}
+    document.setdefault('extras', {})['stones'] = stones
     json.dump(document, open(path, 'w'))
     return path
 

@@ -830,27 +830,29 @@ def _along_of(road: Any, name: str, points: int) -> np.ndarray:
     return found if len(found) == points else np.zeros(0, dtype='d')
 
 
-def _baked_props(extras: Any) -> list:
+def _baked_props(extras: Any, base: str = '') -> list:
     """The obstacles a world carries, out of its tileset's ``extras``.
 
     Not off the tiles: tile geometry is level-of-detail geometry that arrives
     and leaves as the car moves, and a collider built from it would be a boulder
     the car drives through at the moment the tile behind it swaps. The baker
-    writes them into ``extras`` for exactly this.
+    writes them into ``extras`` for exactly this, and the engine reads them
+    (:func:`~OpenGLContext.loaders.tiles3d.props.baked_props`).
     """
-    from OpenGLContext.scenegraph.props import Prop
-    return [Prop.from_json(one) for one in (extras.get('props') or [])]
+    from OpenGLContext.loaders.tiles3d.props import baked_props
+    return baked_props(extras, 'props', base)
 
 
-def _baked_stones(extras: Any) -> list:
-    """The loose stone a world carries, out of its tileset's ``extras``.
+def _baked_stones(extras: Any, base: str) -> list:
+    """The loose stone a world carries: the table beside its tileset that its
+    ``extras.stones`` names, read by the engine.
 
     Its own channel rather than the world's ``props``, because the two are held
     at different reaches: a boulder has to stop a car from a long way off, and
     a stone is what is under the wheel.
     """
-    from OpenGLContext.scenegraph.props import Prop
-    return [Prop.from_json(one) for one in (extras.get('stones') or [])]
+    from OpenGLContext.loaders.tiles3d.props import baked_props
+    return baked_props(extras, 'stones', base)
 
 
 def _baked_luminaires(extras: Any) -> Any:
@@ -933,10 +935,11 @@ class RaceWorld:
         # not a small one.
         document = json.loads(fetch.read_bytes(tileset_path))
         extras = (document.get('extras') or {})
+        base = fetch.dir_of(tileset_path)
         self._assemble(courses_in(document), field=self.terrain.field,
-                       props=_baked_props(extras), traffic=traffic,
+                       props=_baked_props(extras, base), traffic=traffic,
                        gravity=gravity, luminaires=_baked_luminaires(extras),
-                       stones=_baked_stones(extras))
+                       stones=_baked_stones(extras, base))
         # The same holes the collider got -- the same object, not an equal one
         # -- so the hill a bore runs through is drawn with the opening the car
         # drives through rather than cut down to road level to fake one. Set
