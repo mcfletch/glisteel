@@ -300,6 +300,19 @@ of §5 accordingly. Only the ambience actually is.
   position, and panning the driver's own motor across their head as the car
   turns would be wrong.
 
+**The synthesis is the engine's.** A driving game on the engine wants the same
+sound, so the behaviour is `omi_audio.vehicle` (`VehicleSound`, with every
+figure in a `VehicleSoundTuning`) and the nodes are
+`OpenGLContext.audio.vehicle.VehicleSoundtrack`; `glisteel/sound.py` is this
+car's `TUNING` and the names the session uses (2026-09-25 review).
+
+The scrub band in that tuning is measured off this car's `Wheel.slip`. Driving
+a circuit it averages 0.09 m/s and never passes 0.19; an autopilot pushed 80%
+past its own grip limit reaches 0.38. A slide is a different order: full lock
+at 30 m/s runs at 1.0 and peaks at 3.2, and a handbrake turn averages 2.4 and
+peaks at 5.0. Scaled across the whole range, a slide reached a twentieth of
+full level and was never heard; the band is 0.25 to 3.5.
+
 **One engine change made it possible.** `AudioSource` resolved a clip from a
 `url` or from a glTF document's audio library and from nowhere else, so a clip
 an application *made* — including one from the engine's own synthesiser, whose

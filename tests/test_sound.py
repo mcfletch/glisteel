@@ -127,9 +127,9 @@ class TestALetGoTyreIsHeard:
     Driving a circuit it averages 0.09 m/s and never passes 0.19; an autopilot
     pushed 80% past its own grip limit reaches 0.38. A slide is a different
     order: full lock at 30 m/s runs at 1.0 and peaks at 3.2, and a handbrake
-    turn averages 2.4 and peaks at 5.0. Scaled across the whole of that, as
-    this first was, a slide reaches a twentieth of the level and nothing is
-    ever heard -- so the band it comes in over is what these pin.
+    turn averages 2.4 and peaks at 5.0. The band scrub comes in over sits
+    above the first and reaches full scale in the second, which is what these
+    pin.
     """
 
     def test_driving_it_properly_scrubs_at_nothing(self):
