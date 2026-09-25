@@ -75,17 +75,22 @@ def store(root: str | None = None) -> ContentStore:
     return ContentStore(NAMESPACE, root=root)
 
 
+def _ours(given: ContentStore | None) -> ContentStore:
+    """``given``, or this game's own store where the caller named none."""
+    return given if given is not None else store()
+
+
 def installed(packs: Sequence[ContentPack] | None = None,
               store: ContentStore | None = None) -> list[ContentPack]:
     """Those packs already on this machine."""
-    where = store if store is not None else globals()['store']()
+    where = _ours(store)
     return list(where.installed(packs if packs is not None else registry()))
 
 
 def missing(packs: Sequence[ContentPack] | None = None,
             store: ContentStore | None = None) -> list[ContentPack]:
     """Those that would have to be fetched."""
-    where = store if store is not None else globals()['store']()
+    where = _ours(store)
     return list(where.missing(packs if packs is not None else registry()))
 
 
@@ -95,7 +100,7 @@ def needed_to_start(store: ContentStore | None = None) -> list[ContentPack]:
     The base pack and whatever it is incomplete without. Empty once it is here,
     which is every run but the first.
     """
-    where = store if store is not None else globals()['store']()
+    where = _ours(store)
     return list(fetch.missing_base(registry(), where))
 
 
@@ -115,7 +120,7 @@ def installed_tracks(store: ContentStore | None = None) -> list[Any]:
     know which it was.
     """
     from glisteel import tracks
-    where = store if store is not None else globals()['store']()
+    where = _ours(store)
     found = []
     for pack in track_packs():
         root = where.root_for(pack)
@@ -134,7 +139,7 @@ def offered(store: ContentStore | None = None) -> list[ContentPack]:
     shares is not one of them: it arrives with whichever track names it, and
     unpacks under that track rather than into a place of its own.
     """
-    where = store if store is not None else globals()['store']()
+    where = _ours(store)
     return list(where.missing(catalog.offered(registry())))
 
 
@@ -147,7 +152,7 @@ def wanted_for(pack: ContentPack,
     the art lands under each track that needs it -- so a second track fetches
     the art again, from the download cache rather than from the network.
     """
-    where = store if store is not None else globals()['store']()
+    where = _ours(store)
     return list(fetch.wanted_for(pack, registry(), where))
 
 
@@ -160,7 +165,7 @@ def art_directory(store: ContentStore | None = None) -> str:
     leave, this is the only place that has to stop looking there.
     """
     from importlib import resources
-    where = store if store is not None else globals()['store']()
+    where = _ours(store)
     pack = catalog.pack_for_key(BASE, registry())
     if pack is not None:
         root = where.root_for(pack)
