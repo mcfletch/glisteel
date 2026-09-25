@@ -22,19 +22,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from OpenGLContext.loaders.assets import AssetLibrary
-
 from glisteel import content
 
 __all__ = ['ART', 'BONNET', 'HERO', 'HERO_WHEEL_FRONT', 'HERO_WHEEL_REAR',
            'PILLARS', 'STEER_CLIP', 'TRAFFIC', 'VEHICLE_MATERIALS', 'TrafficKind']
 
-#: The art that ships with the game.
-#:
-#: Found through the package rather than through ``__file__``: that is what
-#: :mod:`importlib.resources` is for, and it is the spelling that keeps working
-#: when the package is not a directory of files on a disk.
-ART = AssetLibrary(content.art_directory())
+#: The game's art: the cars pack once it is installed, the copy in the wheel
+#: until then. Where that is, is asked each time a model is loaded, since the
+#: game is imported before a first run has fetched anything.
+ART = content.CONTENT.library()
 
 #: The player's car: bodywork, interior and glass in one file.
 HERO = 'cars/hero.glb'

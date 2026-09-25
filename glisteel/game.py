@@ -160,6 +160,8 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     #: The download screen and the download it started, across openings.
     #: Polled once a frame; a job nobody polls tells nobody anything.
     _downloads: Any = None
+    #: The screen fetching the cars on a first run without them, or None.
+    _first_run: Any = None
     # Supplied by the interactive runtime base.
     platform: Any
     addEventHandler: Any
@@ -187,11 +189,46 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         self._show_hud()
         self._bind_keys()
         self.sg = SceneGraph(children=[environment.horizon_background()])
+        from glisteel import content
+        if not content.art_is_here():
+            self.show_first_run()
+            return
+        self._begin()
+
+    def _begin(self) -> None:                    # pragma: no cover - needs a window
+        """Open the track asked for, or offer a choice."""
         track = self._opening_track()
         if track is None:
             self.show_menu()
         else:
             self.open(track)
+
+    def show_first_run(self) -> None:            # pragma: no cover - needs a window
+        """Ask to fetch the cars, which the game draws nothing without.
+
+        Before the menu and before any world is built: every car is read from
+        that art. Closing the screen without it leaves the game.
+        """
+        from glisteel import content
+        self._first_run = menu.first_run_screen(
+            content.CONTENT.needed_to_start(),
+            on_fetch=lambda _pack: content.CONTENT.base_job(
+                on_progress=self.triggerRedraw),
+            on_finished=self._first_run_finished,
+            on_close=self._first_run_closed)
+        self.pushOverlay(self._first_run.panel)
+
+    def _first_run_finished(self, job: Any) -> None:  # pragma: no cover
+        from glisteel import content
+        if job.failed is None and not job.cancelled and content.art_is_here():
+            screen, self._first_run = self._first_run, None
+            if screen is not None:
+                screen.on_close = None
+                screen.panel.close(True)
+            self._begin()
+
+    def _first_run_closed(self) -> None:         # pragma: no cover - needs a window
+        self._on_quit()
 
     def _opening_track(self) -> Any:             # pragma: no cover - needs a window
         """Which world to open, or None to offer a choice.
@@ -430,8 +467,11 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
             self.pushOverlay(downloads)
 
     def pollDownloads(self) -> None:             # pragma: no cover - needs a window
-        """Publish what the download has managed, once a frame."""
+        """Publish what the downloads have managed, once a frame."""
+        changed = self._first_run is not None and self._first_run.poll()
         if self._downloads is not None and self._downloads.poll():
+            changed = True
+        if changed:
             self.triggerRedraw()
 
     def _drop_named(self, name: str) -> None:    # pragma: no cover - needs a window

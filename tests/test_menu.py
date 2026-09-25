@@ -374,6 +374,25 @@ class _Gate:
         return '/content/' + pack.directory
 
 
+class TestTheFirstRun:
+    """A game with none of its own art asks for it before its menu."""
+
+    def test_the_set_is_offered_whole(self):
+        packs = _offered()
+        screen = menu.first_run_screen(packs)
+        assert screen.whole() == packs
+        assert '32 MB' in _text(screen.panel)
+
+    def test_it_is_named_so_the_game_can_find_it(self):
+        assert menu.first_run_screen(_offered()).panel.name == 'first-run'
+
+    def test_download_asks_for_the_set(self):
+        asked = []
+        screen = menu.first_run_screen(_offered(), on_fetch=asked.append)
+        screen.fetch_button.activate()
+        assert [one.key for one in asked] == ['glisteel/ashdown']
+
+
 class TestDownloadsAcrossOpenings:
     """The download screen is opened from the track chooser, may be closed
     while a track downloads, and is opened again."""

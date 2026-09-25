@@ -4,14 +4,18 @@ glisteel ships its code and fetches its data. A baked track is 22 MB and the
 four this release carries are 90 MB together with the art they share, which
 is not a wheel and not
 something an index should be asked to serve; the archives are attached to a
-GitHub release and fetched from there. The car the player drives is the same
-story at a smaller size, so it is the **base pack** -- the one thing fetched
-before the menu, because a game with none of it has nothing to draw.
+GitHub release and fetched from there. The cars are the **base pack**: the
+game draws nothing without them. The wheel carries a copy of them in
+``glisteel/assets``, which is read while the pack is not installed; when
+neither is here, a first run offers the pack for download before the menu
+(:meth:`glisteel.game.GlisteelContext.OnInit`).
 
 The facility is the engine's (:mod:`OpenGLContext.contentpacks`), which reads
 the registry, checks the digests, unpacks safely and runs the download off the
-frame loop. What is here is which registry, which namespace, and how a track
-that arrived as a pack reaches the chooser beside one baked by hand.
+frame loop. :data:`CONTENT` is its
+:class:`~OpenGLContext.contentpacks.application.Application` for this game;
+what is here besides is which packs are tracks, and how a track that arrived
+as a pack reaches the chooser beside one baked by hand.
 
     >>> from glisteel import content
     >>> for pack in content.missing():                     # doctest: +SKIP
@@ -27,13 +31,21 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Sequence
+from importlib import resources
 from typing import Any
 
-from OpenGLContext.contentpacks import ContentPack, ContentStore, catalog, fetch
+from OpenGLContext.contentpacks import (
+    Application,
+    ContentPack,
+    ContentStore,
+    catalog,
+    fetch,
+)
 
 log = logging.getLogger(__name__)
 
-__all__ = ['BASE', 'CATALOG_PATH', 'NAMESPACE', 'art_directory', 'installed',
+__all__ = ['BASE', 'CATALOG_PATH', 'CONTENT', 'IN_WHEEL', 'NAMESPACE',
+           'art_directory', 'art_is_here', 'installed',
            'installed_tracks', 'missing', 'needed_to_start', 'offered',
            'registry', 'store', 'track_packs', 'wanted_for']
 
@@ -54,25 +66,26 @@ TILESET = 'tileset.json'
 #: traffic it shares the road with.
 BASE = '%s/cars' % (NAMESPACE,)
 
-_registry: list[ContentPack] | None = None
+#: The copy of the cars inside the package, read while the pack is not here.
+IN_WHEEL = str(resources.files('glisteel') / 'assets')
+
+#: This game's content: the shipped registry and any added to the store.
+CONTENT = Application(NAMESPACE, CATALOG_PATH, base=BASE, fallback=IN_WHEEL,
+                      added=True)
 
 
 def registry() -> list[ContentPack]:
     """Every pack this build offers, the shipped ones and any added.
 
     Read once: a registry is a file on disk and a chooser asks for it a great
-    many times. A build that wants it read again clears :data:`_registry`.
+    many times. ``CONTENT.reload()`` reads them again.
     """
-    global _registry
-    if _registry is None:
-        added = [catalog.load(path) for path in store().registries()]
-        _registry = catalog.merge(catalog.load(CATALOG_PATH), *added)
-    return _registry
+    return list(CONTENT.registry())
 
 
 def store(root: str | None = None) -> ContentStore:
     """Where this game's content lives on this machine."""
-    return ContentStore(NAMESPACE, root=root)
+    return CONTENT.store(root)
 
 
 def _ours(given: ContentStore | None) -> ContentStore:
@@ -156,19 +169,19 @@ def wanted_for(pack: ContentPack,
     return list(fetch.wanted_for(pack, registry(), where))
 
 
-def art_directory(store: ContentStore | None = None) -> str:
-    """Where the game's own art is read from.
+def art_is_here(store: ContentStore | None = None) -> bool:
+    """Whether the game's own art can be read: the pack, or the wheel's copy."""
+    try:
+        CONTENT.base_directory(store)
+    except LookupError:
+        return False
+    return True
 
-    The base pack once it has been fetched, and the copy inside the wheel until
-    then. Both, deliberately: the art leaves the wheel when the release carrying
-    it exists, and until that day an install has to work anyway. When it does
-    leave, this is the only place that has to stop looking there.
+
+def art_directory(store: ContentStore | None = None) -> str:
+    """Where the game's own art is read from, as of now.
+
+    The base pack once it is installed, else the copy inside the wheel;
+    :class:`~OpenGLContext.contentpacks.application.NotInstalled` if neither.
     """
-    from importlib import resources
-    where = _ours(store)
-    pack = catalog.pack_for_key(BASE, registry())
-    if pack is not None:
-        root = where.root_for(pack)
-        if root is not None:
-            return str(root)
-    return str(resources.files("glisteel") / "assets")
+    return str(CONTENT.base_directory(store))

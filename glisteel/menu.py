@@ -46,7 +46,7 @@ from OpenGLContext.ui.widgets import (
 
 __all__ = ['ALL_HERE', 'BEST', 'FINISHED', 'GAME_TITLE', 'NEVER_DRIVEN',
            'NO_TRACKS', 'STOPPED', 'Downloads', 'download_screen',
-           'driving_screen',
+           'driving_screen', 'first_run_screen',
            'finish_screen', 'main_menu', 'track_screen']
 
 #: The name of the game, in exactly one place.
@@ -276,6 +276,25 @@ def download_screen(packs: Sequence[Any],
                            title='Downloads', columns=MENU_COLUMNS * 2,
                            job=job)
     screen.panel.name = 'downloads'
+    return screen
+
+
+def first_run_screen(packs: Sequence[Any],
+                     on_fetch: Callable[[Any], Any] | None = None,
+                     on_finished: Callable[[Any], None] | None = None,
+                     on_close: Callable[[], None] | None = None
+                     ) -> ContentScreen:
+    """The download a game with none of its own art needs before its menu.
+
+    The base pack and what it needs, offered as one set with their size and
+    terms. ``on_fetch(pack)`` returns the job that fetches the set. Its panel
+    is named ``first-run``.
+    """
+    screen = ContentScreen(packs, on_fetch=on_fetch, on_finished=on_finished,
+                           on_close=on_close, together=True,
+                           title='%s needs its cars' % (GAME_TITLE,),
+                           columns=MENU_COLUMNS * 2)
+    screen.panel.name = 'first-run'
     return screen
 
 

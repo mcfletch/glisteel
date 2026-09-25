@@ -198,6 +198,7 @@ class TestWhatAFirstRunDoes:
 
     def test_and_from_the_pack_once_it_is(self, store) -> None:
         from OpenGLContext.contentpacks import catalog
+        from OpenGLContext.contentpacks import catalog
         pack = catalog.pack_for_key(content.BASE, content.registry())
         root = store.directory_for(pack)
         os.makedirs(os.path.join(root, 'cars'), exist_ok=True)
@@ -363,3 +364,20 @@ class TestABakeDatesItselfByTheSource:
         wanted = subprocess.run(['git', 'log', '-1', '--format=%ct'], cwd=here,
                                 capture_output=True, text=True).stdout.strip()
         assert release_assets().source_date() == wanted
+
+
+class TestTheArtIsLookedForWhenItIsUsed:
+    """The game is imported before a first run has fetched its cars, so the
+    models are read from wherever the art is when a model is asked for."""
+
+    def test_the_models_follow_a_pack_installed_after_import(
+            self, tmp_path, monkeypatch) -> None:
+        from glisteel import models
+        from OpenGLContext.contentpacks import catalog
+        pack = catalog.pack_for_key(content.BASE, content.registry())
+        root = tmp_path / 'local' / content.NAMESPACE / pack.directory
+        (root / 'cars').mkdir(parents=True)
+        (root / pack.marker).write_bytes(b'glTF')
+        monkeypatch.setenv('OPENGLCONTEXT_CONTENT', str(tmp_path / 'local'))
+        assert models.ART.path_for(models.HERO) == str(root / 'cars' /
+                                                        'hero.glb')

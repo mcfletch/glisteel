@@ -248,12 +248,15 @@ needs Python installed:
   ./glisteel_*.deb` rather than `dpkg -i`, so that the OpenGL and X11 libraries
   it asks the machine for are resolved.
 
-**No world travels with either, and neither do the cars.** A baked track is
-22 MB and the four this release carries are 90 MB together with the art they
-share, which is not a wheel: the archives are attached to a GitHub release and fetched from the game.
-So is the art the car is drawn with, which is why a first run fetches something
-before it shows a menu — one download, asked for, rather than a stall at the
-first frame that wants a model.
+**No world travels with either.** A baked track is 22 MB and the four this
+release carries are 90 MB together with the art they share, which is not a
+wheel: the archives are attached to a GitHub release and fetched from the game.
+
+The cars are a content pack as well (`glisteel/cars`). The package carries a
+copy of them, which the game reads while that pack is not installed. Where
+neither is present, the game asks before its menu to fetch the pack, showing
+its size and terms, with a bar and a Stop button; closing that screen without
+it leaves the game, since every car is drawn from that art.
 
 Four tracks are on offer. **Tracks → Get more** says what each is, how big it
 is and whose it is, and fetches the one chosen along with the art it shares:
