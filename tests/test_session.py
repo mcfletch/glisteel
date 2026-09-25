@@ -842,7 +842,8 @@ class TestACarThatIsNotGoingAnywhereIsRecovered:
         something reads exactly like this.
         """
         moved = []
-        session.return_to_track = lambda: moved.append(True)   # type: ignore
+        session.return_to_track = (   # type: ignore[method-assign] - records the call instead of moving the car
+            lambda: moved.append(True))
         for _ in range(int(seconds / FRAME)):
             session.car.control(throttle=throttle, brake=brake)
             session.world.physics.linear_velocity[session.car.body] = 0.0

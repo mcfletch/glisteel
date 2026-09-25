@@ -79,6 +79,8 @@ select = [
     "UP",   # pyupgrade
     "BLE",  # no blind except
     "S110", # no silent try/except/pass
+    "PGH003", "PGH004",  # a type: ignore or noqa names the codes it silences
+    "PLE0604", "PLE0605",  # __all__ is a list or tuple of strings
 ]
 ignore = [
     "E501",   # line too long -- kept readable by hand, as in the engine
