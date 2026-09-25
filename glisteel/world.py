@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import dataclasses
 import functools
-import json
 import logging
 import math
 import os
@@ -26,7 +25,10 @@ import numpy as np
 from omi_physics import model
 from omi_physics.raycast import raycast
 from omi_physics.world import PhysicsWorld
-from OpenGLContext.loaders.documentvalues import DocumentValues
+from OpenGLContext.loaders import resolver
+from OpenGLContext.loaders.documentvalues import (
+    DocumentValues, JSONObject, parse_object, require_numbers, require_object,
+)
 from OpenGLContext.loaders.tiles3d import fetch
 from OpenGLContext.loaders.tiles3d.frustum import view_projection as frustum_matrix
 from OpenGLContext.loaders.tiles3d.props import baked_props
@@ -807,29 +809,39 @@ class Course:
 
 def load_courses(tileset_path: str) -> list[Course]:
     """The roads a baked world carries, or an empty list if it has none."""
-    return courses_in(json.loads(fetch.read_bytes(tileset_path)))
+    return courses_in(_read_tileset(tileset_path))
 
 
-def courses_in(document: Any) -> list[Course]:
+def _read_tileset(tileset_path: str) -> JSONObject:
+    """The tileset a caller names, checked once and parsed."""
+    return parse_object(fetch.read_bytes(resolver.checked_source(tileset_path)),
+                        tileset_path)
+
+
+def courses_in(document: JSONObject) -> list[Course]:
     """The roads in a tileset document already read.
 
     Separate from :func:`load_courses` because a world wants the roads, the
     obstacles and the lamps out of one file, and reading it three times to get
     them is three parses of a document that can be large.
     """
-    roads = (document.get('extras') or {}).get('roads') or []
     values = DocumentValues(logger=log)
+    roads = values.array(values.mapping(document.get('extras'), 'the tileset extras')
+                         .get('roads'), 'the roads')
 
-    def number(entry: Any, key: str, default: float) -> float:
+    def number(entry: JSONObject, key: str, default: float) -> float:
         return values.number(entry.get(key), default, 'road %s' % (key,), minimum=0.0)
 
     out = []
-    for road in roads:
-        line = np.asarray(road['centreline'], dtype='d')
+    for raw in roads:
+        road = require_object(raw, 'a road')
+        points = values.array(road.get('centreline'), 'road centreline')
+        line = np.asarray([require_numbers(point, 'a centreline point', 3)
+                           for point in points], dtype='d').reshape(-1, 3)
         if len(line) < 2:
             continue
         out.append(Course(
-            name=str(road.get('name', 'road')),
+            name=values.text(road.get('name'), 'road', 'road name'),
             centreline=line,
             carriageway_width=number(road, 'carriagewayWidth', 7.0),
             total_width=number(road, 'totalWidth', 12.0),
@@ -837,19 +849,20 @@ def courses_in(document: Any) -> list[Course]:
             length=number(road, 'length', 0.0),
             start=number(road, 'start', 0.0),
             posted=values.integer(road.get('posted'), 0, 'road posted', minimum=0),
-            profile=dict(road.get('profile') or {}),
+            profile=dict(values.mapping(road.get('profile'), 'road profile')),
             bank=_along_of(road, 'bank', len(line)),
             widening=_along_of(road, 'widening', len(line)),
-            bores=dict(road.get('bores') or {}),
+            bores=dict(values.mapping(road.get('bores'), 'road bores')),
             structures=tuple(
-                Structure(kind=str(one.get('kind', 'dirt')),
+                Structure(kind=values.text(one.get('kind'), 'dirt', 'structure kind'),
                           start=number(one, 'from', 0.0),
                           end=number(one, 'to', 0.0))
-                for one in road.get('structures') or ())))
+                for one in (require_object(entry, 'a road structure') for entry in
+                            values.array(road.get('structures'), 'road structures')))))
     return out
 
 
-def _along_of(road: Any, name: str, points: int) -> np.ndarray:
+def _along_of(road: JSONObject, name: str, points: int) -> np.ndarray:
     """One of a road's per-point figures out of a tileset, or nothing.
 
     A figure that does not match the line it belongs to is dropped rather than
@@ -857,11 +870,13 @@ def _along_of(road: Any, name: str, points: int) -> np.ndarray:
     plain one, and guessing the rest of it puts the car on a corner nobody
     built.
     """
-    found = np.asarray(road.get(name) or (), dtype='d').reshape(-1)
+    raw = road.get(name)
+    found = (np.asarray(require_numbers(raw, 'road %s' % (name,), len(raw)), dtype='d')
+             if isinstance(raw, list) and raw else np.zeros(0, dtype='d'))
     return found if len(found) == points else np.zeros(0, dtype='d')
 
 
-def _baked_props(extras: Any, base: str = '') -> list:
+def _baked_props(extras: JSONObject, base: str = '') -> list:
     """The obstacles a world carries, out of its tileset's ``extras``.
 
     Not off the tiles: tile geometry is level-of-detail geometry that arrives
@@ -874,7 +889,7 @@ def _baked_props(extras: Any, base: str = '') -> list:
     return found
 
 
-def _baked_stones(extras: Any, base: str) -> list:
+def _baked_stones(extras: JSONObject, base: str) -> list:
     """The loose stone a world carries: the table beside its tileset that its
     ``extras.stones`` names, read by the engine.
 
@@ -886,14 +901,14 @@ def _baked_stones(extras: Any, base: str) -> list:
     return found
 
 
-def _baked_luminaires(extras: Any) -> Any:
+def _baked_luminaires(extras: JSONObject) -> Any:
     """Where the lamps hang in a world's bores, out of its tileset's ``extras``.
 
     The pool each throws is baked onto the lining and needs nothing from the
     game. These are for lighting what is *in* the bore -- the car, and the road
     under it -- which the lining cannot do.
     """
-    wanted = extras.get('luminaires') or []
+    wanted = DocumentValues(logger=log).array(extras.get('luminaires'), 'the luminaires')
     if len(wanted) > MOST_LUMINAIRES:
         raise ValueError(
             'this world declares %d luminaires, which is more than a world has '
@@ -964,8 +979,9 @@ class RaceWorld:
         # One read and one parse. The roads, the obstacles and the lamps are
         # three readers of one file, and a tileset for a world worth driving is
         # not a small one.
-        document = json.loads(fetch.read_bytes(tileset_path))
-        extras = (document.get('extras') or {})
+        document = _read_tileset(tileset_path)
+        extras = DocumentValues(logger=log).mapping(document.get('extras'),
+                                                    'the tileset extras')
         base = fetch.dir_of(tileset_path)
         self._assemble(courses_in(document), field=self.terrain.field,
                        props=_baked_props(extras, base), traffic=traffic,
