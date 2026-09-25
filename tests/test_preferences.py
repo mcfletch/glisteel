@@ -91,3 +91,26 @@ class TestWhereItLives:
         from glisteel import records, tracks
         assert os.path.dirname(preferences.preferences_path()) \
             == os.path.dirname(records.records_path()) == tracks.home()
+
+
+class TestAHomeThatCannotBeWritten:
+    """Saving happens from a menu button, and a player whose home directory
+    will not take the file still has the choice they made."""
+
+    @staticmethod
+    def _unwritable(tmp_path):
+        blocked = tmp_path / 'not-a-directory'
+        blocked.write_text('')
+        return str(blocked / 'preferences.json')
+
+    def test_saving_there_says_nothing_was_saved(self, tmp_path, caplog):
+        kept = preferences.Preferences(self._unwritable(tmp_path))
+        kept.control = 'lanes'
+        assert kept.save() is None
+        assert 'could not save' in caplog.text
+
+    def test_and_the_choice_is_still_the_one_made(self, tmp_path) -> None:
+        kept = preferences.Preferences(self._unwritable(tmp_path))
+        kept.control = 'lanes'
+        kept.save()
+        assert kept.control == 'lanes'

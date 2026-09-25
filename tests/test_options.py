@@ -83,8 +83,8 @@ class TestWhatTheWindowReads:
         found = Options.from_namespace(_parsed(['--control', 'lanes']))
         assert found.control == 'lanes'
 
-    def test_and_its_default_is_the_controls_the_game_has_always_had(self) -> None:
-        assert Options.from_namespace(_parsed()).control == schemes.DEFAULT
+    def test_and_with_none_named_it_drives_the_default(self) -> None:
+        assert Options.from_namespace(_parsed()).driving() == schemes.DEFAULT
 
     def test_a_track_to_photograph_is_optional(self) -> None:
         assert Options.from_namespace(_parsed()).picture_track is None
@@ -161,3 +161,24 @@ class TestRecordingARunToExplainIt:
         worth reading is rarely the one that has just finished."""
         found = Options.from_namespace(_parsed(['--telemetry']))
         assert found.telemetry == ''
+
+
+class TestWhichWayOfDriving:
+    """The command line outranks the remembered choice, and a remembered
+    choice outranks the default -- which needs "not given" told apart from
+    ``--control`` naming the default."""
+
+    def test_a_command_line_that_names_none_leaves_it_open(self) -> None:
+        assert Options.from_namespace(_parsed(['x'])).control is None
+
+    def test_then_the_remembered_one_is_driven(self) -> None:
+        options = Options.from_namespace(_parsed(['x']))
+        assert options.driving(remembered='lanes') == 'lanes'
+
+    def test_and_with_nothing_remembered_the_default(self) -> None:
+        assert Options(world='x').driving() == schemes.DEFAULT
+
+    def test_naming_the_default_outranks_a_remembered_choice(self) -> None:
+        options = Options.from_namespace(
+            _parsed(['x', '--control', schemes.DEFAULT]))
+        assert options.driving(remembered='lanes') == schemes.DEFAULT

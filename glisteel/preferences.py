@@ -22,12 +22,12 @@ two clicks.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
-import tempfile
 from typing import Any
+
+from OpenGLContext import atomicfiles
 
 log = logging.getLogger(__name__)
 
@@ -65,31 +65,26 @@ class Preferences:
     def save(self) -> str | None:
         """Write the settings out; answer where they went, or None for nothing.
 
-        Beside the file and then moved onto it, so a write that fails part way
-        leaves what was there rather than half a document -- which for this file
-        would be a choice eaten by the thing that was meant to keep it.
+        Whole or not at all (:mod:`OpenGLContext.atomicfiles`), so a write that
+        fails part way leaves what was there rather than half a document.
 
         An untouched install writes nothing, so a fresh one leaves no file to go
-        stale.
+        stale. A file that cannot be written -- a home directory that is not
+        writable, a full disk -- is logged and answers None: the choice is kept
+        for this run, and saving is called from a menu button.
         """
         document: dict[str, Any] = {}
         if self.control:
             document['control'] = self.control
         if not document:
             return None
-        beside = os.path.dirname(os.path.abspath(self.path))
-        os.makedirs(beside, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(dir=beside, suffix='.prefs-new')
         try:
-            with os.fdopen(handle, 'w', encoding='utf-8') as writing:
-                json.dump(document, writing, indent=2, sort_keys=True,
-                          ensure_ascii=False)
-                writing.write('\n')
-            os.replace(temporary, self.path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(temporary)
-            raise
+            atomicfiles.write_text(self.path, json.dumps(
+                document, indent=2, sort_keys=True, ensure_ascii=False) + '\n')
+        except OSError as error:
+            log.warning('could not save preferences to %s: %s',
+                        self.path, error)
+            return None
         return self.path
 
     def _read(self) -> dict[str, Any]:

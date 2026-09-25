@@ -180,9 +180,8 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         # What was chosen last time, unless this run asked for something. The
         # command line is a deliberate answer for one run and outranks the
         # remembered one without replacing it.
-        if self.preferences.control and self.config.control == schemes.DEFAULT:
-            self.config = dataclasses.replace(
-                self.config, control=self.preferences.control)
+        self.config = dataclasses.replace(
+            self.config, control=self.config.driving(self.preferences.control))
         self.hud = RaceHUD()
         self.addHUDLayer(self.hud)
         self._show_hud()
@@ -481,7 +480,7 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
         """
         self._drop_menu()
         self.pushOverlay(menu.driving_screen(
-            chosen=self.config.control, on_choose=self._on_driving,
+            chosen=self.config.driving(), on_choose=self._on_driving,
             on_cancel=self.show_menu))
 
     def _on_driving(self, name: str) -> None:    # pragma: no cover - needs a window
@@ -692,7 +691,7 @@ def driver_for(config: Any, session: Any) -> Any:
     window is a decision no test can ask about -- which is how ``--mouse`` came
     to be a documented control that was never connected to anything.
     """
-    scheme = schemes.named(config.control, trim=config.assist,
+    scheme = schemes.named(config.driving(), trim=config.assist,
                            pointer=MouseWheel() if config.mouse else None)
     if not config.autopilot:
         return scheme
@@ -803,11 +802,12 @@ def build_parser() -> argparse.ArgumentParser:
                              'window is where the wheel is. Goes with any '
                              '--control')
     parser.add_argument('--control', choices=schemes.available(),
-                        default=schemes.DEFAULT, metavar='WAY',
-                        help='how the steering is driven: %s (default: '
-                             '%%(default)s)'
-                             % '; '.join('%s, %s' % (one, schemes.named(one).summary)
-                                         for one in schemes.available()))
+                        default=None, metavar='WAY',
+                        help='how the steering is driven: %s (default: the '
+                             'way chosen last from the menu, else %s)'
+                             % ('; '.join('%s, %s' % (one, schemes.named(one).summary)
+                                          for one in schemes.available()),
+                                schemes.DEFAULT))
     parser.add_argument('--headlights', action=argparse.BooleanOptionalAction,
                         default=True,
                         help='the light the car carries into a bore')

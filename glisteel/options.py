@@ -72,8 +72,10 @@ class Options:
     #: Whether the pointer steers. A source rather than a way of driving, so
     #: it goes with any of them (:mod:`glisteel.schemes`).
     mouse: bool = False
-    #: Which way of driving the car, by name.
-    control: str = schemes.DEFAULT
+    #: Which way of driving the car, by name, or None where the run did not
+    #: say: :meth:`driving` then answers the one the player chose last, or
+    #: :data:`glisteel.schemes.DEFAULT`.
+    control: str | None = None
     #: Whether the car carries a light into a bore.
     headlights: bool = True
     #: How much of the steering the game puts in while nobody is steering.
@@ -133,7 +135,8 @@ class Options:
         if self.traffic is not None:
             self.traffic = _at_least('traffic', int(self.traffic), 0)
         self.sse = _at_least('sse', float(self.sse), 0.0)
-        if self.control not in schemes.available():
+        if self.control is not None \
+                and self.control not in schemes.available():
             raise ValueError(
                 'control is %r, which is not a way of driving; there is %s'
                 % (self.control, ', '.join(schemes.available())))
@@ -142,6 +145,15 @@ class Options:
                 'there is no view called %r; there is %s'
                 % (self.view, ', '.join(VIEWS)))
         self.size = (int(self.size[0]), int(self.size[1]))
+
+    def driving(self, remembered: str | None = None) -> str:
+        """The name of the way of driving this run uses.
+
+        The command line's, where it named one; otherwise ``remembered``, the
+        player's last choice (:class:`glisteel.preferences.Preferences`);
+        otherwise :data:`glisteel.schemes.DEFAULT`.
+        """
+        return self.control or remembered or schemes.DEFAULT
 
     @classmethod
     def from_namespace(cls, namespace: Any) -> Options:

@@ -231,3 +231,17 @@ class _Unwritable:
 
     def to_json(self):
         return {'seconds': {1, 2, 3}}            # a set is not JSON
+
+
+class TestAHomeThatCannotBeWritten:
+    """A table saved as a race finishes, inside the frame: a home directory
+    that will not take the file loses the time, not the game."""
+
+    def test_saving_there_says_nothing_was_saved(self, tmp_path, caplog):
+        blocked = tmp_path / 'not-a-directory'
+        blocked.write_text('')
+        table = Records(str(blocked / 'times.json'))
+        table.offer('ashdown', 84.0)
+        assert table.save() is None
+        assert 'could not save' in caplog.text
+        assert [lap.seconds for lap in table.best('ashdown')] == [84.0]

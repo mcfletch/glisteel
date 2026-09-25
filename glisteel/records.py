@@ -35,14 +35,14 @@ over one is worth less.
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
-import tempfile
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
+
+from OpenGLContext import atomicfiles
 
 from glisteel.tracks import home
 
@@ -145,31 +145,28 @@ class Records:
 
     # -- keeping it ------------------------------------------------------------
 
-    def save(self) -> str:
-        """Write the table out; answer where it went.
+    def save(self) -> str | None:
+        """Write the table out; answer where it went, or None where it could not.
 
-        Beside the file and then moved onto it, so a write that fails part way
-        -- a full disk, a machine that goes down -- leaves the times that were
-        there rather than a file with half a table in it. This module already
-        says a corrupt table is worth nothing; this is what stops one being
-        made. In UTF-8, and as its own characters, because a track may be named
-        in any language and the file is meant to be readable.
+        Whole or not at all (:mod:`OpenGLContext.atomicfiles`), so a write that
+        fails part way -- a full disk, a machine that goes down -- leaves the
+        times that were there rather than a file with half a table in it. In
+        UTF-8, and as its own characters, because a track may be named in any
+        language and the file is meant to be readable.
+
+        A file that cannot be written is logged and answers None, keeping the
+        table in memory: the table is saved as a race finishes, inside the
+        frame, and an unwritable home directory costs the time rather than the
+        game.
         """
-        beside = os.path.dirname(os.path.abspath(self.path))
-        os.makedirs(beside, exist_ok=True)
         document = {track: [one.to_json() for one in table]
                     for track, table in sorted(self._tables.items()) if table}
-        handle, temporary = tempfile.mkstemp(dir=beside, suffix='.times-new')
         try:
-            with os.fdopen(handle, 'w', encoding='utf-8') as writing:
-                json.dump(document, writing, indent=2, sort_keys=True,
-                          ensure_ascii=False)
-                writing.write('\n')
-            os.replace(temporary, self.path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(temporary)
-            raise
+            atomicfiles.write_text(self.path, json.dumps(
+                document, indent=2, sort_keys=True, ensure_ascii=False) + '\n')
+        except OSError as error:
+            log.warning('could not save the times to %s: %s', self.path, error)
+            return None
         return self.path
 
     def _read(self) -> dict[str, list[Record]]:
