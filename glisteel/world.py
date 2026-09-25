@@ -845,7 +845,8 @@ def _baked_props(extras: Any, base: str = '') -> list:
     (:func:`~OpenGLContext.loaders.tiles3d.props.baked_props`).
     """
     from OpenGLContext.loaders.tiles3d.props import baked_props
-    return baked_props(extras, 'props', base)
+    found: list = baked_props(extras, 'props', base)
+    return found
 
 
 def _baked_stones(extras: Any, base: str) -> list:
@@ -857,7 +858,8 @@ def _baked_stones(extras: Any, base: str) -> list:
     a stone is what is under the wheel.
     """
     from OpenGLContext.loaders.tiles3d.props import baked_props
-    return baked_props(extras, 'stones', base)
+    found: list = baked_props(extras, 'stones', base)
+    return found
 
 
 def _baked_luminaires(extras: Any) -> Any:
