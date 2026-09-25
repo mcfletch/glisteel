@@ -866,6 +866,21 @@ class TestACarThatIsNotGoingAnywhereIsRecovered:
     def test_and_so_is_one_simply_sitting_there(self) -> None:
         assert not self.held(_session(), STUCK_SECONDS * 2.0, throttle=0.0)
 
+    def test_and_so_is_one_nosing_into_the_back_of_a_queue(self) -> None:
+        """A car stopped behind another car is held by the traffic, and the
+        traffic moves on; putting it back on the road takes it out of the
+        queue it is part of."""
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        _traffic_at(session, session.across(), station=8.0, speed=0.0)
+        assert not self.held(session, STUCK_SECONDS * 2.0)
+
+    def test_but_not_one_stopped_with_the_traffic_well_up_the_road(self):
+        session = _session(traffic=1)
+        session.advance(FRAME)
+        _traffic_at(session, session.across(), station=120.0, speed=0.0)
+        assert self.held(session, STUCK_SECONDS * 2.0)
+
 
 class TestTheRunSaysWhereTheCarWasGoing:
     """A journal of nothing but events says a run went off the road and not

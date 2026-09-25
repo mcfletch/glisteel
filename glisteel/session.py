@@ -83,6 +83,11 @@ STUCK_SPEED = 1.0
 #: the car not moving is one the world is holding.
 STUCK_THROTTLE = 0.05
 
+#: How far up its own lane another car holds this one in a queue, in metres.
+#: A car asking to go with one this close in front is waiting for it rather
+#: than stuck, and is not put back on the road.
+QUEUED = 20.0
+
 #: How hard the car has to meet the world before a run writes it down, in
 #: metres per second of closing speed, and how long one bump keeps the next
 #: from being written, in seconds.
@@ -970,23 +975,16 @@ class Session:
         """Put the car back on the road if it has got itself stuck.
 
         Wedged against a bank, upside down, through the floor of the world, or
-        simply stopped against something and unable to start again: all of them
-        end with a car that is not going anywhere, and a game that leaves the
-        player looking at it is broken however correct the physics was on the
-        way there.
+        stopped against something and unable to start again: all of them end
+        with a car that is not going anywhere, and after :data:`STUCK_SECONDS`
+        of that it is put back on the road.
 
-        **Asking to go and not going** is the general case, and the one this
-        used to miss: the rule asked only whether the car was off course or
-        upside down, so a car stopped dead on the carriageway and the right way
-        up was never recovered. On the 7.2 km circuit the car stopped against
-        the world at station 3640 and sat there with the throttle at 1.00 for
-        the remaining five hundred seconds of the run, with the traffic queued
-        into the back of it -- and a player meeting that has no way out but to
-        restart.
-
-        What it must not do is take the car away from somebody who stopped on
-        purpose, so it is the *throttle* that decides: a driver on the brake,
-        or asking for nothing, is left where they are for as long as they like.
+        Asking to go and not going is the general case: the throttle down, the
+        brake up and the car under :data:`STUCK_SPEED`, on the carriageway and
+        the right way up. It is the throttle that decides, so a driver on the
+        brake, or asking for nothing, is left where they are for as long as
+        they like, and so is one queued behind another car
+        (:meth:`_asking_to_go`).
         """
         stuck = (not self.run.over and self.car.speed() < STUCK_SPEED
                  and (self._off_course() or self.car.upside_down()
@@ -997,14 +995,19 @@ class Session:
             self.return_to_track()
 
     def _asking_to_go(self) -> bool:
-        """Whether whoever is driving wants to be moving.
+        """Whether whoever is driving wants to be moving and nothing but the
+        world is stopping them.
 
         The throttle down and the brake up, which for a car that is not moving
-        is a car that cannot rather than one that will not.
+        is a car that cannot rather than one that will not -- unless another
+        car is within :data:`QUEUED` in front of it, which is a queue that
+        moves on.
         """
         vehicle = self.car.vehicle
-        return bool(abs(float(vehicle.throttle)) > STUCK_THROTTLE
-                    and float(vehicle.brake) <= STUCK_THROTTLE)
+        if not (abs(float(vehicle.throttle)) > STUCK_THROTTLE
+                and float(vehicle.brake) <= STUCK_THROTTLE):
+            return False
+        return self.world.traffic is None or self.car_ahead(QUEUED) is None
 
     def _off_course(self) -> bool:
         return bool(off_course(self.course, self.car.position))
