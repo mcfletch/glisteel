@@ -280,6 +280,13 @@ straight into this machine's store, which is how a content release is driven
 before it is a release. `--install` keeps a pack that is already installed;
 `--reinstall` replaces it with the one just built.
 
+The bake captures each place's environment by rendering it, so the command
+needs a GPU with an OpenGL 3.3 core context (a window or EGL); see
+[glisteel-editor's Baking section](https://github.com/mcfletch/glisteel-editor#places-and-their-environments).
+Each world's manifest records the date of this repository's last commit
+(`SOURCE_DATE_EPOCH`, unless it is already set), so an archive rebuilt from a
+tag has the digest the registry names.
+
 Or bake your own, which is what [glisteel-editor](https://github.com/mcfletch/glisteel-editor)
 is for:
 

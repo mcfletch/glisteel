@@ -354,3 +354,12 @@ class TestACreditReadsAsText:
         for one in content.registry():
             assert '](' not in one.copyright and '`' not in one.copyright, \
                 one.key
+
+
+class TestABakeDatesItselfByTheSource:
+    def test_the_date_is_the_last_commit_s(self) -> None:
+        import subprocess
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wanted = subprocess.run(['git', 'log', '-1', '--format=%ct'], cwd=here,
+                                capture_output=True, text=True).stdout.strip()
+        assert release_assets().source_date() == wanted

@@ -41,6 +41,8 @@ import glob
 import json
 import os
 import re
+import subprocess
+import time
 from typing import Any
 
 from OpenGLContext.contentpacks import publish
@@ -91,6 +93,9 @@ def bake(into: str, named: str | None = None, depth: int | None = None) -> str:
             'baking needs glisteel-editor, which is not installed: %s. Check '
             'one out beside this repository, or pass --from a bake.' % (error,)
         ) from error
+    # The bake date goes into each world's manifest, and so into the archive's
+    # digest: the source's own date, so a rebuild from the tag matches.
+    os.environ.setdefault('SOURCE_DATE_EPOCH', source_date())
     for recipe in recipes(named):
         name = os.path.splitext(os.path.basename(recipe))[0]
         print('baking %s' % (name,))
@@ -111,6 +116,20 @@ def bake(into: str, named: str | None = None, depth: int | None = None) -> str:
         if status:
             raise SystemExit('baking %s failed' % (name,))
     return into
+
+
+def source_date() -> str:
+    """When this checkout's last commit was made, in seconds since 1970.
+
+    Today, where there is no git history to ask.
+    """
+    try:
+        found = subprocess.run(['git', 'log', '-1', '--format=%ct'], cwd=HERE,
+                               capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        found = None
+    stamp = found.stdout.strip() if found is not None else ''
+    return stamp if stamp.isdigit() else str(int(time.time()))
 
 
 def declare(build: publish.Build) -> list[dict[str, Any]]:
