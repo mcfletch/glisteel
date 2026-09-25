@@ -44,5 +44,37 @@ class TestTheSummaryOfAHandfulOfRuns:
         assert summarise([]) == 'nothing was driven'
 
 
+
+class TestADriveKeptInAJournalToo:
+    def test_the_report_still_has_the_marks(self) -> None:
+        """A journal is kept as well as the summary, not instead of it."""
+        from OpenGLContext.telemetry import Keeping
+
+        from glisteel.diagnose import drive_it
+        journal = Keeping()
+        report = drive_it('oval', seconds=2.0, traffic=0, journal=journal)
+        assert report.marks, 'the report has no marks'
+        assert [name for _when, name, _fields in report.marks] == \
+            [name for _when, name, _fields in journal.marks]
+        assert report.marks[-1][0] > 1.0, 'the marks carry no clock'
+
+
+class TestTheTrafficADriveMeets:
+    def test_a_reseeded_road_puts_out_what_one_built_with_that_seed_does(
+            self) -> None:
+        from glisteel import scenarios
+        from glisteel.traffic import Traffic
+        course = scenarios.named('oval').world(traffic=0).course
+
+        def put_out(crowd):
+            crowd.update(course.point(0), 1.0 / 60.0, speed=0.0)
+            return [(round(car.station, 3), car.heading, car.kind.name)
+                    for car in crowd.cars]
+
+        reseeded = Traffic(course, count=6, seed=0)
+        reseeded.reseed(5)
+        assert reseeded.seed == 5
+        assert put_out(reseeded) == put_out(Traffic(course, count=6, seed=5))
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))

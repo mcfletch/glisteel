@@ -883,6 +883,15 @@ class Traffic:
         """
         return self._by_body.keys()
 
+    def reseed(self, seed: int) -> None:
+        """Meet the traffic ``seed`` gives from here on, as if built with it.
+
+        Which way each new car goes, where it joins and how it drives follow
+        from the seed, so two runs reseeded alike meet the same road.
+        """
+        self.seed = int(seed)
+        self._rng = np.random.default_rng(self.seed)
+
     def put_out(self, car: TrafficCar) -> TrafficCar:
         """Put a car the caller made themselves on the road, and return it.
 

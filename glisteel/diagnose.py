@@ -28,12 +28,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from OpenGLContext.telemetry import Keeping, Tee
 
 from glisteel.driver import PACE, Autopilot, DriverStyle
 from glisteel.session import Session
 from glisteel.world import RaceWorld
 
-__all__ = ['Marks', 'Report', 'drive_it', 'main']
+__all__ = ['Report', 'drive_it', 'main']
 
 #: How long a run is given before it is called a run that does not end, in
 #: seconds. Long enough for a lap of the longest circuit shipped at the speed
@@ -41,28 +42,6 @@ __all__ = ['Marks', 'Report', 'drive_it', 'main']
 LONGEST = 900.0
 
 FRAME = 1.0 / 60.0
-
-
-class Marks:
-    """Somewhere for a session's marks to go, in order, with a clock on them.
-
-    Stands in for a recorder without writing a file: the same
-    :meth:`mark` the telemetry recorder offers, so a session cannot tell the
-    difference and nothing has to be instrumented twice.
-    """
-
-    def __init__(self) -> None:
-        self.marks: list[tuple[float, str, dict]] = []
-        self.now = 0.0
-
-    def mark(self, name: str, /, **fields: Any) -> None:
-        self.marks.append((self.now, name, fields))
-
-    def named(self, name: str) -> list[tuple[float, str, dict]]:
-        return [one for one in self.marks if one[1] == name]
-
-    def __bool__(self) -> bool:
-        return True
 
 
 @dataclass
@@ -156,7 +135,8 @@ def drive_it(tileset: str, seconds: float = LONGEST, pace: float = PACE,
     """Drive ``tileset`` with the autopilot and answer a :class:`Report`.
 
     ``traffic`` left out lets the road decide, which is what the game does.
-    ``journal`` is somewhere to keep the whole record as well as the summary.
+    ``journal`` is a recorder (:mod:`OpenGLContext.telemetry`) that is handed
+    every mark as well; the report keeps them either way.
 
     ``seed`` is which traffic this run meets. **One run says very little**: a
     lap is chaotic in the ordinary sense -- a car a metre further on at the
@@ -166,19 +146,17 @@ def drive_it(tileset: str, seconds: float = LONGEST, pace: float = PACE,
     """
     world = world_for(tileset, traffic)
     if world.traffic is not None:
-        world.traffic.seed = int(seed)
-        world.traffic._rng = np.random.default_rng(int(seed))
+        world.traffic.reseed(seed)
     session = Session(world, laps=laps)
     session.driver = Autopilot(session.course, lane=session.lane,
                                style=DriverStyle(margin=pace))
-    keeping = Marks()
-    session.telemetry = journal if journal is not None else keeping
-    session.run.go()
     driven, speeds = 0.0, []
+    keeping = Keeping(clock=lambda: driven)
+    session.telemetry = keeping if journal is None else Tee(keeping, journal)
+    session.run.go()
     while driven < seconds:
         session.advance(FRAME)
         driven += FRAME
-        keeping.now = driven
         speeds.append(session.car.speed_kph())
         if session.run.over:
             break
