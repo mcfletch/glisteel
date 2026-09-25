@@ -218,8 +218,9 @@ class TestTheRegistryAsOneFile:
     """
 
     def bundle(self, tmp_path):
-        return release_assets().bundle_registry(content.CATALOG_PATH,
-                                                str(tmp_path))
+        from OpenGLContext.contentpacks import publish
+        return publish.bundle_registry(
+            content.CATALOG_PATH, str(tmp_path / 'glisteel-registry.zip'))
 
     def test_it_holds_the_registry_and_its_pictures(self, tmp_path) -> None:
         import zipfile

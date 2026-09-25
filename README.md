@@ -272,12 +272,13 @@ path inside a baked world resolves against that world's own root.
 instead, and nothing is fetched.
 
 Building that content is one command, `./release-assets.py`: it bakes every
-recipe, archives it, writes `glisteel/packs.json` from the archives it built,
-and — with `--push` — attaches them to the release the registry names.
-`--install` puts them straight into this machine's store, which is how a content
-release is driven before it is a release; it leaves a pack already there where
-it is, and `--reinstall` does the same over whatever the store already holds,
-which is what a rebuilt world needs to be the one that opens.
+recipe, archives it, and writes a registry of the archives it built into
+`dist/content/`. With `--push` it attaches them to the release the registry
+names and writes `glisteel/packs.json`, the registry the game ships;
+`--write-registry` writes that file without pushing. `--install` puts them
+straight into this machine's store, which is how a content release is driven
+before it is a release. `--install` keeps a pack that is already installed;
+`--reinstall` replaces it with the one just built.
 
 Or bake your own, which is what [glisteel-editor](https://github.com/mcfletch/glisteel-editor)
 is for:
