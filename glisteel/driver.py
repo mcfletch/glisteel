@@ -41,7 +41,7 @@ __all__ = ['Autopilot', 'DriverStyle', 'Held', 'StandIn', 'Stretch',
            'PASS_AGAIN',
            'PASSED_BY', 'PASS_LONGEST', 'PACE', 'SETTLED', 'ALONGSIDE',
            'FOLLOWING_SECONDS', 'FOLLOWING_LEAST', 'RACING_KPH',
-           'PASS_SLOWER_BY', 'PASS_WITHIN', 'PASSED_BY',
+           'PASS_SLOWER_BY', 'PASS_WITHIN',
            'PASS_SECONDS', 'REJOIN_SPEED',
            'PASSING_GAP', 'THINKING', 'CROSSING_MARGIN', 'LANE_WIDTH',
            'STILL_ON', 'REASON_HOLDS']
@@ -87,11 +87,6 @@ PASS_WITHIN = 70.0
 #: to, so the car just passed is not what makes that lane un-clear. A driver
 #: that came back in the moment its own nose was ahead would come back in
 #: across the other car's bonnet.
-#:
-#: One constant, because there were two: this name was bound again two hundred
-#: lines further down, so the 12.0 written here was overwritten at import and
-#: never reached the code it was written for. Both readings want the same
-#: number and this is the one that was in force.
 PASSED_BY = 18.0
 
 #: The longest a pass may take before it is not worth starting, in seconds.
@@ -101,8 +96,9 @@ PASSED_BY = 18.0
 #: of the road the pass will cross -- at the speed of whatever might be coming
 #: the other way as well as at this car's own. Past this many seconds the room
 #: that has to be clear is further than a driver can see or a road can promise,
-#: and the answer is to stay in and wait.
-PASS_SECONDS = 9.0
+#: and the answer is to stay in and wait. The traffic on a two-way road is
+#: spaced to leave room for a pass this long, so the number is the road's own.
+PASS_SECONDS = traffic.PASSING_SECONDS
 
 #: How fast a driver with a wheel off the carriageway aims to be going, in
 #: metres per second.
@@ -704,9 +700,7 @@ class Autopilot:
         """
         if not self.own_side:
             return None
-        course = self.course
-        half = float(getattr(course, 'width_at', lambda i: float(
-            course.carriageway_width))(index)) / 2.0
+        half = float(self.course.width_at(index)) / 2.0
         wanted = abs(self.own_side) + ABREAST
         if half < wanted + ABREAST / 2.0:
             return None
@@ -1286,7 +1280,6 @@ SETTLED = 1.0
 #: (:func:`glisteel.traffic.cars_for`).
 RACING_KPH = 200.0
 
-#: How far behind a stand-in wants what it pulled out for before it comes back
 #: How much more room than the lane change strictly needs a driver wants
 #: before pulling out, as a multiple. The crossing time is what a comfortable
 #: change takes; leaving exactly that is arriving in the other lane at the

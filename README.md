@@ -547,8 +547,9 @@ deciding whether the road ahead is clear.
 
 **They ride the road's own surface**, at the height its centreline runs at,
 leaning with it and dropped by whatever camber the lean leaves at the distance
-across they keep -- through a bore, over a deck and on the ground alike. One pulled off stands on the verge, 1.6 m past the
-carriageway's edge, which leaves half a car between it and the treeline.
+across they keep -- through a bore, over a deck and on the ground alike. One
+pulled off stands with its outer side on the edge of the verge, overhanging the
+carriageway by the part of the car the 1.7 m of shoulder and verge cannot hold.
 
 **Nobody leaves a road that is carried.** A bore is lined at the road's edge and
 a deck or a causeway carries a parapet there, so there is no verge on one to

@@ -185,10 +185,9 @@ RACING_SPEED = 120.0 / 3.6
 #: How long a pass on a two-way road takes, in seconds, for sizing how much of
 #: it may be occupied.
 #:
-#: The driver's own ceiling -- :data:`glisteel.driver.PASS_SECONDS` -- named
-#: here because a road is laid out before anybody drives it, and held to that
-#: value by ``tests/test_traffic.py``. A pass longer than this is one the driver
-#: refuses, so a road that never offers this much is a road nobody overtakes on.
+#: The driver reads its ceiling from here (:data:`glisteel.driver.PASS_SECONDS`):
+#: a pass longer than this is one the driver refuses, so a road that never
+#: offers this much is a road nobody overtakes on.
 PASSING_SECONDS = 9.0
 
 
@@ -208,7 +207,6 @@ def passable_count(length: float, racing: float = RACING_SPEED,
     """
     needs = max(float(racing) + float(limit), 1e-6) * max(float(seconds), 1e-6)
     return max(int(float(length) / needs) * 2, 1)
-
 
 
 def cars_for(seconds: float = MEETING_SECONDS, racing: float = RACING_SPEED,
@@ -486,25 +484,15 @@ class TrafficCar:
     def _pulled_off(self) -> float:
         """How much further out than its own side a car pulling off goes.
 
-        As far as the verge will take it and not one metre further: the car's
-        outer edge ends on the edge of the made ground, so the whole of it is
-        on something a car can stand on.
-
-        **It still overhangs the carriageway, and that is the road's doing.**
-        Between the carriageway's edge and the verge there are 1.7 m on this
-        profile -- a 0.7 m shoulder and a 1.0 m verge -- and a car is
-        :data:`IN_THE_WAY` metres wide. There is nowhere to be wholly off, so a
-        car pulled off sits partly on the road, which is what a car on a narrow
-        shoulder does. What it must not do is what it did: the offset was
-        measured to the car's *centre*, with nothing for its width, so 1.3 m of
-        it stood past the verge -- among the trees, which is what a player sees
-        and calls the ditch. A quarter of the traffic pulls off for fourteen
-        seconds at a time, so two or three of ten are standing there at once.
-
-        A road with a real lay-by is the proper answer and is the road's to
-        offer; until one does, this is as far off as there is to go.
+        As far as the verge takes it: the car's outer side ends on the edge of
+        the made ground, so the whole of it stands on something a car can stand
+        on. Between the carriageway's edge and the verge's there are 1.7 m on
+        the shipped profile (a 0.7 m shoulder and a 1.0 m verge), less than a
+        car is wide, so a car pulled off overhangs the carriageway as a car on
+        a narrow shoulder does. A road with a lay-by is what would give it
+        somewhere wholly off.
         """
-        half = IN_THE_WAY / 2.0
+        half = self.kind.width / 2.0
         verge = float(self.course.total_width) / 2.0
         return max(verge - half - self.lane, 0.0)
 

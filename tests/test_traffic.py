@@ -139,22 +139,15 @@ class TestWhatItDoesNext:
         assert car.state == CRUISING
 
     def test_pulling_off_takes_it_as_far_off_as_there_is_to_go(self) -> None:
-        """Its outer edge on the edge of the made ground.
-
-        This used to ask whether the car's *centre* had passed 4.0 m, which was
-        a proxy for "off the road" chosen against a placement that put 1.3 m of
-        the car past the verge and into the trees. The centre sits closer in
-        now and the car is further off, because what is placed is the car
-        rather than the point it is drawn around.
-        """
-        from glisteel.traffic import IN_THE_WAY
+        """Its outer side on the edge of the made ground: what is placed is
+        the car's own bodywork rather than the point it is drawn around."""
         course = _course()
         car = _car(course=course)
         car.pull_off()
         for _ in range(60 * 8):
             car.advance(1.0 / 60.0)
         assert car.state == PULLING_OFF
-        edge = abs(float(car.position()[0])) + IN_THE_WAY / 2.0
+        edge = abs(float(car.position()[0])) + car.kind.width / 2.0
         assert edge == pytest.approx(course.total_width / 2.0, abs=0.05)
 
     def test_and_stops_beside_the_road_rather_than_in_the_trees(self) -> None:
@@ -956,7 +949,7 @@ class TestNoCarEndsUpInTheDitch:
     """
 
     def driven(self, seconds=180.0, count=12, seed=3):
-        """Where every car was, every second, over a run."""
+        """How far out every car's outer side was, every second, over a run."""
         from glisteel.traffic import Traffic
         course = _course(length=4000.0, count=401)
         crowd = Traffic(course, count=count, seed=seed)
@@ -966,19 +959,18 @@ class TestNoCarEndsUpInTheDitch:
             crowd.update((0.0, 0.0, at * 8.0 % 4000.0), step, speed=8.0)
             at += step
             if abs(at % 1.0) < step:
-                seen.extend(abs(float(car.position()[0])) for car in crowd.cars)
+                seen.extend(abs(float(car.position()[0])) + car.kind.width / 2.0
+                            for car in crowd.cars)
         assert seen, 'nothing was driven'
         return course, seen
 
     def test_nothing_stands_past_the_verge(self) -> None:
-        from glisteel.traffic import IN_THE_WAY
         course, seen = self.driven()
         verge = course.total_width / 2.0
-        outside = [one for one in seen if one + IN_THE_WAY / 2.0 > verge + 1e-6]
+        outside = [one for one in seen if one > verge + 1e-6]
         assert not outside, (
             f'{len(outside)} of {len(seen)} car-seconds had a car past the '
-            f'verge, the furthest by '
-            f'{max(outside) + IN_THE_WAY / 2.0 - verge:.2f} m')
+            f'verge, the furthest by {max(outside) - verge:.2f} m')
 
     def test_and_some_of_them_did_pull_off(self) -> None:
         """A budget met by traffic that never left the road proves nothing."""
@@ -1152,16 +1144,6 @@ class TestARoadHasToBePassable:
         on it -- an empty one is what ``--traffic 0`` is for."""
         from glisteel.traffic import cars_for
         assert cars_for(two_way=True, length=50.0) >= 1
-
-    def test_the_pass_it_allows_for_is_the_one_the_driver_will_take(self
-                                                                    ) -> None:
-        """A road laid out for a nine-second pass and a driver who refuses
-        anything over eight would be a road with traffic nobody gets by. The
-        two numbers live apart because a road is laid out before anybody drives
-        it; this is what keeps them the same number."""
-        from glisteel.driver import PASS_SECONDS
-        from glisteel.traffic import PASSING_SECONDS
-        assert PASSING_SECONDS == PASS_SECONDS
 
 
 class TestLeavingARoadThatIsCarried:

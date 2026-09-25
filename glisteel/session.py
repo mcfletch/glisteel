@@ -853,8 +853,7 @@ class Session:
             theirs=_rounded((ahead[1] * 3.6) if ahead else None, 1),
             bank=_rounded(self.course.bank_at(index), 3)
             if hasattr(self.course, 'bank_at') else None,
-            width=round(float(self.course.width_at(index)), 2)
-            if hasattr(self.course, 'width_at') else None,
+            width=round(float(self.course.width_at(index)), 2),
             off_road=bool(self.watch.off))
 
     def _read_the_ground(self, dt: float) -> None:
