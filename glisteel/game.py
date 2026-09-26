@@ -54,7 +54,6 @@ from OpenGLContext.scenegraph.fog import Fog
 from OpenGLContext.scenegraph.light import PointLight, SpotLight
 from OpenGLContext.scenegraph.scenegraph import SceneGraph
 from OpenGLContext.ui import settings
-from OpenGLContext.ui.overlay import OverlayMixin
 from OpenGLContext.video.recorder import RecordingMixin
 from OpenGLContext.viewer import environment
 from OpenGLContext.viewer.sceneviewer import ViewerContext
@@ -139,7 +138,7 @@ LAMP_INTENSITY = 0.9
 LAMP_FALLOFF = (1.0, 0.0, 0.02)
 
 
-class GlisteelContext(RecordingMixin, OverlayMixin, Context):
+class GlisteelContext(RecordingMixin, Context):
     """The game window: a run to advance, a scene to draw, and keys to deliver."""
 
     windowSystemName = 'glfw'
