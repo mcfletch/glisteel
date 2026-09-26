@@ -41,19 +41,19 @@ from typing import Any
 import numpy as np
 
 # The engine reads these at import time, so they are set before it is imported.
-os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')  # noqa: TID251 the program's start-up sets the environment the engine reads
 os.environ.setdefault('OPENGLCONTEXT_RENDERER', 'pbr')  # noqa: TID251 the program's start-up sets the environment the engine reads
 
-from OpenGLContext import quaternion, telemetry, testingcontext
+from OpenGLContext import quaternion, telemetry
 from OpenGLContext.capture import SettleCapture
 from OpenGLContext.contentpacks.fetch import FetchJob
+from OpenGLContext.context import Context
+from OpenGLContext.contextdefinition import ContextDefinition
 from OpenGLContext.events.systemtime import systemTime
 from OpenGLContext.processexit import flush_and_exit
 from OpenGLContext.scenegraph.fog import Fog
 from OpenGLContext.scenegraph.light import PointLight, SpotLight
 from OpenGLContext.scenegraph.scenegraph import SceneGraph
 from OpenGLContext.ui import settings
-from OpenGLContext.ui.overlay import OverlayMixin
 from OpenGLContext.video.recorder import RecordingMixin
 from OpenGLContext.viewer import environment
 from OpenGLContext.viewer.sceneviewer import ViewerContext
@@ -88,7 +88,6 @@ from glisteel.steering import CONTROLS, KeyboardDriver, MouseWheel
 from glisteel.world import RaceWorld
 
 log = logging.getLogger(__name__)
-BaseContext: Any = testingcontext.getInteractive()
 
 #: What the keys do, for ``--help``. Its own constant rather than a slice cut
 #: out of the module docstring by searching for two phrases in it: rewording the
@@ -139,8 +138,13 @@ LAMP_INTENSITY = 0.9
 LAMP_FALLOFF = (1.0, 0.0, 0.02)
 
 
-class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
+class GlisteelContext(RecordingMixin, Context):
     """The game window: a run to advance, a scene to draw, and keys to deliver."""
+
+    windowSystemName = 'glfw'
+    #: No navigation: the chase camera is the one thing that moves the view,
+    #: and the arrow keys steer the car.
+    contextDefinition = ContextDefinition(navigation=None)
 
     #: What this run was asked for. Checked once, at the command line.
     config: Options = None      # type: ignore[assignment]
@@ -170,11 +174,6 @@ class GlisteelContext(RecordingMixin, OverlayMixin, BaseContext):
     _downloads: Any = None
     #: The screen fetching the cars on a first run without them, or None.
     _first_run: Any = None
-    # Supplied by the interactive runtime base.
-    platform: Any
-    addEventHandler: Any
-    triggerRedraw: Any
-    sg: Any
 
     def OnInit(self) -> None:                    # pragma: no cover - needs a window
         # The engine's clock rather than the wall clock directly: a recording
