@@ -175,9 +175,9 @@ class Reflections:
     """The environment the car is lit and reflected by, kept up with the road.
 
     ``apply`` is what the environment is handed to -- by default the engine's
-    IBL probe, which rebuilds when it is handed a different one. Rebuilding costs a few
-    milliseconds, so it happens when the road changes and not otherwise: a lap
-    crosses a handful of portals, not a thousand frames.
+    IBL probe, which rebuilds when it is handed a different one. Rebuilding
+    costs a few milliseconds, so it happens when the road changes and not
+    otherwise: a lap crosses a handful of portals, not a thousand frames.
     """
 
     def __init__(self, course: Any, apply: Callable[[Any], Any] | None = None,
