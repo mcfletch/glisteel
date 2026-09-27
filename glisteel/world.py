@@ -1235,10 +1235,18 @@ class RaceWorld:
         return None if hit is None else float(hit.point[1])
 
     def shutdown(self) -> None:
-        """Stop the streamer's workers."""
-        runtime = getattr(self.terrain, 'runtime', None)
-        if runtime is not None:
-            runtime.shutdown()
+        """Stop the terrain's workers: the tile loaders and the cover's scatter."""
+        if self.terrain is not None:
+            self.terrain.shutdown()
+
+    def dispose(self) -> None:
+        """Delete the GL objects of the ground, the trees and the ground cover.
+
+        With the context the world was drawn in current, when it is taken out
+        of a scene that goes on being drawn.
+        """
+        if self.terrain is not None:
+            self.terrain.dispose()
 
 
 def static_ground(world: PhysicsWorld, size: float = 400.0,

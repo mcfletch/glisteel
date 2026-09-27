@@ -374,6 +374,7 @@ class GlisteelContext(RecordingMixin, Context):
         """Put away whatever world is loaded."""
         if self.session is not None:
             self.session.world.shutdown()
+            self.session.world.dispose()
         self.session = None
         self._beam = None
         self._lamps = None
