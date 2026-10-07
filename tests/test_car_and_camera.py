@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 from omi_physics.world import PhysicsWorld
 from OpenGLContext.loaders.assets import bounds
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.shape import Shape
 from OpenGLContext.scenegraph.switch import Switch
 from OpenGLContext.viewer import environment
@@ -26,6 +25,7 @@ from glisteel.car import (
     CarSpec,
     cabin_mesh,
     car_body_mesh,
+    car_nodes,
     wheel_mesh,
 )
 from glisteel.game import race_fog
@@ -148,18 +148,18 @@ class TestTheCar:
 
 class TestHowItIsDrawn:
     def test_the_body_is_a_closed_solid(self) -> None:
-        mesh = car_body_mesh(PBRMaterial())
+        mesh = car_body_mesh()
         assert len(mesh.positions) % 3 == 0
         assert len(mesh.indices) == len(mesh.positions)
 
     def test_the_body_is_car_sized(self) -> None:
-        points = car_body_mesh(PBRMaterial()).positions
+        points = car_body_mesh().positions
         size = points.max(axis=0) - points.min(axis=0)
         assert 1.5 < size[0] < 2.2                    # across
         assert 3.5 < size[2] < 5.0                    # along
 
     def test_every_face_has_a_normal(self) -> None:
-        mesh = car_body_mesh(PBRMaterial())
+        mesh = car_body_mesh()
         assert np.allclose(np.linalg.norm(mesh.normals, axis=1), 1.0, atol=1e-4)
 
     def test_a_wheel_is_round_and_the_right_size(self) -> None:
@@ -268,8 +268,8 @@ class TestTheCamera:
 class TestTheCarIsPaintedWhereTheRendererLooks:
     """The render pass takes a shape's material from its Appearance.
 
-    A mesh that carries a material but sits in a bare Shape is drawn in the
-    default grey -- which is how a red car comes out white.
+    A Shape with no Appearance is drawn in the default grey, which is how a
+    red car comes out white.
     """
 
     def test_every_shape_has_an_appearance_with_a_material(self, floor) -> None:
@@ -303,15 +303,40 @@ class TestTheCarIsPaintedWhereTheRendererLooks:
         assert len(colours) >= 3
         assert min(max(colour) for colour in colours) < 0.1     # the tyres
 
+    def test_the_four_tyres_share_one_appearance(self) -> None:
+        """Shapes painted alike share one Appearance."""
+        shapes = _shapes(car_nodes())
+        appearances: list = []
+        for shape in shapes:
+            if not any(shape.appearance is seen for seen in appearances):
+                appearances.append(shape.appearance)
+        assert len(shapes) == 6
+        assert len(appearances) == 3            # paint, glass and rubber
+
 
 def _shapes(node, out=None):
+    """Every Shape under ``node``, down every branch of every switch."""
     out = [] if out is None else out
     if isinstance(node, Shape):
         out.append(node)
-    for child in ((getattr(node, 'children', None) or [])
-                  + (getattr(node, 'choice', None) or [])):
+    for child in _branches(node):
         _shapes(child, out)
     return out
+
+
+def _branches(node):
+    """A node's children: every choice of a Switch, the children of anything else."""
+    if isinstance(node, Switch):
+        return list(node.choice or ())
+    return list(getattr(node, 'children', None) or ())
+
+
+def _chosen(node):
+    """The children a node draws: a Switch's chosen one, or all of them."""
+    if isinstance(node, Switch):
+        choices = node.choice or ()
+        return [choices[node.whichChoice]] if 0 <= node.whichChoice < len(choices) else []
+    return _branches(node)
 
 
 class TestTheAirTheWorldIsSeenThrough:
@@ -526,9 +551,7 @@ def _visible(node, car):
 def _reachable(node, out=None):
     out = [] if out is None else out
     out.append(node)
-    for child in ((getattr(node, 'children', None) or [])
-                  + (getattr(node, 'choice', None) or [])[
-                      :max(getattr(node, 'whichChoice', -1) + 1, 0)]):
+    for child in _chosen(node):
         _reachable(child, out)
     return out
 
@@ -542,12 +565,8 @@ def _named(node, out=None):
     out = [] if out is None else out
     if getattr(node, 'DEF', ''):
         out.append(node)
-    for child in getattr(node, 'children', None) or ():
+    for child in _chosen(node):
         _named(child, out)
-    choices = getattr(node, 'choice', None) or ()
-    which = getattr(node, 'whichChoice', -1)
-    if choices and 0 <= which < len(choices):
-        _named(choices[which], out)
     return out
 
 
@@ -636,12 +655,12 @@ class TestThePrimitiveCarIsWoundTheRightWayRound:
     """
 
     def test_the_body_faces_outward(self) -> None:
-        found = _outward(car_body_mesh(PBRMaterial()))
+        found = _outward(car_body_mesh())
         assert (found > 0).all(), '%d of %d body triangles face inward' % (
             int((found <= 0).sum()), len(found))
 
     def test_the_cabin_faces_outward(self) -> None:
-        found = _outward(cabin_mesh(PBRMaterial()))
+        found = _outward(cabin_mesh())
         assert (found > 0).all(), '%d of %d cabin triangles face inward' % (
             int((found <= 0).sum()), len(found))
 
@@ -653,7 +672,7 @@ class TestThePrimitiveCarIsWoundTheRightWayRound:
     def test_the_normals_it_carries_agree_with_its_winding(self) -> None:
         # The shading normals are built from the faces, so if the two ever
         # disagree the shape is lit as something other than what is drawn.
-        for mesh in (car_body_mesh(PBRMaterial()), cabin_mesh(PBRMaterial()),
+        for mesh in (car_body_mesh(), cabin_mesh(),
                      wheel_mesh()):
             a, b, c = _faces_of(mesh)
             from_winding = np.cross(b - a, c - a)

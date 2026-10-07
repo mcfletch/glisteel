@@ -230,7 +230,7 @@ class TestThePlayersCar:
         """
         paint = hero.materials[models.PAINT]
         assert (tuple(paint.baseColor) != (1.0, 1.0, 1.0)
-                or 'baseColor' in (paint.textures or {})), 'the car is unpainted'
+                or paint.texture('baseColor') is not None), 'the car is unpainted'
 
     def test_the_paint_is_a_finish_rather_than_a_colour(self, hero) -> None:
         """A coat over a base that keeps its colour, which is what paint is.

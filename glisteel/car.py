@@ -23,8 +23,8 @@ import numpy as np
 from omi_physics import model
 from omi_physics.vehicle import RaycastVehicle, VehicleTuning, car_wheels
 from OpenGLContext.scenegraph.appearance import Appearance
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
 from OpenGLContext.scenegraph.shape import Shape
 from OpenGLContext.scenegraph.switch import Switch
 from OpenGLContext.scenegraph.transform import Transform
@@ -42,6 +42,10 @@ BODY_LENGTH = 4.2
 BODY_WIDTH = 1.85
 BODY_HEIGHT = 0.62
 CABIN_HEIGHT = 0.19
+
+#: The primitive car's glass and tyres, as linear base colours.
+_GLASS_COLOUR = (0.10, 0.13, 0.16)
+_RUBBER_COLOUR = (0.045, 0.045, 0.05)
 
 
 @dataclass
@@ -336,14 +340,12 @@ class Car:
                 column = scene.getDEF(models.COLUMN)
                 return outside, inside, [column] if column is not None else []
             log.warning('%s is missing one of its named shells', models.HERO)
-        paint = PBRMaterial(baseColor=self.spec.paint, metallic=0.55,
-                            roughness=0.32)
-        glass = PBRMaterial(baseColor=(0.10, 0.13, 0.16), metallic=0.1,
-                            roughness=0.08)
+        paint = _finish(self.spec.paint, metallic=0.55, roughness=0.32)
+        glass = _finish(_GLASS_COLOUR, metallic=0.1, roughness=0.08)
         # Drawn from primitives there is no wheel to leave in the frame, so the
         # driver's seat is the road and nothing else.
-        return ([_painted(car_body_mesh(paint), paint)],
-                [_painted(cabin_mesh(glass), glass)], [])
+        return ([_painted(car_body_mesh(), paint)],
+                [_painted(cabin_mesh(), glass)], [])
 
     def _wheel_art(self, spec: Any) -> list[Any]:
         """One wheel's geometry: the shipped model, or a cylinder.
@@ -356,9 +358,8 @@ class Car:
                                   else models.HERO_WHEEL_REAR)
         if scene is not None:
             return [scene.group]
-        rubber = PBRMaterial(baseColor=(0.045, 0.045, 0.05), metallic=0.0,
-                             roughness=0.85)
-        return [_painted(wheel_mesh(spec.spec.radius, 0.24, rubber), rubber)]
+        rubber = _finish(_RUBBER_COLOUR, metallic=0.0, roughness=0.85)
+        return [_painted(wheel_mesh(spec.spec.radius, 0.24), rubber)]
 
 
 def car_nodes(paint: tuple[float, float, float] = (0.62, 0.09, 0.07),
@@ -370,34 +371,38 @@ def car_nodes(paint: tuple[float, float, float] = (0.62, 0.09, 0.07),
     suspension does not move, which nobody driving past at speed reads, and it
     costs a transform apiece instead of a raycast vehicle.
     """
-    body = PBRMaterial(baseColor=paint, metallic=0.55, roughness=0.32)
-    glass = PBRMaterial(baseColor=(0.10, 0.13, 0.16), metallic=0.1,
-                        roughness=0.08)
-    rubber = PBRMaterial(baseColor=(0.045, 0.045, 0.05), metallic=0.0,
-                         roughness=0.85)
+    body = _finish(paint, metallic=0.55, roughness=0.32)
+    glass = _finish(_GLASS_COLOUR, metallic=0.1, roughness=0.08)
+    rubber = _finish(_RUBBER_COLOUR, metallic=0.0, roughness=0.85)
+    tyre = wheel_mesh(wheel_radius, 0.24)
     half_track, half_base = 1.58 / 2.0, 2.55 / 2.0
     wheels = [
-        Transform(children=[_painted(wheel_mesh(wheel_radius, 0.24, rubber),
-                                     rubber)],
+        Transform(children=[_painted(tyre, rubber)],
                   translation=(side * half_track,
                                -BODY_HEIGHT / 2.0 + wheel_radius,
                                end * half_base))
         for side in (-1.0, 1.0) for end in (-1.0, 1.0)]
-    return Transform(children=[_painted(car_body_mesh(body), body),
-                               _painted(cabin_mesh(glass), glass), *wheels])
+    return Transform(children=[_painted(car_body_mesh(), body),
+                               _painted(cabin_mesh(), glass), *wheels])
 
 
-def _painted(mesh: PBRMesh, material: PBRMaterial) -> Shape:
-    """A mesh ready to render: the material on the Appearance, not only the mesh.
+def _finish(colour: tuple[float, float, float], metallic: float,
+            roughness: float) -> Appearance:
+    """An appearance for the primitive car: one metal/roughness material."""
+    return Appearance(material=PhysicalMaterial(
+        baseColor=colour, metallic=metallic, roughness=roughness))
 
-    The render pass takes a shape's material from its ``Appearance``. A mesh
-    that carries one and sits in a bare Shape is drawn in the default grey,
-    which is how a red car comes out white.
+
+def _painted(mesh: PBRMesh, appearance: Appearance) -> Shape:
+    """A mesh in a Shape drawn with ``appearance``.
+
+    The meshes carry geometry alone; the material they are drawn with is the
+    Shape's ``Appearance``, and shapes painted alike share one.
     """
-    return Shape(geometry=mesh, appearance=Appearance(material=material))
+    return Shape(geometry=mesh, appearance=appearance)
 
 
-def car_body_mesh(material: PBRMaterial) -> PBRMesh:
+def car_body_mesh() -> PBRMesh:
     """The car's lower body: a box drawn in at the nose and tail."""
     half_w, half_h = BODY_WIDTH / 2.0, BODY_HEIGHT / 2.0
     nose, tail = -BODY_LENGTH / 2.0, BODY_LENGTH / 2.0
@@ -406,10 +411,10 @@ def car_body_mesh(material: PBRMaterial) -> PBRMesh:
         bottom=[(-half_w * taper, -half_h, nose), (half_w * taper, -half_h, nose),
                 (half_w, -half_h, tail * 0.2), (half_w * 0.86, -half_h, tail),
                 (-half_w * 0.86, -half_h, tail), (-half_w, -half_h, tail * 0.2)],
-        height=BODY_HEIGHT, material=material)
+        height=BODY_HEIGHT)
 
 
-def cabin_mesh(material: PBRMaterial) -> PBRMesh:
+def cabin_mesh() -> PBRMesh:
     """The greenhouse: a shorter, narrower box sitting on the body."""
     half_w = BODY_WIDTH / 2.0 * 0.78
     base = BODY_HEIGHT / 2.0
@@ -418,11 +423,11 @@ def cabin_mesh(material: PBRMaterial) -> PBRMesh:
         bottom=[(-half_w * 0.8, base, front), (half_w * 0.8, base, front),
                 (half_w, base, back * 0.5), (half_w * 0.9, base, back),
                 (-half_w * 0.9, base, back), (-half_w, base, back * 0.5)],
-        height=CABIN_HEIGHT, material=material)
+        height=CABIN_HEIGHT)
 
 
 def wheel_mesh(radius: float = 0.33, width: float = 0.24,
-               material: PBRMaterial | None = None, sides: int = 16) -> PBRMesh:
+               sides: int = 16) -> PBRMesh:
     """A wheel: a cylinder lying on its side, its axis across the car."""
     angle = np.linspace(0.0, 2.0 * math.pi, sides, endpoint=False)
     circle = np.stack([np.zeros(sides), np.sin(angle) * radius,
@@ -441,11 +446,11 @@ def wheel_mesh(radius: float = 0.33, width: float = 0.24,
     for i in range(1, sides - 1):                # the two discs
         faces.append((0, i, i + 1))                          # the left face
         faces.append((sides, sides + i + 1, sides + i))       # the right face
-    return _mesh(points, faces, material or PBRMaterial(baseColor=(0.05, 0.05, 0.05)))
+    return _mesh(points, faces)
 
 
-def _box_mesh(bottom: list[tuple[float, float, float]], height: float,
-              material: PBRMaterial) -> PBRMesh:
+def _box_mesh(bottom: list[tuple[float, float, float]],
+              height: float) -> PBRMesh:
     """A prism: a closed outline extruded upward by ``height``.
 
     The outline runs **counter-clockwise seen from above** -- which is the
@@ -466,11 +471,10 @@ def _box_mesh(bottom: list[tuple[float, float, float]], height: float,
     for i in range(1, count - 1):
         faces.append((0, i, i + 1))                          # the floor
         faces.append((count, count + i + 1, count + i))      # the roof
-    return _mesh(points, faces, material)
+    return _mesh(points, faces)
 
 
-def _mesh(points: np.ndarray, faces: list[tuple[int, int, int]],
-          material: PBRMaterial) -> PBRMesh:
+def _mesh(points: np.ndarray, faces: list[tuple[int, int, int]]) -> PBRMesh:
     """A flat-shaded mesh: every triangle gets its own vertices and normal.
 
     A car body has creases, and sharing vertices between the panels either side
@@ -483,7 +487,7 @@ def _mesh(points: np.ndarray, faces: list[tuple[int, int, int]],
     lengths = np.linalg.norm(face_normals, axis=1, keepdims=True)
     lengths[lengths == 0] = 1.0
     normals = np.repeat(face_normals / lengths, 3, axis=0).astype('f')
-    return PBRMesh(positions=corners, normals=normals, material=material,
+    return PBRMesh(positions=corners, normals=normals,
                    indices=np.arange(len(corners), dtype=np.uint32))
 
 
