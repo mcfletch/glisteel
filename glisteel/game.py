@@ -323,13 +323,13 @@ class GlisteelContext(RecordingMixin, Context):
                                cutOffAngle=self.headlights.spread,
                                beamWidth=self.headlights.spread * 0.5,
                                radius=self.headlights.reach,
-                               attenuation=(1.0, 0.0, 0.0), castShadows=False)
+                               attenuation=(1.0, 0.0, 0.0), shadows=False)
         self._beam.on = False
         # One point light per luminaire slot, dark until the car is among them.
         self._lamps = [
             PointLight(color=LAMP_COLOUR, intensity=0.0,
                        radius=LAMP_REACH, attenuation=LAMP_FALLOFF,
-                       castShadows=False)
+                       shadows=False)
             for _ in range(world.luminaires.count)]
         for lamp in self._lamps:
             lamp.on = False
