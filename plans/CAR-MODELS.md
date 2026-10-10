@@ -355,7 +355,7 @@ will not parse. `recolour()` and `brighten()` paint a whole subtree.
 
 Alongside it, the names an asset is driven by now survive the file:
 
-- `scene.materials[name]` is the `PBRMaterial` the document named, so the
+- `scene.materials[name]` is the `PhysicalMaterial` the document named, so the
   traffic's `paint` is repainted without touching its glass, and the writer
   writes a material's `DEF` as its glTF name so the round trip holds.
 - `scene.player_named(name, loop=False)` is the clip by name, which is what
