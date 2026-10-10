@@ -616,7 +616,7 @@ class GlisteelContext(RecordingMixin, Context):
 
     # -- the frame -------------------------------------------------------------
 
-    def OnIdle(self, *args: Any) -> int:         # pragma: no cover - needs a window  # noqa: ARG002 the engine's idle callback
+    def OnIdle(self, *arguments: Any) -> int:         # pragma: no cover - needs a window  # noqa: ARG002 the engine's idle callback
         now = systemTime()
         elapsed = now - self._clock
         self._clock = now
