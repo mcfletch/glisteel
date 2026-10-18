@@ -8,8 +8,8 @@ PyPI with the code: it is attached to a GitHub release and fetched by
     ./release-assets.py                   # bake, archive, write the registry
     ./release-assets.py --install         # ...and put it in this machine's store
     ./release-assets.py --reinstall       # ...replacing the copies installed there
-    ./release-assets.py --push            # ...attach it to the release tag and
-                                          #    write the shipped packs.json
+    ./release-assets.py --push            # ...attach each archive to its release
+                                          #    and write the shipped packs.json
 
 ``--install`` is what makes a content release testable before it is a release:
 the game then finds the tracks in its own store and offers them as an installed
